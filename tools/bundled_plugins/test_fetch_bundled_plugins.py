@@ -134,17 +134,48 @@ class TheRealManifest(unittest.TestCase):
                 "MVerb",
                 "MaGigaverb",
                 "Surge XT Effects",
+                "Surge XT",
+                "Kars",
+                "Nekobi",
             ],
         )
         # (What the sets are called, what they hold and how they are licensed: an address may name another plugin, as the text of the LGPL that MaGigaverb needs comes from the folder of 3BandEQ.)
         # (Not in the CLAP sets: 3BandEQ, 3BandSplitter and PingPongPan share a CLAP id with MVerb. They are in the LV2 sets, whose URIs are their own.)
         named = json.dumps([[s["id"], s["name"], s["plugins"], s["licence"]] for s in clap_sets]).lower()
-        for left_out in ("airwindows", "agpl", "nekobi", "zl equalizer", "3bandeq", "pingpongpan", "3bandsplitter"):
+        for left_out in ("airwindows", "agpl", "zl equalizer", "3bandeq", "pingpongpan", "3bandsplitter"):
             self.assertNotIn(left_out, named)
         everything = json.dumps([[s["id"], s["name"], s["plugins"], s["licence"]] for s in THE_REAL_MANIFEST["sets"]]).lower()
         # (3BandSplitter has 6 audio outputs and AmplitudeImposer 4 audio inputs, which no effect of the program uses yet: the scan finds them "not used", so they are not offered.)
-        for left_out in ("airwindows", "agpl", "nekobi", "zl equalizer", "3bandsplitter", "amplitudeimposer"):
+        # (Nekobi was left out until 2026-10-29, on the reading that it is GPL-2.0-only; its source files say "or any later version", so it is in: see the licence note of its set.)
+        for left_out in ("airwindows", "agpl", "zl equalizer", "3bandsplitter", "amplitudeimposer", "soulforce"):
             self.assertNotIn(left_out, everything)
+
+    def test_the_synthesizers_are_these_with_the_licences_that_were_read_and_every_one_says_synthesizer_in_its_name(self):
+        # (The test of the real plugins finds the synthesizers of the manifest by that word in the name of the set: tests/bundled_synthesizers_real.rs.)
+        synthesizers = {s["id"]: s for s in THE_REAL_MANIFEST["sets"] if "synthesizer" in s["name"]}
+        self.assertEqual(
+            {set_id: (plugin_set["plugins"], plugin_set["licence"]) for set_id, plugin_set in synthesizers.items()},
+            {
+                "surge-xt-synthesizer": (["Surge XT"], "GPL-3.0-or-later"),
+                "kars": (["Kars"], "ISC"),
+                "nekobi": (["Nekobi"], "GPL-2.0-or-later"),
+                "kars-lv2": (["Kars"], "ISC"),
+                "nekobi-lv2": (["Nekobi"], "GPL-2.0-or-later"),
+            },
+        )
+        # (Nekobi's licence is a reading of its source files, and the set says so, with the reason, where a person reads about the licence.)
+        for set_id in ("nekobi", "nekobi-lv2"):
+            self.assertIn("any later version", synthesizers[set_id]["licence_note"])
+        # (Surge XT's synthesizer and its effects are in one release file, which the Bundles tab downloads once. Its LV2 bundle, in the file for Linux, is not offered: it has 2 audio inputs and 6
+        # outputs, which the scan lists as "not used".)
+        by_id = {s["id"]: s for s in THE_REAL_MANIFEST["sets"]}
+        for platform_name in ("windows-x86_64", "linux-x86_64", "macos-universal"):
+            self.assertEqual(
+                by_id["surge-xt-synthesizer"]["platforms"][platform_name]["sha256"],
+                by_id["surge-xt-effects"]["platforms"][platform_name]["sha256"],
+                platform_name,
+            )
+        self.assertNotIn("surge-xt-synthesizer-lv2", by_id)
 
     def test_the_lv2_sets_are_these_and_hold_what_their_authors_release_as_lv2_bundles(self):
         lv2_sets = {s["id"]: s for s in THE_REAL_MANIFEST["sets"] if s["id"].endswith("-lv2")}
@@ -156,6 +187,8 @@ class TheRealManifest(unittest.TestCase):
                 "dpf-mini-series-lv2": ["3BandEQ", "PingPongPan"],
                 "dpf-max-gen-lv2": ["MaBitcrush", "MaFreeverb", "MaGigaverb", "MaPitchshift"],
                 "cycleshifter-lv2": ["CycleShifter"],
+                "kars-lv2": ["Kars"],
+                "nekobi-lv2": ["Nekobi"],
                 "wolf-shaper-lv2": ["Wolf Shaper"],
             },
         )
@@ -168,7 +201,7 @@ class TheRealManifest(unittest.TestCase):
                 self.assertEqual(len(build["members"]), len(plugin_set["plugins"]), (plugin_set["id"], platform_name))
         # (A release file that a CLAP set is fetched from is the one the LV2 set of the same authors is fetched from, so that the Bundles tab downloads it once.)
         by_id = {s["id"]: s for s in THE_REAL_MANIFEST["sets"]}
-        for lv2_id, clap_id in (("dragonfly-reverb-lv2", "dragonfly-reverb"), ("mverb-lv2", "mverb"), ("dpf-max-gen-lv2", "magigaverb")):
+        for lv2_id, clap_id in (("dragonfly-reverb-lv2", "dragonfly-reverb"), ("mverb-lv2", "mverb"), ("dpf-max-gen-lv2", "magigaverb"), ("kars-lv2", "kars"), ("nekobi-lv2", "nekobi")):
             for platform_name in ("windows-x86_64", "linux-x86_64"):
                 self.assertEqual(
                     by_id[lv2_id]["platforms"][platform_name]["sha256"], by_id[clap_id]["platforms"][platform_name]["sha256"], (lv2_id, platform_name)

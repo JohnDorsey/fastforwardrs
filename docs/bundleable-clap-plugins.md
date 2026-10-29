@@ -15,7 +15,7 @@ but **nobody has listened to any of them in the editor yet**.
 ## DECIDED 2026-10-20 (the maintainer)
 
 **LG-02 is widened** to GPL and LGPL licences compatible with GPLv3, for what ships including plugin binaries, with the conditions below. **AGPL is not allowed**, so the ZL plugins are out. The
-tier B of this page is therefore allowed; **GPL-2.0-only (Nekobi) is still out** because it is not compatible with GPLv3. The maintainer also allowed me to download every plugin that this
+tier B of this page is therefore allowed; **GPL-2.0-only (Nekobi) is still out** because it is not compatible with GPLv3. **(Corrected 2026-10-29: I read the table of the pack, which says `GPL-2.0`, and not the source files of Nekobi, which say "or any later version", i.e. GPL-2.0-or-later, which is allowed: Nekobi is in, with a note. See `bundleable-synthesizers.md`.)** The maintainer also allowed me to download every plugin that this
 allows; the results are at the end of the page (*What was downloaded and what was found*).
 
 ## What the program's own rules said before

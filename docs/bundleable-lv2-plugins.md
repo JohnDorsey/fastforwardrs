@@ -40,7 +40,7 @@ DPF plugin is its own, so the clash does not exist here.
   would also be fetched by everyone. Not added; it would need a per-set choice in the tab or a licence check of every file. [B for its licence]
 * **x42 plugins** (GPL-2.0-or-later, **[B]**): the Windows files are installers (`.exe`) that the program cannot open, and I found no zip.
 * **LSP Plugins 1.2.35**: LV2 bundle for Linux only on GitHub (see `bundleable-clap-plugins.md`); Windows builds are behind a registration. **[B]**
-* **Surge XT** has no LV2 in its Windows zip (`Surge XT Effects.clap`, `.vst3`, `.exe`) [V]; **Airwindows** by the maintainer's decision; **ZL** and **Nekobi** by licence (AGPL, GPL-2.0-only).
+* **Surge XT** has no LV2 in its Windows zip (`Surge XT Effects.clap`, `.vst3`, `.exe`) [V]; **Airwindows** by the maintainer's decision; **ZL** by licence (AGPL). **(Nekobi was left out here on a wrong reading of its licence, "GPL-2.0-only"; its source files say "or any later version". It and Kars, two synthesizers, were added on 2026-10-29: see `bundleable-synthesizers.md`.)**
 
 ## What was checked
 

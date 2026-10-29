@@ -170,6 +170,8 @@ jobs:
           mkdir -p "$fetched"
           FFRS_FETCH_INTO="$fetched" bash tools/ci/run_tests_and_report.sh warning "The real fetch of the bundled plugins failed on macOS" cargo test --lib --no-fail-fast fetch_the_real_plugins -- --ignored --nocapture
           FFRS_BUNDLED_PLUGINS="$fetched" bash tools/ci/run_tests_and_report.sh warning "The scan of the fetched bundled plugins failed on macOS" cargo test --release --test bundled_plugins_real --no-fail-fast -- --ignored --nocapture
+          # (The synthesizers among them, played: a note through the plugin host, and a MIDI clip through the whole engine.)
+          FFRS_BUNDLED_PLUGINS="$fetched" bash tools/ci/run_tests_and_report.sh warning "The synthesizers of the fetched bundled plugins failed on macOS" cargo test --release --test bundled_synthesizers_real --no-fail-fast -- --ignored --nocapture --test-threads=1
           echo "::notice title=Fetched bundled plugins (macOS)::$(find "$fetched" -maxdepth 2 | sed "s|$fetched/||" | tr '\n' '|')"
 
       # Which graphics adapters the runner has, written as an annotation of the job (annotations can be read without signing in). The export is made by the picture

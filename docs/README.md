@@ -20,6 +20,7 @@ The top-level [`README.md`](../README.md) is for someone who wants to install th
 | [`distribution-notices.md`](distribution-notices.md) | what must go with a copy of the program: licence texts, ffmpeg's source offer, the bundled plugins |
 | [`bundleable-clap-plugins.md`](bundleable-clap-plugins.md) | which CLAP plugins can be bundled and what was measured of them |
 | [`bundleable-lv2-plugins.md`](bundleable-lv2-plugins.md) | which LV2 plugins the Bundles tab fetches, the ones left out, and what was tried with real plugins |
+| [`bundleable-synthesizers.md`](bundleable-synthesizers.md) | the synthesizers the Bundles tab fetches (Surge XT, Kars, Nekobi), what trying them found in the program, the licence reading of Nekobi, and the synthesizers left out and why |
 | [`bundleable-isf-shaders.md`](bundleable-isf-shaders.md) | which ISF shaders can be fetched by the Bundles tab and why the others are left out |
 
 ## Design, plans and reports

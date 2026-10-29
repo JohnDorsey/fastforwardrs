@@ -34,6 +34,9 @@ fn the_manifest_in_the_program_is_read_and_is_fit_and_has_a_build_for_this_syste
             "MVerb",
             "MaGigaverb",
             "Surge XT Effects",
+            "Surge XT",
+            "Kars",
+            "Nekobi",
             "Dragonfly Early Reflections",
             "Dragonfly Hall Reverb",
             "Dragonfly Plate Reverb",
@@ -46,6 +49,8 @@ fn the_manifest_in_the_program_is_read_and_is_fit_and_has_a_build_for_this_syste
             "MaGigaverb",
             "MaPitchshift",
             "CycleShifter",
+            "Kars",
+            "Nekobi",
             "Wolf Shaper"
         ]
     );
