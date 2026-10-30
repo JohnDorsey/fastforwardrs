@@ -16,6 +16,8 @@ PROTOCOL = "src/plugin_process/protocol.rs"
 REMOTE = "src/plugin_process/remote.rs"
 PROGRAM = "src/plugin_process/program.rs"
 HOST = "src/plugin_host/host.rs"
+TOLD = "src/plugin_process/told.rs"
+MAKER = "src/plugin_host/instance.rs"
 PROCESSES = "src/plugin_host/processes.rs"
 
 MUTATIONS = [
@@ -47,7 +49,7 @@ MUTATIONS = [
     ("remote: a channel longer than the run is refused", REMOTE,
      ".any(|channel| channel.len() < frames)", ".any(|channel| channel.len() > frames)", TESTS),
     ("remote: the commands are given again at the next run", REMOTE,
-     "commands: std::mem::take(&mut self.commands),", "commands: self.commands.clone(),", TESTS),
+     "let commands = std::mem::take(&mut self.commands);", "let commands = self.commands.clone();", TESTS),
     ("remote: the latency of the last answer is not kept", REMOTE,
      "self.latency = ran.latency as usize;", "self.latency = self.latency;", TESTS),
     ("remote: only the last run's restart is told", REMOTE,
@@ -94,4 +96,34 @@ MUTATIONS = [
      "NotStarted::Refused(Refused::NotWhatWasScanned) => {\n                            words_for_a_plugin_that_could_not_be_loaded(plugin, \"\")", TESTS),
     ("host: the program that cannot be started is not said", HOST,
      "could not be run in a program of its own: {why}. The sound goes through it unchanged.", "could not be run: {why}.", TESTS),
+    # --- phase 14, the restart: what a program that is started again is told ---
+    ("told: a note off does not let go of the note", TOLD, "self.notes.remove(place);", "let _ = place;", TESTS),
+    ("told: a reset keeps the notes", TOLD,
+     "                Command::Reset => {\n                    self.notes.clear();\n", "                Command::Reset => {\n", TESTS),
+    ("told: a midi all notes off lets go of the notes of every channel", TOLD,
+     "self.notes.retain(|held| held.channel != channel);", "self.notes.clear();", TESTS),
+    ("told: one note more is kept as held than there may be", TOLD, "if self.notes.len() >= MOST_NOTES_HELD {", "if self.notes.len() > MOST_NOTES_HELD {", TESTS),
+    ("told: the notes are given again before the controllers", TOLD,
+     "controllers.chain(wheels).chain(notes).collect()", "notes.chain(wheels).chain(controllers).collect()", TESTS),
+    ("told: a value is set again at another sample", TOLD, "                at_sample: 0,\n", "                at_sample: 7,\n", TESTS),
+    ("remote: a program is never started again", REMOTE,
+     "if self.restarts >= MOST_RESTARTS_OF_A_PROGRAM {", "if true {", TESTS),
+    ("remote: the times a program was started again are not counted", REMOTE, "        self.restarts += 1;\n", "", TESTS),
+    ("remote: a program that is started again is not told the values", REMOTE,
+     "let mut to_do = self.told.values_to_set_again();", "let mut to_do = Vec::new();", TESTS),
+    ("remote: a program that is started again is not told the notes that are held", REMOTE,
+     "let mut all = after_the_commands.events_to_give_again();", "let mut all = Vec::new();", TESTS),
+    ("remote: the notes that are held are those from before the commands of the run", REMOTE,
+     "let mut all = after_the_commands.events_to_give_again();", "let mut all = self.told.events_to_give_again();", TESTS),
+    ("remote: the commands of a good run are not remembered", REMOTE, "                    self.told.after_commands(&commands);\n", "", TESTS),
+    ("remote: the notes of a good run are not remembered", REMOTE, "self.told.after_notes(notes);", "let _ = notes;", TESTS),
+    ("remote: a plugin that says it could not run has its program started again", REMOTE,
+     "Err(Failure::ThePlugin(why)) => return Err(why),",
+     "Err(Failure::ThePlugin(why)) => {\n                    self.start_again_after(&why)?;\n                    to_give = self.what_to_give_a_program_that_is_started_again(&commands, notes);\n                }", TESTS),
+    ("remote: a change of latency is always said", REMOTE, "if latency_changed {", "if true {", TESTS),
+    ("remote: a block is given twenty seconds", REMOTE, "to_run: Duration::from_secs(5),", "to_run: Duration::from_secs(20),", TESTS),
+    ("maker: an instrument that is given a state is not given a silent block first", MAKER,
+     "run_a_silent_block_so_that_the_state_is_applied_before_any_note(&mut instance);", "let _ = &mut instance;",
+     # (Aimed at the one test that fails cleanly: the test program that has the copy in its own process ends with the plugin's abort, which is noticed but not a clean failure.)
+     "--test plugin_process -- a_note_in_the_first_block"),
 ]

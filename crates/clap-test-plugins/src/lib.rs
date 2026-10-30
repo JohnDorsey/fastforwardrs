@@ -23,6 +23,7 @@
 //! It does nothing but arithmetic.
 
 use std::ffi::CStr;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use clack_extensions::audio_ports::{
@@ -66,6 +67,9 @@ pub const INSTRUMENT_MIDI: &str = "org.fastforwardrs.test.instrument_midi";
 /// The instrument as **Surge XT has it**: its only audio input is a stereo port that is **not the main one** (a side chain: `is_main` is false and it is at index 0, where a main port would be), and
 /// it has no main input at all. **Its parameter `Gain` says that its default is 0, and it starts at 1** (Surge XT's 775 parameters all say 0). It makes the sound of [`INSTRUMENT`] and ignores what comes in the side chain, **except that it adds a thousand to every sample if a host gives that port anything
 /// but two channels** (so that a host that leaves the port out, or gives it the channels of the main input, is heard).
+/// **It has a state, which it takes as Surge XT does**: the state is given on the main thread and is *applied in the audio thread, in the first block that follows*, and **a note in that block ends the
+/// program** (Surge XT does that at random, in a few plays of a hundred for some patches; this one always does). The state is text, of which `edits=N` is what it keeps: each edit makes the sound half
+/// as loud again. A host that gives the plugin a silent block with no events before the first note is not hurt.
 pub const INSTRUMENT_WITH_A_SIDE_CHAIN: &str = "org.fastforwardrs.test.instrument_with_a_side_chain";
 pub const THREADS: &str = "org.fastforwardrs.test.threads";
 /// Plugins that misbehave, for the tests of what a host does about it: `activate` says no, `process` says it failed, `process` panics.
@@ -100,11 +104,20 @@ pub const EDITOR_EDIT_VALUE: f64 = 0.75;
 /// tests of the scan, which run the scan program (a process of its own) with the variable set; **in a test program the variable is never set**.
 ///
 /// `crash_when_loaded`, `hang_when_loaded`, `init_says_no` (the entry's `init` returns false), `crash_when_described`, `crash_when_made`, `hang_when_made`, `crash_when_activated`,
-/// `crash_when_run`, `hang_when_run`, `exit_when_run` (ends the program with no answer), `answer_wrong_when_run` (writes a line that is not an answer, and ends the program),
+/// `crash_when_run`, `hang_when_run`, `exit_when_run` (ends the program with no answer), `crash_at_every_fourth_run` (a program that counts its runs and crashes at the fourth, so a program that is
+/// started again plays three runs and crashes again: for the tests of a copy that is started again), `answer_wrong_when_run` (writes a line that is not an answer, and ends the program),
 /// `print_noise` (writes to the standard output while it is loaded and while it is made), `no_plugins` (a library with none).
 fn misbehaviour() -> &'static str {
     static HOW: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     HOW.get_or_init(|| std::env::var("FFRS_TEST_PLUGIN").unwrap_or_default())
+}
+
+/// Crashes at every fourth run of the program (`crash_at_every_fourth_run`), if that is what was asked for.
+fn crash_at_every_fourth_run_if_asked() {
+    static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if misbehaviour() == "crash_at_every_fourth_run" && RUNS.fetch_add(1, Ordering::SeqCst) % 4 == 3 {
+        std::process::abort();
+    }
 }
 
 /// Does what the misbehaviour `how` says, if that is the one that was asked for,: crashes, never returns, or ends the program.
@@ -250,6 +263,8 @@ pub struct Shared {
     values: [AtomicU64; 2],
     /// What has been done to the window (`editor` only; see [`Shared::state_text`]).
     window: WindowLog,
+    /// A state that was given on the main thread and is not applied yet: the instrument that is made like Surge XT applies it in the audio thread, in the first block after it was given.
+    pending_state: Mutex<Option<String>>,
 }
 
 /// What the host has done to the window of the editor plugin.
@@ -310,6 +325,7 @@ impl Shared {
         Self {
             values: [value(0), value(1)],
             window,
+            pending_state: Mutex::new(None),
         }
     }
 
@@ -366,7 +382,10 @@ impl<const KIND: u8> Plugin for TestPlugin<KIND> {
             builder.register::<PluginParams>();
         }
         if KIND == KIND_EDITOR {
-            builder.register::<PluginGui>().register::<PluginState>();
+            builder.register::<PluginGui>();
+        }
+        if KIND == KIND_EDITOR || KIND == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN {
+            builder.register::<PluginState>();
         }
         if KIND == KIND_LATENCY || KIND == KIND_LATENCY_CHANGES {
             builder.register::<PluginLatency>();
@@ -657,8 +676,13 @@ impl<const KIND: u8> PluginGuiImpl for Main<'_, KIND> {
 impl<const KIND: u8> PluginStateImpl for Main<'_, KIND> {
     fn save(&self, output: &mut OutputStream) -> Result<(), PluginError> {
         use std::io::Write;
+        let text = if KIND == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN {
+            format!("edits={}", self.shared.window.edits.load(Ordering::SeqCst))
+        } else {
+            self.shared.state_text()
+        };
         output
-            .write_all(self.shared.state_text().as_bytes())
+            .write_all(text.as_bytes())
             .map_err(|_| PluginError::Message("the state could not be written"))
     }
 
@@ -668,6 +692,15 @@ impl<const KIND: u8> PluginStateImpl for Main<'_, KIND> {
         input
             .read_to_string(&mut text)
             .map_err(|_| PluginError::Message("the state could not be read"))?;
+        // (The instrument that is made like Surge XT keeps the state to apply it in the audio thread.)
+        if KIND == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN {
+            *self
+                .shared
+                .pending_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(text);
+            return Ok(());
+        }
         // (Only the edits are what a state gives back; the rest says what was done to a window, which a state does not undo.)
         if let Some(edits) = text
             .split_whitespace()
@@ -841,6 +874,7 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
         ] {
             misbehave_if_asked(how);
         }
+        crash_at_every_fourth_run_if_asked();
         if (KIND == KIND_CALLBACKS || KIND == KIND_LATENCY_CHANGES) && !self.asked {
             self.asked = true;
             if KIND == KIND_CALLBACKS {
@@ -861,6 +895,31 @@ impl<'a, const KIND: u8> PluginAudioProcessor<'a, Shared, Main<'a, KIND>> for Pr
                 check.is_audio_thread(handle) == Some(true) && check.is_main_thread(handle) == Some(false)
             });
             self.threads_were_right &= right;
+        }
+        if KIND == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN
+            && let Some(state) = self
+                .shared
+                .pending_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+        {
+            // The state is applied here, in the audio thread, in the first block after it was given; and a note in this block ends the program, as it ends Surge XT's.
+            if events.input.into_iter().any(|event| {
+                matches!(
+                    event.as_core_event(),
+                    Some(CoreEventSpace::NoteOn(_) | CoreEventSpace::Midi(_))
+                )
+            }) {
+                std::process::abort();
+            }
+            if let Some(edits) = state
+                .split_whitespace()
+                .find_map(|word| word.strip_prefix("edits="))
+                .and_then(|edits| edits.parse::<u32>().ok())
+            {
+                self.shared.window.edits.store(edits, Ordering::SeqCst);
+            }
         }
         let frames = audio.frames_count() as usize;
         let mut done = 0;
@@ -1069,6 +1128,12 @@ impl<const KIND: u8> Processor<'_, KIND> {
             .iter()
             .map(|&(_, key, velocity)| velocity * f32::from(key) / 100.0)
             .sum();
+        if KIND == KIND_INSTRUMENT_WITH_A_SIDE_CHAIN {
+            // (Each edit that a state said was made is half a gain more, as for the editor.)
+            return notes
+                * self.values[0] as f32
+                * (1.0 + 0.5 * self.shared.window.edits.load(Ordering::SeqCst) as f32);
+        }
         if KIND != KIND_INSTRUMENT_MIDI {
             return notes * self.values[0] as f32;
         }

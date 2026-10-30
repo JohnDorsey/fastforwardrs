@@ -3,12 +3,17 @@
 
 //! The editor's side of a plugin in a process of its own (phase 14): a [`Launcher`] starts the program for a plugin, and gives a [`RemoteCopy`], which is a
 //! [`PluginInstance`] like the copies that run in the editor's process. **Whatever the program does comes out as an error of the call that was
-//! waiting for it**: it ends without a word (a crash), it never answers (a hang: the call has a time limit and the program is stopped), it says what is not a message. After that the copy
-//! answers every call with the same error at once, and the effect that has it leaves it out for the rest of the play and says why (`PluginEffect`).
+//! waiting for it**: it ends without a word (a crash), it never answers (a hang: the call has a time limit and the program is stopped), it says what is not a message.
+//!
+//! **Then the program is started again** (a copy made by [`Launcher::start_and_start_again_when_it_ends`], at most [`MOST_RESTARTS_OF_A_PROGRAM`] times): the new one makes the plugin as the
+//! first did, is given the values the plugin was last given (`told`), and the block that the other ended in is run again in it with the notes that were held played again from its first sample, so the
+//! sound goes on and the copy says between two blocks what happened. A plugin that has the trouble every time, or a program that cannot be started, ends the copy: it answers every call with the
+//! same error at once, and the effect that has it leaves it out for the rest of the play and says why (`PluginEffect`).
 
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, ExitStatus, Stdio};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -16,6 +21,7 @@ use super::protocol::{
     Command, Frame, FrameError, FrameKind, Hello, Made, Make, Ran, Refused, RunRequest, TOKEN_VARIABLE,
     WhatWasDoneBetweenBlocks, put_samples, read_frame, take_samples, write_frame,
 };
+use super::told::WhatTheProgramWasTold;
 use crate::media::{background_command, collect_error_output_in_background};
 use crate::plugin_host::{BetweenBlocks, PluginInstance};
 use crate::plugin_scan::child::how_it_ended_badly;
@@ -59,10 +65,14 @@ impl Default for Limits {
         Self {
             to_connect: Duration::from_secs(20),
             to_make: Duration::from_secs(30),
-            to_run: Duration::from_secs(20),
+            to_run: Duration::from_secs(5),
         }
     }
 }
+
+/// How many times the program of one copy is started again when it ends, at the most: a plugin that ends its program every time it is made would be started again for ever, and the sound
+/// would be a gap after a gap.
+pub const MOST_RESTARTS_OF_A_PROGRAM: usize = 5;
 
 /// How long the editor waits for a program that has said goodbye (or lost its connection) to end by itself, before it is stopped.
 const HOW_LONG_A_PROGRAM_MAY_TAKE_TO_END: Duration = Duration::from_millis(300);
@@ -110,6 +120,21 @@ pub enum NotStarted {
     TheProgram(String),
     /// The program was reached and would not make the copy: why.
     Refused(Refused),
+}
+
+impl std::fmt::Display for NotStarted {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TheProgram(why) => write!(formatter, "{why}"),
+            Self::Refused(Refused::CouldNotBeLoaded(why)) => {
+                write!(formatter, "the library could not be loaded: {why}")
+            }
+            Self::Refused(Refused::NotWhatWasScanned) => {
+                write!(formatter, "the plugin is not what it was when the plugins were scanned")
+            }
+            Self::Refused(Refused::CouldNotBeMade(why)) => write!(formatter, "the plugin could not be made: {why}"),
+        }
+    }
 }
 
 /// The program, started: its end is its end.
@@ -243,7 +268,29 @@ fn a_token() -> String {
 
 impl Launcher {
     /// Starts the program, asks it to make the plugin that `make` says (given `state`, which is the plugin's state if the project has one), and gives the copy and what the program says of it.
+    /// **The copy is gone for good when its program ends**: see [`Self::start_and_start_again_when_it_ends`] for one that is not.
     pub fn start(&self, make: &Make, state: Option<&[u8]>) -> Result<(RemoteCopy, Made), NotStarted> {
+        let (connection, made) = self.connect(make, state)?;
+        Ok((RemoteCopy::over(connection, &made, self.limits), made))
+    }
+
+    /// The same, and **when the program ends (it crashes, never answers, says nonsense) the program is started again** (at most [`MOST_RESTARTS_OF_A_PROGRAM`] times for the copy): the
+    /// new one is made like the first, given the values the plugin was last given and the notes that are held, and the block that the other ended in is run again in it. The copy goes on
+    /// as if nothing had happened, and says what happened between two blocks. (A plugin that has the same trouble each time it is made, or that cannot be made again, ends the copy as before.)
+    pub fn start_and_start_again_when_it_ends(
+        &self,
+        make: &Make,
+        state: Option<Arc<[u8]>>,
+    ) -> Result<(RemoteCopy, Made), NotStarted> {
+        let (connection, made) = self.connect(make, state.as_deref())?;
+        let (launcher, make) = (self.clone(), make.clone());
+        let mut copy = RemoteCopy::over(connection, &made, self.limits);
+        copy.restart = Some(Box::new(move || launcher.connect(&make, state.as_deref())));
+        Ok((copy, made))
+    }
+
+    /// Starts the program and has it make the plugin: the connection to it, and what it says of the plugin.
+    fn connect(&self, make: &Make, state: Option<&[u8]>) -> Result<(Connection, Made), NotStarted> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|error| {
             NotStarted::TheProgram(format!(
                 "the editor's socket for the program that runs plugins could not be made: {error}"
@@ -298,7 +345,7 @@ impl Launcher {
                     ))
                 })?;
                 let _ = connection.stream.set_read_timeout(Some(self.limits.to_run));
-                Ok((RemoteCopy::over(connection, &made, self.limits), made))
+                Ok((connection, made))
             }
             FrameKind::Refused => match serde_json::from_slice::<Refused>(&frame.header) {
                 Ok(refused) => Err(NotStarted::Refused(refused)),
@@ -406,6 +453,23 @@ pub struct RemoteCopy {
     meters: Vec<(u32, f32)>,
     /// What the plugin asked for since it was last asked.
     done_between_blocks: WhatWasDoneBetweenBlocks,
+    /// What starts the program again when it ends, if the copy is to go on (see [`Launcher::start_and_start_again_when_it_ends`]).
+    restart: Option<Restart>,
+    /// How many times the program was started again.
+    restarts: usize,
+    /// What the program has been told that it keeps: what a program that is started again is told.
+    told: WhatTheProgramWasTold,
+}
+
+/// What starts the program again, and has it make the plugin.
+type Restart = Box<dyn FnMut() -> Result<(Connection, Made), NotStarted> + Send>;
+
+/// Why a run did not go well.
+enum Failure {
+    /// The plugin said that it could not run: the program and the copy go on.
+    ThePlugin(String),
+    /// The program ended, or is not to be trusted any more: it is gone, and why.
+    TheProgram(String),
 }
 
 impl RemoteCopy {
@@ -422,6 +486,9 @@ impl RemoteCopy {
             most_samples_at_once: made.most_samples_at_once,
             meters: Vec::new(),
             done_between_blocks: made.done_between_blocks.clone(),
+            restart: None,
+            restarts: 0,
+            told: WhatTheProgramWasTold::default(),
         }
     }
 
@@ -431,6 +498,29 @@ impl RemoteCopy {
         let _ = stream.set_nodelay(true);
         let _ = stream.set_read_timeout(Some(limits.to_run));
         Self::over(Connection { stream, process: None }, made, limits)
+    }
+
+    /// The same, with a way to start the program again when it ends: `start` gives the stream to a program that is played from a thread, and what it says of the plugin it made (**for the
+    /// tests**).
+    #[must_use]
+    pub fn with_a_way_to_start_again(
+        mut self,
+        mut start: impl FnMut() -> Result<(TcpStream, Made), NotStarted> + Send + 'static,
+    ) -> Self {
+        let limits = self.limits;
+        self.restart = Some(Box::new(move || {
+            start().map(|(stream, made)| {
+                let _ = stream.set_nodelay(true);
+                let _ = stream.set_read_timeout(Some(limits.to_run));
+                (Connection { stream, process: None }, made)
+            })
+        }));
+        self
+    }
+
+    /// How many times the program was started again after it ended.
+    pub fn times_started_again(&self) -> usize {
+        self.restarts
     }
 
     /// The number the system gave the program, while it is there and the editor started it.
@@ -491,8 +581,37 @@ impl RemoteCopy {
         {
             return Err("the sound is not as long as the run, or has too many channels".to_owned());
         }
+        let commands = std::mem::take(&mut self.commands);
+        let mut to_give = (commands.clone(), notes.map(<[NoteEvent]>::to_vec));
+        loop {
+            match self.run_once(&to_give.0, to_give.1.as_deref(), inputs, outputs, frames) {
+                Ok(()) => {
+                    self.told.after_commands(&commands);
+                    if let Some(notes) = notes {
+                        self.told.after_notes(notes);
+                    }
+                    return Ok(());
+                }
+                Err(Failure::ThePlugin(why)) => return Err(why),
+                Err(Failure::TheProgram(why)) => {
+                    self.start_again_after(&why)?;
+                    to_give = self.what_to_give_a_program_that_is_started_again(&commands, notes);
+                }
+            }
+        }
+    }
+
+    /// Gives the program one run, and puts what it made in `outputs`.
+    fn run_once(
+        &mut self,
+        commands: &[Command],
+        notes: Option<&[NoteEvent]>,
+        inputs: &[&mut [f32]],
+        outputs: &mut [&mut [f32]],
+        frames: usize,
+    ) -> Result<(), Failure> {
         let request = RunRequest {
-            commands: std::mem::take(&mut self.commands),
+            commands: commands.to_vec(),
             frames,
             inputs: inputs.len(),
             outputs: outputs.len(),
@@ -500,19 +619,21 @@ impl RemoteCopy {
         };
         let mut raw = Vec::with_capacity(inputs.len() * frames * 4);
         put_samples(&mut raw, inputs.iter().map(|channel| &**channel), frames);
-        let frame = self.ask(FrameKind::Run, &request.header(), &raw)?;
+        let frame = self
+            .ask(FrameKind::Run, &request.header(), &raw)
+            .map_err(Failure::TheProgram)?;
         if frame.kind != FrameKind::Ran {
-            return Err(self.go(format!(
+            return Err(Failure::TheProgram(self.go(format!(
                 "the program that runs the plugin said {:?} when it was given sound to run",
                 frame.kind
-            )));
+            ))));
         }
         let ran = match Ran::of_the_header(&frame.header) {
             Ok(ran) => ran,
             Err(error) => {
-                return Err(self.go(format!(
+                return Err(Failure::TheProgram(self.go(format!(
                     "the program that runs the plugin said what is not a message ({error})"
-                )));
+                ))));
             }
         };
         self.latency = ran.latency as usize;
@@ -520,12 +641,69 @@ impl RemoteCopy {
         self.done_between_blocks.was_restarted |= ran.done_between_blocks.was_restarted;
         self.done_between_blocks.notes.extend(ran.done_between_blocks.notes);
         // (A plugin that says that it could not run is not a program that is gone: the copy goes on, and so does the program.)
-        ran.result?;
+        ran.result.map_err(Failure::ThePlugin)?;
         take_samples(&frame.raw, outputs, frames).map_err(|error| {
-            self.go(format!(
+            Failure::TheProgram(self.go(format!(
                 "the program that runs the plugin gave sound that is not what was asked for ({error})"
-            ))
+            )))
         })
+    }
+
+    /// What a program that is started in the place of the one that ended is given with the run that the other ended in: the values the plugin was last given, then the commands of the run,
+    /// and, if the plugin is given notes, the controllers and the notes that are held where the commands of the run leave them, then the notes of the run.
+    fn what_to_give_a_program_that_is_started_again(
+        &self,
+        commands: &[Command],
+        notes: Option<&[NoteEvent]>,
+    ) -> (Vec<Command>, Option<Vec<NoteEvent>>) {
+        let mut after_the_commands = self.told.clone();
+        after_the_commands.after_commands(commands);
+        let mut to_do = self.told.values_to_set_again();
+        to_do.extend_from_slice(commands);
+        let notes = notes.map(|notes| {
+            let mut all = after_the_commands.events_to_give_again();
+            all.extend_from_slice(notes);
+            all
+        });
+        (to_do, notes)
+    }
+
+    /// The program ended, for the reason `why`: starts it again if the copy may be and has not been started again too often, and says so between the blocks. If it cannot be, the copy is gone
+    /// for good, and the error says why and how many times it was started again.
+    fn start_again_after(&mut self, why: &str) -> Result<(), String> {
+        let Some(restart) = self.restart.as_mut() else {
+            return Err(why.to_owned());
+        };
+        if self.restarts >= MOST_RESTARTS_OF_A_PROGRAM {
+            let times = self.restarts;
+            return Err(self.go(format!(
+                "{why} (it was started again {times} times, and is not any more)"
+            )));
+        }
+        self.restarts += 1;
+        match restart() {
+            Ok((connection, made)) => {
+                let latency_changed = made.latency as usize != self.latency;
+                self.connection = Some(connection);
+                self.gone_because = None;
+                self.latency = made.latency as usize;
+                self.takes_values_at_samples = made.takes_values_at_samples;
+                self.most_samples_at_once = made.most_samples_at_once;
+                self.meters.clear();
+                self.done_between_blocks.was_restarted |= made.done_between_blocks.was_restarted;
+                self.done_between_blocks.notes.extend(made.done_between_blocks.notes);
+                self.done_between_blocks.notes.push(format!(
+                    "{why}, and was started again; the notes that were held are played again from here{}",
+                    if latency_changed {
+                        " (its latency changed, and the sound is not made up for the new latency until the next play)"
+                    } else {
+                        ""
+                    }
+                ));
+                Ok(())
+            }
+            Err(not_started) => Err(self.go(format!("{why}; it could not be started again: {not_started}"))),
+        }
     }
 }
 

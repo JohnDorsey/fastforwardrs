@@ -14,7 +14,7 @@ Tags: **[V]** verified by a test or a measurement, **[B]** believed from reading
 | P2 | **The seam is `PluginInstance`** (`plugin_host/instance.rs`): the process holds a real `ClapCopy` / `Lv2Copy` / `LadspaCopy`, and the editor holds a `RemoteCopy`, which is a `PluginInstance` too. Nothing above it (`PluginEffect`, the graph, the plan) knows. | The effect already does the layouts, the values at samples, the latency, the notes and the "left out" handling once, for every format. |
 | P3 | **A local socket** (TCP on 127.0.0.1, a port the editor listens on and the program is told, and a random token the program says first), not the program's standard input and output. | A plugin may print to standard output (the scan program has the same trouble and uses lines with a fixed first word); the sound is binary, and a socket has a read time limit, which a pipe has not. |
 | P4 | **Which plugins**: a setting of the host, `InAProcessOfItsOwn::{Nothing, Instruments, Everything}`. The editor and the export program use `Instruments`; `PluginHost::new()` stays `Nothing` (so every test that exists runs what it ran), and `Everything` is there for the tests (every kind of plugin goes through the same seam) and for the day the maintainer wants it. | The maintainer asked for instruments now and "other sound plugins later". |
-| P5 | **What happens when the process dies or does not answer**: the copy answers every call after that with an error, and `PluginEffect` does what it already does with a plugin that fails to run: it is left out for the rest of the play and says why (on the board of the effect's window and in the notes of the play). The next play makes a new process. **No automatic restart in the middle of a play** (a restarted instrument has forgotten the notes it was holding, and the sound would be wrong in a way nobody hears being announced). | The editor survives and says what happened; the rest is a follow-up the maintainer can ask for. |
+| P5 | **What happens when the process dies or does not answer**: the copy answers every call after that with an error, and `PluginEffect` does what it already does with a plugin that fails to run: it is left out for the rest of the play and says why (on the board of the effect's window and in the notes of the play). The next play makes a new process. **Built on 2026-10-30 at the maintainer's word: the program is started again** (at most five times for a copy), given the values and the held notes again, and the block it ended in is run again in it; the person is told between two blocks. A copy that cannot be started again is left out as before. | The editor survives, the sound goes on, and the person is told. |
 | P6 | **If the program is not beside the editor, or was built from other code, the plugin is not run** and the effect says to build everything together (`cargo build --bins`), as the window program does. It is **not** run in the editor's process instead. | The point is that a plugin never runs in the editor. |
 
 ## 2. What the editor and the program say
@@ -36,7 +36,7 @@ Nothing else: **the end of the connection is the end** on both sides (the progra
 
 ## 3. Limits
 
-* Make: 30 seconds (the limit of the scan). Run: 20 seconds for one run (a block is 512 samples; a plugin that needs 20 seconds for one is hung). Both can be set shorter for the tests.
+* Make: 30 seconds (the limit of the scan). Run: 5 seconds for one run (a block is 512 samples; a plugin that needs 5 seconds for one is hung; the limit was 20 until the program was started again, which makes a false alarm cost little). Both can be set shorter for the tests.
 * The program is given the environment the scan and window programs get (where the libraries a plugin needs are looked for).
 * A frame is at most 1 GiB; a longer one is a broken connection.
 
@@ -54,7 +54,7 @@ Nothing else: **the end of the connection is the end** on both sides (the progra
 
 ## 5. Not done (said before it is built)
 
-* No restart of a process in the middle of a play (P5).
+* (No restart of a process in the middle of a play: this was said here before it was built, and it was built on 2026-10-30; see section 6.)
 * No shared memory: the sound goes through the socket (512 samples of two channels is 4 KiB a block, at about 94 blocks a second).
 * The windows of plugins already have a program of their own (phase 10) and are not touched.
 * No limit on the memory or the time of a process (an operating-system feature of each system).
@@ -80,7 +80,21 @@ Nothing else: **the end of the connection is the end** on both sides (the progra
 **Real plugins [V].** Surge XT, Kars (CLAP and LV2) and Nekobi (CLAP and LV2), fetched by the *Bundles* tab, play a MIDI clip through the plan, the graph and a program of their own: silence before, sound in the notes, the tail, and a note that is held across a seek (`tests/bundled_synthesizers_real.rs`, which now makes its host the way the editor does).
 
 **Not done, said plainly.**
-* **Surge XT's random crash was not reproduced through a program.** It needs a factory patch as the plugin's state and notes (the synthesizers document has the numbers), and the 253 MB of patches that I fetched for that are no longer on this computer. What *is* shown is that a plugin which aborts, hangs, exits, or crashes when it is loaded or made does not take the test program with it, and that the effect says why (`tests/plugin_process.rs`, `tests/plugin_host_processes.rs`).
-* **No restart in the middle of a play** (P5): after a crash the instrument is silent until the next play. A restart would lose the notes it was holding.
+* (Surge XT's crash was not reproduced through a program on 2026-10-30; it was later the same day, with the patches fetched again: see below.)
+* (The restart that was not built is built: see below.)
 * **No memory or time limit** on a program, and no job object / process group: a plugin that starts a program of its own leaves it behind.
 * macOS: the code is the same and nothing in it is specific to a system, but nothing was run there [B].
+
+### 6.1 The restart (built 2026-10-30, at the maintainer's word)
+
+* **What it does.** `Launcher::start_and_start_again_when_it_ends` makes a copy that, when its program ends (a crash, no answer within the limit of a run, something that is not a message), **starts the program again** (at most `MOST_RESTARTS_OF_A_PROGRAM` = 5 times for a copy), has it make the plugin as the first was made (the same state), and **gives it again what the plugin had been told**: the last value of each parameter at the first sample, the controllers and the pitch wheel where they were put, and the notes that are held, played again from the first sample of the block; then the block that the first program ended in is run again in the new one. The caller sees one run that took longer.
+* **What it knows is kept by `told.rs`**: values by handle (the last wins), the held notes (a note on adds it, a note off with its id takes it away, every-note-off and the MIDI all-sound-off and all-notes-off take away those of their channel, a reset takes away the notes, the controllers and the wheels and keeps the values), at most 1,024 notes. It takes in a run only when the run went well. A reset in the run that the program ended in is taken into account: the notes that were held before it are not played again.
+* **What it does not know:** a note that a sustain pedal keeps sounding after its note off is not played again (the new program has the pedal down and not the note); a note begins again from its start, so its sound is not where it was; the program's own memory (an echo, a filter) is lost. A plugin that says that it could not run (a clean failure, not a crash) is **not** started again: the copy goes on and the effect leaves it out, as before.
+* **What is said.** Between two blocks, in the notes of the play: *the program that runs the plugin ended (0xC0000005: access violation), and was started again; the notes that were held are played again from here*, and the words about a latency that changed if it did. When it is not started again too often it is left out, with *(it was started again 5 times, and is not any more)* in the reason; a program that cannot be started says *it could not be started again: why*.
+* **[V]** Fake programs played from threads (`remote/tests.rs`: it ends in the middle of a run, it never answers, it says it failed, it ends every time, it cannot be started again, a reset before the run, a run without notes, what the new program says of the plugin); **the real program with the test instrument whose program crashes at every fourth run: the sound is the sound of one that never crashes, bit for bit**, held notes, pedal, wheel, values and a reset included (`tests/plugin_process.rs`, and through the host `tests/plugin_host_processes.rs`, with the three crashes said once each); **real Surge XT** with the silent block switched off, 1,400 plays: 41 times a program ended and was started again, no play ended, every play made sound.
+
+### 6.2 Surge XT's crash (found out and fixed on 2026-10-30)
+
+The patches were fetched again (the maintainer said yes, 2026-10-30), and 3,008 patches were played, each in a program of its own. **A state and a note in the first block, and the program ends at random: 63 of 1,400 plays of seven patches, 7 of 3,008 plays of all.** A note in the second block or later: none in 4,200 plays. The fix is a silent block before the first note, for an instrument that was given a state (`ClapMaker`): 0 in 9,024 plays of all the patches. The whole account, with the numbers and what is not known, is in `bundleable-synthesizers.md`, *What the crash is*.
+
+**What changed for the limits:** a block now has **5 seconds** to be run (it was 20): a program that is stopped for being slow is started again, so a false alarm costs a restart and not a play.

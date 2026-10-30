@@ -612,3 +612,70 @@ fn a_plugin_that_crashes_its_program_while_it_is_made_leaves_the_sound_as_it_was
     assert_eq!(host.problem_with(instrument.kind.key()), Some(said[0].clone()));
     assert!(host.loaded_libraries().is_empty());
 }
+
+#[test]
+fn an_instrument_whose_program_crashes_now_and_then_is_heard_as_if_it_did_not_and_the_person_is_told_each_time() {
+    let _alone = the_installed_plugins_to_myself();
+    let crashing = PluginHost::new()
+        .running_in_a_process_of_its_own(InAProcessOfItsOwn::Instruments)
+        .with_the_program_that_runs_plugins(the_program())
+        .with_the_program_given(
+            vec![("FFRS_TEST_PLUGIN".to_owned(), "crash_at_every_fourth_run".to_owned())],
+            Limits {
+                to_connect: Duration::from_secs(60),
+                to_make: Duration::from_secs(60),
+                to_run: Duration::from_secs(60),
+            },
+        );
+    crashing.allow_everything();
+    let plain = a_host_with(InAProcessOfItsOwn::Nothing);
+    let instrument = an_effect(
+        the_clap_kind_of(clap_plugins::INSTRUMENT),
+        vec![PropertyValue::Number(1.0)],
+        None,
+    );
+    // Twelve blocks with notes that are held across the blocks the program crashes in (the fourth, the seventh and the tenth).
+    let blocks: Vec<(usize, Vec<NoteEvent>)> = vec![
+        (512, vec![on(10, 60, 0.5)]),
+        (512, Vec::new()),
+        (512, vec![on(100, 72, 1.0)]),
+        (512, vec![off(50, 60)]),
+        (512, Vec::new()),
+        (512, Vec::new()),
+        (512, vec![on(0, 48, 0.25)]),
+        (512, vec![off(300, 72)]),
+        (512, Vec::new()),
+        (512, vec![on(5, 55, 0.8)]),
+        (512, Vec::new()),
+        (512, vec![off(100, 55)]),
+    ];
+    let (notes_crashing, notes_plain) = (Notes::default(), Notes::default());
+    let mut processor_crashing = the_processor(&crashing, &instrument, &notes_crashing).expect("the instrument is run");
+    let mut processor_plain = the_processor(&plain, &instrument, &notes_plain).expect("the instrument is run");
+
+    let heard = play(&mut *processor_crashing, &blocks);
+    let wanted = play(&mut *processor_plain, &blocks);
+
+    assert_eq!(
+        heard, wanted,
+        "the sound is the sound of a program that does not crash, bit for bit"
+    );
+    assert!(
+        heard[3].0.iter().any(|sample| f32::from_bits(*sample) > 0.5),
+        "and it is not silence"
+    );
+    let said = the_notes_of(&notes_crashing);
+    assert_eq!(said.len(), 3, "once for each crash: {said:?}");
+    assert!(
+        said.iter().all(|line| line.starts_with("The sound plugin \u{ab}")
+            && line.contains("the program that runs the plugin ended")
+            && line.contains("and was started again; the notes that were held are played again from here")),
+        "{said:?}"
+    );
+    assert!(the_notes_of(&notes_plain).is_empty());
+    assert_eq!(
+        crashing.problem_with(instrument.kind.key()),
+        None,
+        "an instrument that was started again is not left out"
+    );
+}

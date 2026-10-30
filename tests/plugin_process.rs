@@ -1023,6 +1023,220 @@ fn ladspa_plugins_play_the_same_in_the_program_the_effect_that_remembers_and_the
     assert!(seen[0].meters.is_empty());
 }
 
+// --- a program that ends is started again ---
+
+fn started_again_when_it_ends(
+    launcher: &Launcher,
+    subject: &dyn Subject,
+    state: Option<&[u8]>,
+) -> Result<(RemoteCopy, fastforwardrs::plugin_process::protocol::Made), NotStarted> {
+    launcher.start_and_start_again_when_it_ends(&subject.what_to_make(state.is_some()), state.map(Arc::from))
+}
+
+fn a_note(time: u32, what: NoteEventKind) -> NoteEvent {
+    NoteEvent { time, what }
+}
+
+#[test]
+fn an_instrument_whose_program_crashes_at_every_fourth_run_is_started_again_and_makes_the_sound_that_it_makes_without_a_crash()
+ {
+    let pedal = |time, value| {
+        a_note(
+            time,
+            NoteEventKind::Controller {
+                channel: 0,
+                number: 64,
+                value,
+            },
+        )
+    };
+    let wheel = |time, value| a_note(time, NoteEventKind::PitchBend { channel: 0, value });
+    let script = [
+        Step::Value {
+            handle: GAIN,
+            value: 0.5,
+            at_sample: 0,
+        },
+        // 1: two things that are kept by the plugin (the pedal and the wheel) and a note
+        block_with_notes(512, 2, vec![on(10, 60, 0.5), pedal(20, 127), wheel(30, 12_000)]),
+        block_with_notes(512, 2, Vec::new()),
+        block_with_notes(512, 2, vec![on(100, 72, 1.0)]),
+        // 4: the program crashes here; two notes are held, and the pedal and the wheel are where they were put
+        block_with_notes(512, 2, vec![off(50, 60)]),
+        block_with_notes(512, 2, Vec::new()),
+        Step::Value {
+            handle: GAIN,
+            value: 2.0,
+            at_sample: 100,
+        },
+        block_with_notes(512, 2, Vec::new()),
+        // 7: it crashes again, in the block that has a new note
+        block_with_notes(512, 2, vec![on(0, 48, 0.25)]),
+        block_with_notes(512, 2, vec![off(300, 72)]),
+        block_with_notes(512, 2, vec![pedal(10, 0)]),
+        // 10: a seek (a reset), and then it crashes in the block with the first note after it
+        Step::Reset,
+        block_with_notes(512, 2, vec![on(5, 55, 0.8)]),
+        block_with_notes(512, 2, Vec::new()),
+        block_with_notes(512, 2, vec![off(100, 55)]),
+    ];
+    for id in [clap_plugins::INSTRUMENT, clap_plugins::INSTRUMENT_MIDI] {
+        let instrument = a_clap_plugin(id, 0, 2, &[GAIN]);
+        let (mut without_a_crash, _) = instrument.in_this_process(None);
+        let crashing = launcher().with_environment(vec![(
+            "FFRS_TEST_PLUGIN".to_owned(),
+            "crash_at_every_fourth_run".to_owned(),
+        )]);
+        let (mut with_crashes, _) =
+            started_again_when_it_ends(&crashing, &instrument, None).expect("the program makes the plugin");
+        let first_program = with_crashes.process_id().unwrap();
+
+        let wanted = play(without_a_crash.as_mut(), &script);
+        let heard = play(&mut with_crashes, &script);
+
+        let sounds = |seen: &[Seen]| seen.iter().map(|block| block.sound.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            sounds(&heard),
+            sounds(&wanted),
+            "{id}: the sound is the sound of a program that does not crash, bit for bit"
+        );
+        assert_eq!(heard.len(), 12);
+        assert_eq!(
+            with_crashes.times_started_again(),
+            3,
+            "{id}: runs 4, 7 and 10 of the program that counts its own"
+        );
+        assert_ne!(
+            with_crashes.process_id().unwrap(),
+            first_program,
+            "{id}: it is another program"
+        );
+        let said: Vec<&str> = heard
+            .iter()
+            .filter_map(|block| block.between_blocks.note.as_deref())
+            .collect();
+        assert_eq!(
+            said.len(),
+            3,
+            "{id}: it is said between the blocks, once for each: {said:?}"
+        );
+        assert!(
+            said.iter()
+                .all(|words| words.contains("the program that runs the plugin ended")
+                    && words.contains("and was started again; the notes that were held are played again from here")),
+            "{id}: {said:?}"
+        );
+        // (Not silence against silence: the first notes are heard in the blocks the crashes were in.)
+        assert!(the_sound(&heard[3])[0].iter().any(|sample| *sample > 0.1), "{id}");
+        assert!(the_sound(&heard[9])[0].iter().any(|sample| *sample > 0.05), "{id}");
+    }
+}
+
+#[test]
+fn an_effect_whose_program_crashes_is_started_again_with_its_values_and_makes_the_sound_that_it_makes_without_a_crash()
+{
+    let gain = a_clap_plugin(clap_plugins::GAIN, 2, 2, &[GAIN]);
+    let mut script = vec![Step::Value {
+        handle: GAIN,
+        value: 0.25,
+        at_sample: 0,
+    }];
+    for number in 0..9 {
+        if number == 4 {
+            script.push(Step::Value {
+                handle: GAIN,
+                value: 3.0,
+                at_sample: 200,
+            });
+        }
+        script.push(block(512, 2, 2));
+    }
+    let (mut without_a_crash, _) = gain.in_this_process(None);
+    let crashing = launcher().with_environment(vec![(
+        "FFRS_TEST_PLUGIN".to_owned(),
+        "crash_at_every_fourth_run".to_owned(),
+    )]);
+    let (mut with_crashes, _) =
+        started_again_when_it_ends(&crashing, &gain, None).expect("the program makes the plugin");
+
+    let wanted = play(without_a_crash.as_mut(), &script);
+    let heard = play(&mut with_crashes, &script);
+
+    assert_eq!(
+        heard.iter().map(|block| &block.sound).collect::<Vec<_>>(),
+        wanted.iter().map(|block| &block.sound).collect::<Vec<_>>()
+    );
+    assert_eq!(with_crashes.times_started_again(), 2, "runs 4 and 7");
+}
+
+#[test]
+fn a_program_that_crashes_at_every_run_is_started_again_so_often_and_then_the_copy_is_gone_and_the_editor_is_still_here()
+ {
+    let gain = a_clap_plugin(clap_plugins::GAIN, 2, 2, &[GAIN]);
+    let (mut copy, _) =
+        started_again_when_it_ends(&a_launcher_for_a_plugin_that_misbehaves("crash_when_run"), &gain, None).unwrap();
+    let (mut left, mut right) = ([0.0_f32; 512], [0.0_f32; 512]);
+
+    let error = copy
+        .run(
+            &mut [&mut [0.5; 512], &mut [0.5; 512]],
+            &mut [&mut left, &mut right],
+            512,
+        )
+        .unwrap_err();
+
+    assert!(
+        error.contains("the program that runs the plugin ended")
+            && error.contains("it was started again 5 times, and is not any more"),
+        "{error}"
+    );
+    assert_eq!(copy.times_started_again(), 5);
+    assert_eq!(copy.gone_because(), Some(error.as_str()));
+    assert!(copy.process_id().is_none(), "no program is left");
+}
+
+// --- a plugin that applies its state in the audio thread (Surge XT does) ---
+
+#[test]
+fn a_note_in_the_first_block_of_a_plugin_that_applies_its_state_in_the_audio_thread_does_not_end_the_program() {
+    // (The test instrument that is made like Surge XT applies the state it is given in the first block that follows, and a note in that block ends its program: Surge XT does that at random,
+    // in some 4 plays of a hundred for some patches, and the test instrument always does.)
+    let like_surge = a_clap_plugin(clap_plugins::INSTRUMENT_WITH_A_SIDE_CHAIN, 0, 2, &[GAIN]);
+    let (mut copy, _) = started(&launcher(), &like_surge, Some(b"edits=2")).expect("the program makes the plugin");
+    let (mut left, mut right) = ([0.0_f32; 512], [0.0_f32; 512]);
+
+    copy.run_with_notes(&mut [], &mut [&mut left, &mut right], 512, &[on(0, 50, 1.0)])
+        .expect("the first block, with a note, is run");
+
+    // Key 50 at full velocity is 0.5; the state's two edits make it twice as loud: the state was applied, and the note was heard.
+    assert_eq!(left[10], 1.0);
+    assert_eq!(copy.times_started_again(), 0);
+}
+
+#[test]
+fn a_state_and_a_note_in_the_first_block_make_the_same_sound_in_the_program_and_in_this_process_which_are_both_given_a_silent_block_first()
+ {
+    // (If the copy in this process were not given the silent block, this test program would end with the plugin's abort: that is how the lack of it is noticed.)
+    let like_surge = a_clap_plugin(clap_plugins::INSTRUMENT_WITH_A_SIDE_CHAIN, 0, 2, &[GAIN]);
+
+    let seen = the_same_in_the_program(
+        &like_surge,
+        Some(b"edits=2"),
+        &[
+            block_with_notes(512, 2, vec![on(0, 50, 1.0)]),
+            block_with_notes(512, 2, Vec::new()),
+        ],
+    );
+
+    assert_eq!(the_sound(&seen[0])[0][10], 1.0);
+    let without_a_state = the_same_in_the_program(&like_surge, None, &[block_with_notes(512, 2, vec![on(0, 50, 1.0)])]);
+    assert_eq!(
+        the_sound(&without_a_state[0])[0][10],
+        0.5,
+        "no state, no edits, and the sound is half as loud"
+    );
+}
+
 // --- what it costs (a report, not a check) ---
 
 /// How long the program takes to start and make a plugin, and how long a block takes in it and in this process. Run with

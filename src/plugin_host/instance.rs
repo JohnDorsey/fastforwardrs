@@ -175,6 +175,9 @@ impl ClapMaker {
             .as_ref()
             .and_then(|state| instance.load_the_state(state).err())
             .map(|error| error.to_string());
+        if self.state.is_some() && not_taken.is_none() && !instance.note_inputs().is_empty() {
+            run_a_silent_block_so_that_the_state_is_applied_before_any_note(&mut instance);
+        }
         Ok((instance, not_taken))
     }
 
@@ -183,6 +186,19 @@ impl ClapMaker {
         self.make_and_say_if_the_state_was_not_taken()
             .map(|(instance, _)| instance)
     }
+}
+
+/// Runs the instrument once on a block of silence with no events, **so that a state that it was given is applied before the first note reaches it.** A plugin may keep the state it is given until
+/// its next block and apply it in the audio thread, and Surge XT, when that block also has a note, dies at random: 63 of 1,400 plays of seven of its patches did, in the first block and in no other, and
+/// not one of 4,200 plays with the note in the second block or a later one (`docs/engine-phase-14-report.md`). What the block makes is thrown away, and so is an error: the first block that
+/// is wanted says it again if it is real.
+fn run_a_silent_block_so_that_the_state_is_applied_before_any_note(instance: &mut clap_host::Instance) {
+    let channels_of = |port: Option<&clap_host::scan::AudioPort>| port.map_or(0, |port| port.channel_count as usize);
+    let mut input = vec![vec![0.0_f32; MOST_FRAMES_OF_A_CLAP_PLUGIN]; channels_of(instance.main_audio_input())];
+    let mut output = vec![vec![0.0_f32; MOST_FRAMES_OF_A_CLAP_PLUGIN]; channels_of(instance.audio_outputs().first())];
+    let mut inputs: Vec<&mut [f32]> = input.iter_mut().map(Vec::as_mut_slice).collect();
+    let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(Vec::as_mut_slice).collect();
+    let _ = instance.run_with_notes(&mut inputs, &mut outputs, &[], &[]);
 }
 
 /// How many times a copy of a CLAP plugin is made again because it asks to be: a plugin that asks every time it is made would be made again at every block for ever, and the

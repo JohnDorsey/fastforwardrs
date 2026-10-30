@@ -806,7 +806,7 @@ impl PluginHost {
         };
         let mut instances: Vec<Box<dyn PluginInstance>> = Vec::new();
         for _ in 0..layout.instances() {
-            match launcher.start(&make, effect.state.as_deref()) {
+            match launcher.start_and_start_again_when_it_ends(&make, effect.state.clone()) {
                 Ok((copy, made)) => {
                     if let Some(why) = made.state_not_taken {
                         voice.problem(words_for_a_state_that_a_plugin_did_not_take(plugin, &why));
