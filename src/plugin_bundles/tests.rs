@@ -912,7 +912,9 @@ fn a_download_of_the_real_manifest_adds_at_most_100_characters_to_the_folder_it_
     assert!(added <= 100, "{} adds {added}", longest.1);
 }
 
-/// A path of exactly `length` characters, in folders made under `base` (each of at most 50 characters), ending in a file name; the folders are made, the file is not.
+/// A path of exactly `length` characters, in folders made under `base` (each of at most 50 characters), ending in a file name; the folders are made, the file is not. (Used by the
+/// test of curl on Windows alone.)
+#[cfg(windows)]
 fn a_path_of_length(base: &Path, length: usize) -> PathBuf {
     let mut folder = base.to_owned();
     let mut left = length - base.to_string_lossy().chars().count();
