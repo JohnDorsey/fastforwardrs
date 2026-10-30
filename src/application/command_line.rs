@@ -19,7 +19,7 @@ use std::time::Duration;
 use super::archive_cache::ArchiveCache;
 use crate::engine::AdapterChoice;
 use crate::media::{FfmpegToolchain, MediaLocation};
-use crate::plugin_host::{PluginHost, folders_the_sound_of_a_project_needs};
+use crate::plugin_host::{PluginHost, THE_PLUGINS_IN_A_PROCESS_OF_THEIR_OWN, folders_the_sound_of_a_project_needs};
 use crate::plugin_scan::{
     LibraryOutcome, PluginSearch, plugins_found_in, scan_a_library_alone, scanner_program_beside_this_program,
 };
@@ -340,7 +340,7 @@ fn find_and_check_the_plugins_of_the_sound(
     request: &ExportRequest,
     project: &Project,
 ) -> Result<Arc<PluginHost>, String> {
-    let host = Arc::new(PluginHost::new());
+    let host = Arc::new(PluginHost::new().running_in_a_process_of_its_own(THE_PLUGINS_IN_A_PROCESS_OF_THEIR_OWN));
     // (The plugins that came with the program are the program's own: no question, so no refusal either.)
     for folder in &request.bundled_plugins {
         host.trust_bundled_folder(folder);

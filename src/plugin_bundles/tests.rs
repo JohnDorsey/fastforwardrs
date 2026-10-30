@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use super::test_support::{FakeFetcher, Fixture, a_fixture, a_zip};
 use super::download::{file_name_of, place_of_a_download};
+use super::test_support::{FakeFetcher, Fixture, a_fixture, a_zip};
 use super::*;
 
 // --- the manifest ---
@@ -834,7 +834,8 @@ impl Fetcher for FetcherThatSaysWhere {
 }
 
 #[test]
-fn every_file_that_is_downloaded_is_in_a_folder_of_the_start_of_its_checksum_under_dot_downloading_with_the_name_in_its_address() {
+fn every_file_that_is_downloaded_is_in_a_folder_of_the_start_of_its_checksum_under_dot_downloading_with_the_name_in_its_address()
+ {
     let fixture = a_fixture();
     let fetcher = FetcherThatSaysWhere {
         inner: FakeFetcher::new(fixture.files.clone()),
@@ -842,12 +843,24 @@ fn every_file_that_is_downloaded_is_in_a_folder_of_the_start_of_its_checksum_und
     };
     let folder = tempfile::tempdir().unwrap();
 
-    fetch_plugins(&fixture.manifest, "windows-x86_64", folder.path(), &fetcher, &mut |_| {}, &|| false).unwrap();
+    fetch_plugins(
+        &fixture.manifest,
+        "windows-x86_64",
+        folder.path(),
+        &fetcher,
+        &mut |_| {},
+        &|| false,
+    )
+    .unwrap();
 
     let mut expected: Vec<String> = Vec::new();
     for set in &fixture.manifest.sets {
         if let Some(build) = set.platforms.get("windows-x86_64") {
-            expected.push(format!(".downloading/{}/{}", &build.sha256[..16], file_name_of(&build.url)));
+            expected.push(format!(
+                ".downloading/{}/{}",
+                &build.sha256[..16],
+                file_name_of(&build.url)
+            ));
         }
         for text in &set.licence_texts {
             expected.push(format!(".downloading/{}/{}", &text.sha256[..16], text.name));
@@ -860,7 +873,12 @@ fn every_file_that_is_downloaded_is_in_a_folder_of_the_start_of_its_checksum_und
         .lock()
         .unwrap()
         .iter()
-        .map(|path| path.strip_prefix(folder.path()).unwrap().to_string_lossy().replace('\\', "/"))
+        .map(|path| {
+            path.strip_prefix(folder.path())
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
         .collect();
     got.sort();
     got.dedup();
@@ -883,7 +901,10 @@ fn a_download_of_the_real_manifest_adds_at_most_100_characters_to_the_folder_it_
         }
         for text in &set.licence_texts {
             let relative = place_of_a_download(Path::new(""), &text.sha256, &text.name);
-            longest = longest.max((relative.to_string_lossy().chars().count(), format!("the licence {} of {}", text.name, set.id)));
+            longest = longest.max((
+                relative.to_string_lossy().chars().count(),
+                format!("the licence {} of {}", text.name, set.id),
+            ));
         }
     }
     // (The folder name is joined to an empty path: `.downloading` is joined by the caller, so its 13 characters and a separator are added here.)
@@ -908,7 +929,8 @@ fn a_path_of_length(base: &Path, length: usize) -> PathBuf {
 
 #[cfg(windows)]
 #[test]
-fn curl_on_windows_writes_a_file_of_a_path_of_259_characters_and_is_not_started_for_one_of_260_which_it_would_refuse_whatever_the_setting_for_long_paths_is() {
+fn curl_on_windows_writes_a_file_of_a_path_of_259_characters_and_is_not_started_for_one_of_260_which_it_would_refuse_whatever_the_setting_for_long_paths_is()
+ {
     if !curl_is_there() {
         eprintln!("SKIPPED: there is no curl");
         return;

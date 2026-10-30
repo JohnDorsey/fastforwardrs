@@ -557,7 +557,10 @@ impl FastForwardApplication {
 
         let project = Project::empty();
         let video_format_prober = ffprobe_as_the_video_format_prober(toolchain.clone());
-        let plugin_host = Arc::new(crate::plugin_host::PluginHost::new());
+        let plugin_host = Arc::new(
+            crate::plugin_host::PluginHost::new()
+                .running_in_a_process_of_its_own(crate::plugin_host::THE_PLUGINS_IN_A_PROCESS_OF_THEIR_OWN),
+        );
         Self {
             playback: Playback {
                 preview_pictures: PreviewPictures::new(FfmpegPictureStreamStarter::new(

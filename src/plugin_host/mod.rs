@@ -8,12 +8,16 @@
 //!   library once, writes the breadcrumb before it does, makes the plugin, and checks that it is the plugin that was scanned.
 //! * [`PluginEffect`] is the effect: the channel layouts, the values that change with the keyframes, the plugin that is too slow and is left out, the sound that is not a number.
 //!
-//! Plugins run **in the editor's own process** (G4). A plugin that crashes takes the editor with it; the breadcrumb says, the next time, which library it was.
+//! Plugins run **in the editor's own process** (G4), except those that [`InAProcessOfItsOwn`] says run in a program of their own (phase 14: the instruments, for the editor and the export
+//! program). A plugin that crashes in the editor's process takes the editor with it, and the breadcrumb says, the next time, which library it was; one that crashes in a program of its own ends
+//! that program, and the effect is left out of that play and says why (`plugin_process`).
 
 mod effect;
 mod host;
 mod instance;
 mod needs;
+mod processes;
+mod scanned;
 
 pub use effect::{
     Layout, PluginEffect, SAMPLES_BETWEEN_LOOKS_WHEN_ANIMATED, SECONDS_TOO_SLOW, SlownessGuard, frame_of_a_sample,
@@ -21,9 +25,11 @@ pub use effect::{
 pub use host::{PluginHost, Wanted};
 pub use instance::{
     BetweenBlocks, ClapCopy, ClapMaker, LadspaCopy, LiveGuard, Lives, Lv2Copy, MOST_FRAMES_OF_A_CLAP_PLUGIN,
-    PluginInstance, places_to_look_in,
+    MOST_FRAMES_OF_AN_LV2_PLUGIN, PluginInstance, places_to_look_in,
 };
 pub use needs::folders_the_sound_of_a_project_needs;
+pub use processes::{InAProcessOfItsOwn, THE_PLUGINS_IN_A_PROCESS_OF_THEIR_OWN};
+pub use scanned::WhatWasScanned;
 
 #[cfg(test)]
 mod synthesizer_tests;

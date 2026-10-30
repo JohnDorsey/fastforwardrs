@@ -32,11 +32,16 @@ const HOW_OFTEN_TO_LOOK: Duration = Duration::from_millis(2);
 /// The name of the scan program, without the ending that programs have on this system.
 pub const SCANNER_PROGRAM_NAME: &str = "fastforwardrs-plugin-scan";
 
-/// Where the scan program is, if it is beside the program that is running (the editor and the scan program are built into one folder, and installed into one), or, when this is a
-/// test of the library (which `cargo` puts in the folder `deps` inside it), the folder above.
+/// Where the scan program is, if it is beside the program that is running (see [`program_beside_this_program`]).
 pub fn scanner_program_beside_this_program() -> Option<PathBuf> {
+    program_beside_this_program(SCANNER_PROGRAM_NAME)
+}
+
+/// Where the program called `name` (without the ending that programs have on this system) is, if it is beside the program that is running (the editor and its other programs are built
+/// into one folder, and installed into one), or, when this is a test of the library (which `cargo` puts in the folder `deps` inside it), the folder above.
+pub fn program_beside_this_program(name: &str) -> Option<PathBuf> {
     let program = std::env::current_exe().ok()?;
-    let name = format!("{SCANNER_PROGRAM_NAME}{}", std::env::consts::EXE_SUFFIX);
+    let name = format!("{name}{}", std::env::consts::EXE_SUFFIX);
     let folder = program.parent()?;
     let mut candidates = vec![folder.join(&name)];
     if folder.file_name().is_some_and(|folder_name| folder_name == "deps") {
@@ -202,7 +207,7 @@ pub(super) fn outcome_of(did: &WhatItDid, time_limit: Duration) -> LibraryOutcom
 }
 
 /// How a program that ended badly ended, in words.
-fn how_it_ended_badly(status: ExitStatus) -> String {
+pub(crate) fn how_it_ended_badly(status: ExitStatus) -> String {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;

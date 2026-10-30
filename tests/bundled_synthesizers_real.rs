@@ -51,6 +51,17 @@ fn manifest() -> serde_json::Value {
     serde_json::from_str(&std::fs::read_to_string(file).expect("the manifest is read")).expect("the manifest is JSON")
 }
 
+/// The host as the editor makes it: **the instruments run in a program of their own** (phase 14), the program that `cargo` built beside these tests; everything is allowed.
+fn a_host() -> PluginHost {
+    let host = PluginHost::new()
+        .running_in_a_process_of_its_own(fastforwardrs::plugin_host::THE_PLUGINS_IN_A_PROCESS_OF_THEIR_OWN)
+        .with_the_program_that_runs_plugins(std::path::PathBuf::from(env!(
+            "CARGO_BIN_EXE_fastforwardrs-plugin-process"
+        )));
+    host.allow_everything();
+    host
+}
+
 fn thirty() -> FrameRate {
     FrameRate::new(30, 1).unwrap()
 }
@@ -133,8 +144,7 @@ fn an_effect_with_the_values_it_has_when_it_is_put_on(kind: EffectKind) -> Layer
 }
 
 fn the_processor_of(effect: &LayerEffect) -> Box<dyn BlockProcessor> {
-    let host = PluginHost::new();
-    host.allow_everything();
+    let host = a_host();
     let clip = SoundClipToExport {
         source_input: 0,
         first_source_frame: 0,
@@ -323,8 +333,7 @@ impl ClipSpawner for NoFile {
 fn heard_from(project: &Project, from: u64, block: usize) -> Vec<f32> {
     let plan = plan_sound(project, TimelineFrameIndex::new(from), |_| true);
     let specification = sound_graph_specification(&plan, &[], SpedUpClipSound::MaintainPitch);
-    let host = PluginHost::new();
-    host.allow_everything();
+    let host = a_host();
     let runner: Arc<dyn PluginRunner> = Arc::new(host);
     let insertions = PluginInsertions::new(runner, specification.frame_rate, Notes::default(), false);
     let feeds = LookAheadFeeds::new(specification.clone(), NoFile);

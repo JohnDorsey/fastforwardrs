@@ -29,14 +29,7 @@ pub const HOW_LONG_A_WINDOW_MAY_TAKE_TO_CLOSE: Duration = Duration::from_secs(3)
 
 /// Where the editor-window program is, if it is beside the program that is running (as the scan program is), or, when this is a test of the library, in the folder above.
 pub fn editor_program_beside_this_program() -> Option<PathBuf> {
-    let program = std::env::current_exe().ok()?;
-    let name = format!("{EDITOR_PROGRAM_NAME}{}", std::env::consts::EXE_SUFFIX);
-    let folder = program.parent()?;
-    let mut candidates = vec![folder.join(&name)];
-    if folder.file_name().is_some_and(|folder_name| folder_name == "deps") {
-        candidates.push(folder.parent()?.join(&name));
-    }
-    candidates.into_iter().find(|candidate| candidate.is_file())
+    crate::plugin_scan::child::program_beside_this_program(EDITOR_PROGRAM_NAME)
 }
 
 /// Which window: the plugin effect `instance` of the clip or the track `target`.

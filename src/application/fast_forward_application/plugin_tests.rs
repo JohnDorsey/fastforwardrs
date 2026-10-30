@@ -327,6 +327,11 @@ fn a_yes_to_a_plugin_inside_the_project_writes_it_out_and_trusts_it_and_a_no_doe
         not_loaded(&asked_yes).is_empty(),
         "it is loaded: the window of an effect does not blame it"
     );
+    assert_eq!(
+        asked_yes.application().plugin_host().runs_in_a_process_of_its_own(),
+        crate::plugin_host::InAProcessOfItsOwn::Instruments,
+        "the editor runs the instruments in a process of their own: the maintainer's word of 2026-10-30"
+    );
     assert!(
         asked_yes.application().plugin_host().forget_the_embedded_plugins(),
         "the folder it was written out to is trusted"

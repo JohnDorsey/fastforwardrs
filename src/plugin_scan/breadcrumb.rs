@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 John Dorsey
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The breadcrumb (G4 of the design): **plugins run in the editor's own process**, so a plugin that crashes while it runs takes the editor with it, and nothing can be done
-//! about that while it happens. What is done is this: before a library is used for the first time in a session its path is written to a file (and flushed to the disk), and when
+//! The breadcrumb (G4 of the design): **plugins run in the editor's own process** (all but the instruments, since phase 14, which run in a program of their own and are not written here:
+//! the editor never loads them), so a plugin that crashes while it runs takes the editor with it, and nothing can be done about that while it happens. What is done is this: before a library is used for the first time in a session its path is written to a file (and flushed to the disk), and when
 //! the editor ends well the file is removed. If the next start finds the file, the last run ended badly, and the libraries in the file are the ones it was using. The library that
 //! was started last is **failed** (like one that crashed the scan: not loaded again until it changes), and the others are named.
 //!

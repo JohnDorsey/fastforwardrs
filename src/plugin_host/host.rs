@@ -13,8 +13,12 @@ use ladspa_host::Library;
 
 use super::effect::{Layout, MeterBoard, PluginEffect, ProblemBoard};
 use super::instance::{ClapCopy, ClapMaker, LadspaCopy, Lives, Lv2Copy, PluginInstance};
+use super::processes::{InAProcessOfItsOwn, Processes};
+use super::scanned::WhatWasScanned;
 use crate::composition::LayerEffect;
 use crate::media::export::SoundClipToExport;
+use crate::plugin_process::protocol::{Address, Make, Refused};
+use crate::plugin_process::remote::{Limits, NotStarted};
 use crate::plugin_scan::{Breadcrumb, dependency_search_folders};
 use crate::plugin_trust::{FolderStanding, PluginCache, folder_of};
 use crate::project::{FrameRate, InstalledPlugin, PluginAddress, PluginLibrary};
@@ -104,6 +108,8 @@ pub struct PluginHost {
     longest_wait_for_what_is_being_let_go_of: std::time::Duration,
     /// The folders of the plugins that were written out of a project file and are trusted until the next project is opened (see [`Self::write_out_and_trust_an_embedded_plugin`]).
     embedded_folders: Mutex<Vec<PathBuf>>,
+    /// Which plugins run in a process of their own, and the program (phase 14).
+    processes: Mutex<Processes>,
     /// Where the plugins of project files are written out, made when the first is. **The last field: the libraries above it are let go of before its files are removed** (a
     /// library that is loaded cannot be removed on Windows).
     embedded_cache: Mutex<Option<PluginCache>>,
@@ -135,6 +141,7 @@ impl PluginHost {
             lives: std::sync::Arc::default(),
             longest_wait_for_what_is_being_let_go_of: LONGEST_WAIT_FOR_WHAT_IS_BEING_LET_GO_OF,
             embedded_folders: Mutex::new(Vec::new()),
+            processes: Mutex::new(Processes::default()),
             embedded_cache: Mutex::new(None),
         }
     }
@@ -311,6 +318,48 @@ impl PluginHost {
     pub fn waiting_no_longer_than(mut self, longest: std::time::Duration) -> Self {
         self.longest_wait_for_what_is_being_let_go_of = longest;
         self
+    }
+
+    /// The same, running the plugins that `which` says in a process of their own (see [`InAProcessOfItsOwn`]; `new()` runs none): **a plugin that crashes ends the process it runs in**, and
+    /// the program that runs it is not the editor.
+    #[must_use]
+    pub fn running_in_a_process_of_its_own(mut self, which: InAProcessOfItsOwn) -> Self {
+        self.processes
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .which = which;
+        self
+    }
+
+    /// The same, with the program that runs plugins given and not looked for beside the editor (the tests use the one that `cargo` built).
+    #[must_use]
+    pub fn with_the_program_that_runs_plugins(mut self, program: PathBuf) -> Self {
+        self.processes
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .given_the_program(program);
+        self
+    }
+
+    /// The same, with what the program that runs plugins is given in its environment besides the usual (for the tests of what it does about a plugin that misbehaves), and how long it is
+    /// given for each thing.
+    #[must_use]
+    pub fn with_the_program_given(mut self, environment: Vec<(String, String)>, limits: Limits) -> Self {
+        let processes = self
+            .processes
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        processes.extra_environment = environment;
+        processes.limits = Some(limits);
+        self
+    }
+
+    /// Which plugins run in a process of their own.
+    pub fn runs_in_a_process_of_its_own(&self) -> InAProcessOfItsOwn {
+        self.processes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .which
     }
 
     /// Says why the plugin whose effect has the key `key` does nothing (for the window of the effect). The host says it itself when a plugin that was wanted went wrong.
@@ -552,29 +601,19 @@ impl PluginHost {
         let PluginAddress::Ladspa { index, .. } = plugin.address else {
             return None;
         };
+        let scanned = WhatWasScanned::of(plugin);
         let mut instances = Vec::new();
         for _ in 0..layout.instances() {
             match library.instantiate(index, SAMPLE_RATE) {
                 Ok(instance) => {
-                    if !this_is_the_plugin_that_was_scanned(&instance, plugin) {
-                        voice.problem(
-                            format!(
-                                "The sound plugin \u{ab}{}\u{bb} is not what it was when the plugins were scanned (the library {} has changed): scan again.",
-                                plugin.descriptor.name,
-                                plugin.library.display()
-                            ),
-                        );
+                    if !scanned.is_this_ladspa_plugin(&instance) {
+                        voice.problem(words_for_a_plugin_that_is_not_what_was_scanned(plugin));
                         return None;
                     }
                     instances.push(Box::new(LadspaCopy(instance)) as Box<dyn PluginInstance>);
                 }
                 Err(error) => {
-                    voice.problem(
-                        format!(
-                            "The sound plugin \u{ab}{}\u{bb} could not be made: {error}. The sound goes through it unchanged.",
-                            plugin.descriptor.name
-                        ),
-                    );
+                    voice.problem(words_for_a_plugin_that_could_not_be_made(plugin, &error.to_string()));
                     return None;
                 }
             }
@@ -595,12 +634,8 @@ impl PluginHost {
         state: Option<&std::sync::Arc<[u8]>>,
         voice: &Voice<'_>,
     ) -> Option<Vec<Box<dyn PluginInstance>>> {
-        if !this_lv2_plugin_is_the_one_that_was_scanned(description, plugin) {
-            voice.problem(format!(
-                "The sound plugin \u{ab}{}\u{bb} is not what it was when the plugins were scanned (the bundle {} has changed): scan again.",
-                plugin.descriptor.name,
-                plugin.library.display()
-            ));
+        if !WhatWasScanned::of(plugin).is_this_lv2_plugin(description) {
+            voice.problem(words_for_a_plugin_that_is_not_what_was_scanned(plugin));
             return None;
         }
         let mut instances: Vec<Box<dyn PluginInstance>> = Vec::new();
@@ -617,18 +652,12 @@ impl PluginHost {
                         && instance.has_state()
                         && let Err(error) = instance.restore_state(bytes)
                     {
-                        voice.problem(format!(
-                            "The sound plugin \u{ab}{}\u{bb} did not take the state that the project has for it ({error}): it goes on with its values.",
-                            plugin.descriptor.name
-                        ));
+                        voice.problem(words_for_a_state_that_a_plugin_did_not_take(plugin, &error.to_string()));
                     }
                     instances.push(Box::new(Lv2Copy(instance)));
                 }
                 Err(error) => {
-                    voice.problem(format!(
-                        "The sound plugin \u{ab}{}\u{bb} could not be made: {error}. The sound goes through it unchanged.",
-                        plugin.descriptor.name
-                    ));
+                    voice.problem(words_for_a_plugin_that_could_not_be_made(plugin, &error.to_string()));
                     return None;
                 }
             }
@@ -647,6 +676,7 @@ impl PluginHost {
         voice: &Voice<'_>,
     ) -> Option<Vec<Box<dyn PluginInstance>>> {
         let worker = self.the_clap_worker();
+        let scanned = WhatWasScanned::of(plugin);
         let stream = stream_of(voice.notes);
         // A stream that is being stopped makes no more plugins (it is about to let go of those it has, and a plugin made now would be alive with the ones of the stream that took its
         // place): the sound of it is not wanted.
@@ -672,30 +702,133 @@ impl PluginHost {
             match maker.make_and_say_if_the_state_was_not_taken() {
                 Ok((instance, state_not_taken)) => {
                     if let Some(why) = state_not_taken {
-                        voice.problem(format!(
-                            "The sound plugin \u{ab}{}\u{bb} did not take the state that the project has for it ({why}): it goes on with its values.",
-                            plugin.descriptor.name
-                        ));
+                        voice.problem(words_for_a_state_that_a_plugin_did_not_take(plugin, &why));
                     }
-                    if !this_clap_plugin_is_the_one_that_was_scanned(&instance, plugin) {
-                        voice.problem(
-                            format!(
-                                "The sound plugin \u{ab}{}\u{bb} is not what it was when the plugins were scanned (the library {} has changed): scan again.",
-                                plugin.descriptor.name,
-                                plugin.library.display()
-                            ),
-                        );
+                    if !scanned.is_this_clap_plugin(&instance) {
+                        voice.problem(words_for_a_plugin_that_is_not_what_was_scanned(plugin));
                         return None;
                     }
                     instances.push(Box::new(ClapCopy::new(instance, maker, alive)));
                 }
                 Err(error) => {
-                    voice.problem(
-                        format!(
-                            "The sound plugin \u{ab}{}\u{bb} could not be made: {error}. The sound goes through it unchanged.",
+                    voice.problem(words_for_a_plugin_that_could_not_be_made(plugin, &error.to_string()));
+                    return None;
+                }
+            }
+        }
+        Some(instances)
+    }
+}
+
+/// What is said of a plugin whose library could not be loaded (or does not have the plugin any more).
+fn words_for_a_plugin_that_could_not_be_loaded(plugin: &InstalledPlugin, error: &str) -> String {
+    format!(
+        "The sound plugin \u{ab}{}\u{bb} could not be loaded from {}: {error}. The sound goes through it unchanged.",
+        plugin.descriptor.name,
+        plugin.library.display()
+    )
+}
+
+/// What is said of a plugin that is not what it was when the plugins were scanned.
+fn words_for_a_plugin_that_is_not_what_was_scanned(plugin: &InstalledPlugin) -> String {
+    let what = if matches!(plugin.address, PluginAddress::Lv2 { .. }) {
+        "bundle"
+    } else {
+        "library"
+    };
+    format!(
+        "The sound plugin \u{ab}{}\u{bb} is not what it was when the plugins were scanned (the {what} {} has changed): scan again.",
+        plugin.descriptor.name,
+        plugin.library.display()
+    )
+}
+
+/// What is said of a plugin that said no when it was made.
+fn words_for_a_plugin_that_could_not_be_made(plugin: &InstalledPlugin, error: &str) -> String {
+    format!(
+        "The sound plugin \u{ab}{}\u{bb} could not be made: {error}. The sound goes through it unchanged.",
+        plugin.descriptor.name
+    )
+}
+
+/// What is said of a plugin that could not take the state that the project has for it.
+fn words_for_a_state_that_a_plugin_did_not_take(plugin: &InstalledPlugin, why: &str) -> String {
+    format!(
+        "The sound plugin \u{ab}{}\u{bb} did not take the state that the project has for it ({why}): it goes on with its values.",
+        plugin.descriptor.name
+    )
+}
+
+impl PluginHost {
+    /// As many copies of the plugin as the layout needs, each in a process of its own (phase 14), or why not (said in the notes). **The library is not loaded here**: the program loads it, so
+    /// that a plugin that crashes ends the program and not the editor. The words for what goes wrong are those of the copies in this process.
+    fn the_instances_in_processes_of(
+        &self,
+        plugin: &'static InstalledPlugin,
+        effect: &LayerEffect,
+        layout: Layout,
+        voice: &Voice<'_>,
+    ) -> Option<Vec<Box<dyn PluginInstance>>> {
+        // A stream that is being stopped makes no more copies (as for the copies in this process): the sound of it is not wanted.
+        if self
+            .lives
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_stopping(stream_of(voice.notes))
+        {
+            return None;
+        }
+        let environment = self.environment_for_a_program_that_loads(&plugin.library);
+        let launcher = match self
+            .processes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .launcher(environment)
+        {
+            Ok(launcher) => launcher,
+            Err(why) => {
+                voice.problem(format!(
+                    "The sound plugin \u{ab}{}\u{bb} is not run: {why}. The sound goes through it unchanged.",
+                    plugin.descriptor.name
+                ));
+                return None;
+            }
+        };
+        let make = Make {
+            address: match &plugin.address {
+                PluginAddress::Ladspa { index, .. } => Address::Ladspa { index: *index },
+                PluginAddress::Clap { id } => Address::Clap { id: id.clone() },
+                PluginAddress::Lv2 { uri } => Address::Lv2 { uri: uri.clone() },
+            },
+            library: plugin.library.clone(),
+            scanned: WhatWasScanned::of(plugin),
+            has_state: effect.state.is_some(),
+        };
+        let mut instances: Vec<Box<dyn PluginInstance>> = Vec::new();
+        for _ in 0..layout.instances() {
+            match launcher.start(&make, effect.state.as_deref()) {
+                Ok((copy, made)) => {
+                    if let Some(why) = made.state_not_taken {
+                        voice.problem(words_for_a_state_that_a_plugin_did_not_take(plugin, &why));
+                    }
+                    instances.push(Box::new(copy));
+                }
+                Err(not_started) => {
+                    voice.problem(match not_started {
+                        NotStarted::Refused(Refused::CouldNotBeLoaded(error)) => {
+                            words_for_a_plugin_that_could_not_be_loaded(plugin, &error)
+                        }
+                        NotStarted::Refused(Refused::NotWhatWasScanned) => {
+                            words_for_a_plugin_that_is_not_what_was_scanned(plugin)
+                        }
+                        NotStarted::Refused(Refused::CouldNotBeMade(error)) => {
+                            words_for_a_plugin_that_could_not_be_made(plugin, &error)
+                        }
+                        NotStarted::TheProgram(why) => format!(
+                            "The sound plugin \u{ab}{}\u{bb} could not be run in a program of its own: {why}. The sound goes through it unchanged.",
                             plugin.descriptor.name
                         ),
-                    );
+                    });
                     return None;
                 }
             }
@@ -731,20 +864,6 @@ impl PluginHost {
     }
 }
 
-/// Whether what the library gave for the CLAP plugin is the plugin that was scanned: the main ports have the channels that were scanned, and the plugin has every parameter that a
-/// value of the effect is the value of (it may have more).
-fn this_clap_plugin_is_the_one_that_was_scanned(instance: &clap_host::Instance, plugin: &InstalledPlugin) -> bool {
-    let channels = |port: Option<&clap_host::scan::AudioPort>| port.map_or(0, |port| port.channel_count as usize);
-    (
-        channels(instance.main_audio_input()),
-        channels(instance.audio_outputs().first()),
-    ) == (plugin.audio_inputs, plugin.audio_outputs)
-        && plugin
-            .value_handles
-            .iter()
-            .all(|handle| instance.parameters().iter().any(|parameter| parameter.id == *handle))
-}
-
 /// Where a plugin says what is wrong with it: in the notes of the play, and on the board that the window reads.
 struct Voice<'a> {
     notes: &'a Notes,
@@ -767,45 +886,6 @@ fn say(notes: &Notes, line: String) {
     if !notes.contains(&line) {
         notes.push(line);
     }
-}
-
-/// Whether what the bundle says now of the LV2 plugin is the plugin that was scanned: the same audio ports and the same control inputs for the values.
-fn this_lv2_plugin_is_the_one_that_was_scanned(
-    description: &lv2_host::PluginDescription,
-    plugin: &InstalledPlugin,
-) -> bool {
-    use lv2_host::{PortDirection, PortKind};
-    let count = |direction: PortDirection| {
-        description
-            .ports
-            .iter()
-            .filter(|port| port.kind == PortKind::Audio && port.direction == direction)
-            .count()
-    };
-    (count(PortDirection::Input), count(PortDirection::Output)) == (plugin.audio_inputs, plugin.audio_outputs)
-        && plugin.value_handles.iter().all(|&index| {
-            description
-                .ports
-                .get(index as usize)
-                .is_some_and(|port| port.direction == PortDirection::Input && port.kind == PortKind::Control)
-        })
-}
-
-/// Whether what the library gave for the plugin is the plugin that was scanned: the same label and ports of the same kinds, so that no value is given to a port that is
-/// not the one it was made for.
-fn this_is_the_plugin_that_was_scanned(instance: &ladspa_host::Instance, plugin: &InstalledPlugin) -> bool {
-    use ladspa_host::{PortDirection, PortKind};
-    let description = instance.description();
-    let (inputs, outputs) = description.audio_port_counts();
-    let key_label = plugin.descriptor.key.rsplit(':').next().unwrap_or_default();
-    description.label.replace(':', "_") == key_label
-        && (inputs, outputs) == (plugin.audio_inputs, plugin.audio_outputs)
-        && plugin.value_handles.iter().all(|&port| {
-            description
-                .ports
-                .get(port as usize)
-                .is_some_and(|port| port.direction == PortDirection::Input && port.kind == PortKind::Control)
-        })
 }
 
 impl PluginRunner for PluginHost {
@@ -849,43 +929,41 @@ impl PluginRunner for PluginHost {
             return None;
         }
         let could_not_be_loaded = |error: String| {
-            voice.problem(
-                format!(
-                    "The sound plugin \u{ab}{}\u{bb} could not be loaded from {}: {error}. The sound goes through it unchanged.",
-                    plugin.descriptor.name,
-                    plugin.library.display()
-                ),
-            );
+            voice.problem(words_for_a_plugin_that_could_not_be_loaded(plugin, &error));
         };
-        let instances = match &plugin.address {
-            PluginAddress::Ladspa { .. } => {
-                let library = self
-                    .library(&plugin.library)
-                    .inspect_err(|error| could_not_be_loaded(error.clone()))
-                    .ok()?;
-                self.the_instances_of(plugin, layout, &library, &voice)?
-            }
-            PluginAddress::Lv2 { uri } => {
-                let bundle = self
-                    .lv2_bundle(&plugin.library)
-                    .inspect_err(|error| could_not_be_loaded(error.clone()))
-                    .ok()?;
-                let Some(description) = bundle.plugins.iter().find(|candidate| candidate.uri == *uri) else {
-                    could_not_be_loaded(format!("the bundle does not describe a plugin called {uri} any more"));
-                    return None;
-                };
-                let library = self
-                    .lv2_library(&description.binary)
-                    .inspect_err(|error| could_not_be_loaded(error.clone()))
-                    .ok()?;
-                self.the_lv2_instances_of(plugin, description, layout, &library, effect.state.as_ref(), &voice)?
-            }
-            PluginAddress::Clap { id } => {
-                let library = self
-                    .clap_library(&plugin.library)
-                    .inspect_err(|error| could_not_be_loaded(error.clone()))
-                    .ok()?;
-                self.the_clap_instances_of(plugin, id, layout, &library, effect.state.as_ref(), &voice)?
+        let instances = if self.runs_in_a_process_of_its_own().includes(plugin) {
+            self.the_instances_in_processes_of(plugin, effect, layout, &voice)?
+        } else {
+            match &plugin.address {
+                PluginAddress::Ladspa { .. } => {
+                    let library = self
+                        .library(&plugin.library)
+                        .inspect_err(|error| could_not_be_loaded(error.clone()))
+                        .ok()?;
+                    self.the_instances_of(plugin, layout, &library, &voice)?
+                }
+                PluginAddress::Lv2 { uri } => {
+                    let bundle = self
+                        .lv2_bundle(&plugin.library)
+                        .inspect_err(|error| could_not_be_loaded(error.clone()))
+                        .ok()?;
+                    let Some(description) = bundle.plugins.iter().find(|candidate| candidate.uri == *uri) else {
+                        could_not_be_loaded(format!("the bundle does not describe a plugin called {uri} any more"));
+                        return None;
+                    };
+                    let library = self
+                        .lv2_library(&description.binary)
+                        .inspect_err(|error| could_not_be_loaded(error.clone()))
+                        .ok()?;
+                    self.the_lv2_instances_of(plugin, description, layout, &library, effect.state.as_ref(), &voice)?
+                }
+                PluginAddress::Clap { id } => {
+                    let library = self
+                        .clap_library(&plugin.library)
+                        .inspect_err(|error| could_not_be_loaded(error.clone()))
+                        .ok()?;
+                    self.the_clap_instances_of(plugin, id, layout, &library, effect.state.as_ref(), &voice)?
+                }
             }
         };
         PluginEffect::new(

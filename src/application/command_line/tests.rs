@@ -693,6 +693,25 @@ fn with_allow_plugins_every_folder_is_run() {
 }
 
 #[test]
+fn the_export_program_runs_the_plugins_that_are_to_run_in_a_process_of_their_own_in_one() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let (project, _) = project_with_a_plugin_on_its_clip();
+
+    let host = find_and_check_the_plugins_of_the_sound(&a_request_for_the_plugins_of(true, None), &project)
+        .expect("not refused");
+
+    assert_eq!(
+        host.runs_in_a_process_of_its_own(),
+        crate::plugin_host::InAProcessOfItsOwn::Instruments,
+        "the instruments: the maintainer's word of 2026-10-30"
+    );
+    assert_eq!(
+        host.runs_in_a_process_of_its_own(),
+        crate::plugin_host::THE_PLUGINS_IN_A_PROCESS_OF_THEIR_OWN
+    );
+}
+
+#[test]
 fn a_project_with_no_plugin_on_a_clip_is_not_refused_and_runs_nothing() {
     let _alone = crate::test_support::the_installed_plugins_to_myself();
     let plugin = crate::test_support::the_plugins_of_the_test_library().remove(0);
