@@ -1299,7 +1299,6 @@ dependencies = [
  "lv2-host",
  "lv2-test-plugins",
  "naga",
- "pathdiff",
  "pollster 0.4.0",
  "rfd",
  "serde",
@@ -2003,7 +2002,6 @@ dependencies = [
  "ladspa-test-plugins",
  "libloading",
  "serde",
- "serde_json",
  "tempfile",
  "thiserror 2.0.21",
 ]
@@ -2781,12 +2779,6 @@ dependencies = [
  "smallvec",
  "windows-link",
 ]
-
-[[package]]
-name = "pathdiff"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "peniko"

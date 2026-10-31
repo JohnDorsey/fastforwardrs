@@ -12,7 +12,7 @@ source of the ffmpeg that is shipped with a release is to be offered with it (`d
 
 | Licence | Libraries |
 |---|---|
-| [MIT License](#MIT) | 357 |
+| [MIT License](#MIT) | 356 |
 | [Unicode License v3](#Unicode-3.0) | 19 |
 | [Apache License 2.0](#Apache-2.0) | 18 |
 | [GNU General Public License v3.0 or later](#GPL-3.0-or-later) | 5 |
@@ -6742,7 +6742,6 @@ Used by:
 - once_cell 1.21.4 (https://github.com/matklad/once_cell)
 - ordered-stream 0.2.0 (https://github.com/danieldg/ordered-stream)
 - parking 2.2.1 (https://github.com/smol-rs/parking)
-- pathdiff 0.2.3 (https://github.com/Manishearth/pathdiff)
 - pin-project-lite 0.2.17 (https://github.com/taiki-e/pin-project-lite)
 - piper 0.2.5 (https://github.com/smol-rs/piper)
 - polling 3.11.0 (https://github.com/smol-rs/polling)
