@@ -60,3 +60,10 @@ egui_kittest = { version = "0.36.2", features = ["wgpu"] }
 # The tests of the picture engine draw the same triangles with the window's own renderer, as the oracle (default features of egui-wgpu are the
 # window's anyway: they are on already).
 egui-wgpu = "0.36.2"
+
+# Debug information for the lines only (the file and the line of every frame of a panic's backtrace), not for the variables. Measured on 2026-10-31 on Windows (MSVC), for one
+# integration test with everything that it needs, the best of two runs of each: the program database of the test (.pdb) was 359 MB with full debug information and 105 MB like
+# this, the folder of builds 6.9 GB and 3.2 GB, building it from nothing 127 s and 70 s, and building it again after a change of its file 3.8 s and 2.4 s. The folder of builds
+# of the whole project had grown to 54 GB, 37 GB of it .pdb files. A debugger that shows the values of variables needs `CARGO_PROFILE_DEV_DEBUG=2` (or `debug = true` here).
+[profile.dev]
+debug = "line-tables-only"
