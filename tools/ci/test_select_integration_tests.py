@@ -88,10 +88,10 @@ class TheRealProgramsOfTests(unittest.TestCase):
 
 
 class ThePartsAsTheWorkflowUsesThem(unittest.TestCase):
-    def test_each_column_of_the_workflow_runs_all_of_the_integration_tests_in_one_job_or_both_halves_in_jobs_of_their_own(self):
-        # A column (an operating system) is either one job that does everything, or three: the unit tests, the first part and the second part of the integration tests.
-        # Nothing else, so that no part is left out when a job is edited. Each entry of the matrix is one line:
-        #     - { name: "...", os: ..., part: all|unit|integration, integration_tests: all|first|second }
+    def test_each_column_of_the_workflow_has_a_job_of_unit_tests_and_runs_all_of_the_integration_tests_in_one_job_or_both_halves_in_jobs_of_their_own(self):
+        # A column (an operating system) is the job of the unit tests, and either one job that runs all of the integration tests or two that run a half each. Nothing
+        # else, so that no part is left out when a job is edited. Each entry of the matrix is one line:
+        #     - { name: "...", os: ..., part: unit|integration, integration_tests: all|first|second }
         text = THE_WORKFLOW.read_text(encoding="utf-8")
         entries = re.findall(r"^\s*- \{([^}]*)\}\s*$", text, re.MULTILINE)
         self.assertTrue(entries, "no entry of the matrix was found")
@@ -106,14 +106,14 @@ class ThePartsAsTheWorkflowUsesThem(unittest.TestCase):
         for operating_system, jobs in by_os.items():
             self.assertIn(
                 sorted(jobs, key=str),
-                ([("all", "all")], [("integration", "first"), ("integration", "second"), ("unit", None)]),
-                f"{operating_system} runs {jobs}: not everything in one job, and not the unit tests and both halves of the integration tests",
+                ([("integration", "all"), ("unit", None)], [("integration", "first"), ("integration", "second"), ("unit", None)]),
+                f"{operating_system} runs {jobs}: not the unit tests and all of the integration tests, and not the unit tests and both halves of the integration tests",
             )
         self.assertEqual(sorted(by_os), ["macos-latest", "ubuntu-latest", "windows-latest"])
 
 
 class WhatTheScriptDoesWithOtherFolders(unittest.TestCase):
-    NAMED_BY_THE_SCRIPT = ("media_export", "media_export_tracks", "midi_in_the_sound", "media_in_place")
+    NAMED_BY_THE_SCRIPT = ("media_export", "media_export_tracks", "media_export_effects", "midi_in_the_sound")
     SEPARATE = ("application_playback", "application_sound", "media_ffmpeg_quirks", "sound_engine_real_time")
 
     def test_a_program_that_is_added_later_is_run_by_the_second_part_and_not_by_the_first(self):

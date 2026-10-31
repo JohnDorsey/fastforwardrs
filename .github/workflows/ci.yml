@@ -7,10 +7,11 @@
 # What "supported" means per platform (decision Q-19): Windows and Linux: the whole suite passes. macOS: it builds and the headless
 # tests pass (nobody here can look at the window on a Mac).
 #
-# Jobs (2026-10-31, after the times of run 172 were read through the API: Windows 48 min, Ubuntu 22, macOS 26): the Windows column is three jobs that run side by
-# side (the unit tests, and the integration tests in two halves chosen by tools/ci/select_integration_tests.sh), because its integration tests alone took 32 minutes
-# (tests of the picture engine and of the export on a software adapter, 3 to 5 times slower there than on Ubuntu). Ubuntu and macOS are one job each. Every step runs the
-# same commands as before; what a job leaves to another is written on the step as `if:`.
+# Jobs (2026-10-31, from the times of runs 172 and 173, read through the API): every column is a job for the unit tests and one or two for the integration tests, which run
+# side by side. In run 172 each column was one job: Windows took 48 minutes, Ubuntu 22 and macOS 26, and the integration tests of Windows alone took 32 (the picture engine and
+# the export run on a software adapter, 3 to 5 times slower there than on Ubuntu). Run 173 cut Windows into three jobs (the unit tests, and the integration tests in two
+# halves chosen by tools/ci/select_integration_tests.sh) and took 25 minutes in all, Ubuntu now being the longest. Every step runs the same commands as before; what a job
+# leaves to another is written on the step as `if:`. The steps that fetch things from the authors of plugins are with the unit tests, which have built the library already.
 name: CI
 
 on:
@@ -29,15 +30,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `part` says what a job does: `all` (everything), `unit` (format, clippy, library and host tests) or `integration` (the programs of tests in tests/, the steps that
-        # need ffmpeg, the downloads). `integration_tests` says which programs of tests/ the job runs (tools/ci/select_integration_tests.sh): all of them, or the first or the
-        # second half. One entry on each line: tools/ci/test_select_integration_tests.py reads them and checks that no half is left out.
+        # `part` says what a job does: `unit` (format, clippy, the library and host tests, the documentation, and the downloads of the plugins' authors) or `integration` (the
+        # programs of tests in tests/ and the steps that need ffmpeg). `integration_tests` says which programs of tests/ an integration job runs
+        # (tools/ci/select_integration_tests.sh): all of them, or the first or the second half. One entry on each line: tools/ci/test_select_integration_tests.py reads them
+        # and checks that no half is left out.
         include:
           - { name: "windows-latest (unit tests)", os: windows-latest, part: unit }
           - { name: "windows-latest (integration tests, first half)", os: windows-latest, part: integration, integration_tests: first }
           - { name: "windows-latest (integration tests, second half)", os: windows-latest, part: integration, integration_tests: second }
-          - { name: "ubuntu-latest", os: ubuntu-latest, part: all, integration_tests: all }
-          - { name: "macos-latest", os: macos-latest, part: all, integration_tests: all }
+          - { name: "ubuntu-latest (unit tests)", os: ubuntu-latest, part: unit }
+          - { name: "ubuntu-latest (integration tests)", os: ubuntu-latest, part: integration, integration_tests: all }
+          - { name: "macos-latest (unit tests)", os: macos-latest, part: unit }
+          - { name: "macos-latest (integration tests)", os: macos-latest, part: integration, integration_tests: all }
     steps:
       - uses: actions/checkout@v7
 
@@ -155,7 +159,7 @@ jobs:
       # says which tests failed, and does not make the build red. The variable is set here and nowhere else: the tests never run on the graphics card of a developer's computer
       # (SF-01), and where there is a software adapter it changes nothing.
       - name: Engine and export tests on the Metal device of the runner (macOS; failures are warnings)
-        if: ${{ runner.os == 'macOS' && steps.ffmpeg.outputs.major >= 9 }}
+        if: ${{ runner.os == 'macOS' && matrix.part != 'integration' && steps.ffmpeg.outputs.major >= 9 }}
         # (A graphics device that does not answer must not hold the build for hours.)
         timeout-minutes: 20
         continue-on-error: true
@@ -172,7 +176,7 @@ jobs:
       # and a zip with a bundle), their checksums, the plugins taken out as folders, then the scan program finds, loads and start-checks every one of them. Nobody here has a Mac,
       # so this is the only place that the builds for macOS in bundled-plugins/manifest.json are tried; a failure is a WARNING that says what failed, and does not make the build red.
       - name: Fetch the bundled plugins and scan them (macOS; failures are warnings)
-        if: ${{ runner.os == 'macOS' }}
+        if: ${{ runner.os == 'macOS' && matrix.part != 'integration' }}
         timeout-minutes: 25
         continue-on-error: true
         shell: bash
@@ -188,7 +192,7 @@ jobs:
       # The same on Linux, with the data of Surge XT (the 253 MB of patches and wavetables, which a tar.gz holds with names that are not ASCII): the real fetch by the program's own downloader
       # (about 370 MB), what it fetched scanned and played, and the data counted. A failure is a WARNING that says what failed, and does not make the build red.
       - name: Fetch the bundled plugins and the data and try them (Linux; failures are warnings)
-        if: ${{ runner.os == 'Linux' }}
+        if: ${{ runner.os == 'Linux' && matrix.part != 'integration' }}
         timeout-minutes: 25
         continue-on-error: true
         shell: bash
@@ -215,7 +219,7 @@ jobs:
           echo "::warning::ffmpeg ${{ steps.ffmpeg.outputs.major }} is older than 9, so the integration tests were not run"
 
       - name: Documentation
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.part != 'integration'
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps --document-private-items

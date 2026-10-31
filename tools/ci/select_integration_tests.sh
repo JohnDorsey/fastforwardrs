@@ -6,10 +6,11 @@
 # `all` is every program but the four that have steps of their own in .github/workflows/ci.yml (the ones that measure real time, and the one about what ffmpeg itself does).
 #
 # The Windows column of the CI is cut in three jobs that run side by side (the unit tests, and the integration tests in two parts), because the integration tests took 32 of its 48
-# minutes (CI run 172: 19.9 minutes of tests, which on Windows run 3 to 5 times slower than on Ubuntu, and about 12 of building). `first` is the programs listed below and
-# `second` is **every other program**, so that a program of tests that is added later is run by the second part until someone moves it, and is never left out. The list was made
-# from the times of that run on Windows: media_export 326 s, media_export_tracks 142 s, midi_in_the_sound 90 s and media_in_place 38 s are 595 of the 1194 seconds that the
-# integration tests ran.
+# minutes (CI run 172; the tests of the picture engine and of the export run 3 to 5 times slower on Windows than on Ubuntu). `first` is the programs listed below and `second` is
+# **every other program**, so that a program of tests that is added later is run by the second part until someone moves it, and is never left out. The list was made from the
+# times of run 173 on Windows (the 50 programs ran 1503 seconds): media_export 332 s, media_export_tracks 156 s, media_export_effects 135 s and midi_in_the_sound 87 s are 710 of
+# them, and the first part also runs the 66 seconds of the programs that measure real time, so that the two jobs end together. (Run 173 had media_in_place in place of
+# media_export_effects: 613 seconds against 890, and the jobs took 13.9 and 18.3 minutes.)
 #
 # tools/ci/test_select_integration_tests.py checks that `first` and `second` are every program between them and no program twice, and that the four programs that are left out
 # are the four that ci.yml runs by name.
@@ -21,7 +22,7 @@ folder=${2:-tests}
 # Run by steps of their own: they measure real time (a shared machine with a few slow processors cannot be asked to pass them), or what ffmpeg itself does.
 separate="application_playback application_sound media_ffmpeg_quirks sound_engine_real_time"
 # The long ones (see above).
-first="media_export media_export_tracks midi_in_the_sound media_in_place"
+first="media_export media_export_tracks media_export_effects midi_in_the_sound"
 
 contains() {
     case " $2 " in
