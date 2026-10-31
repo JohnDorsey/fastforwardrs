@@ -2,7 +2,7 @@
 name = "clap-host"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.95"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/JohnDorsey/fastforwardrs"
 description = "Loads CLAP sound plugins (with the clack-host crate): the only part of fastforwardrs that names it"

@@ -2,7 +2,7 @@
 name = "ladspa-test-plugins"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.95"
 license = "CC0-1.0"
 repository = "https://github.com/JohnDorsey/fastforwardrs"
 description = "A LADSPA plugin library written for the tests of fastforwardrs: a gain, a filter, a stereo swap, switches, a generator and some that misbehave on request"

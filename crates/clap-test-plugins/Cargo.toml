@@ -2,7 +2,7 @@
 name = "clap-test-plugins"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.95"
 license = "CC0-1.0"
 repository = "https://github.com/JohnDorsey/fastforwardrs"
 description = "A CLAP plugin library written for the tests of fastforwardrs: a gain, a swap, a mono one, plugins with latency, tail, a choice, state, no audio input, and some that misbehave on request"

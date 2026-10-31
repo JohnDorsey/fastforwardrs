@@ -2,7 +2,7 @@
 name = "fastforwardrs"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.95"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/JohnDorsey/fastforwardrs"
 # (The editor is the program that `cargo run` starts; the export from the command line is `cargo run --bin fastforwardrs-export`.)

@@ -7,7 +7,7 @@ A small video editor with one main job: **fast-forward the parts of a video you 
 **You need**
 
 * **ffmpeg and ffprobe, version 9 or newer** (the GPL build). An older one is refused with a message that lists where it looked: ffmpeg 8 shifts the pictures of a file whose sound starts before its picture, so every frame would be off by one. They are looked for in the folder named by `FASTFORWARDRS_FFMPEG_DIRECTORY`, then the folder of the program, then the `PATH`. If they are missing the window still opens and says so.
-* **Rust 1.88 or newer** to build it (edition 2024).
+* **Rust 1.95 or newer** to build it (edition 2024; the egui crates that it is built on need 1.95, the code itself only 1.88).
 * **`curl`**, only for the *Bundles* tab (below).
 * **A graphics adapter** for the preview and the export (a software one works, slowly: see the export command below).
 * **On Linux**, the window system libraries that `eframe`/`wgpu` need, and ALSA's development files (`libasound2-dev` on Debian and Ubuntu) for the sound.
