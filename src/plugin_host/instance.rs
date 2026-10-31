@@ -192,6 +192,10 @@ impl ClapMaker {
 /// its next block and apply it in the audio thread, and Surge XT, when that block also has a note, dies at random: 63 of 1,400 plays of seven of its patches did, in the first block and in no other, and
 /// not one of 4,200 plays with the note in the second block or a later one (`docs/engine-phase-14-report.md`). What the block makes is thrown away, and so is an error: the first block that
 /// is wanted says it again if it is real.
+///
+/// **Why Surge XT dies, and when this can go** (`docs/bundleable-synthesizers.md`, *What is behind it*): the array in which each LFO of its scenes keeps its output is never given a value, a voice
+/// that starts in the first block reads it before any block has written it, and a NaN in it ends in a read 8 GiB away. Surge's own source has been fixed since 2025-05-27; its last release
+/// (1.3.4, 2024-08-11), which is the one that the *Bundles* tab fetches, has not. **When the Surge XT that is fetched is a release that has the fix, this function and its call can go.**
 fn run_a_silent_block_so_that_the_state_is_applied_before_any_note(instance: &mut clap_host::Instance) {
     let channels_of = |port: Option<&clap_host::scan::AudioPort>| port.map_or(0, |port| port.channel_count as usize);
     let mut input = vec![vec![0.0_f32; MOST_FRAMES_OF_A_CLAP_PLUGIN]; channels_of(instance.main_audio_input())];
