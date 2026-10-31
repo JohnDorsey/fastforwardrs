@@ -385,17 +385,6 @@ impl Journey {
         self.press_or_release(position, button, false);
     }
 
-    /// Ticks (or unticks) a setting by its label in the global settings window, which is opened
-    /// from the Edit menu.
-    pub fn change_global_setting(&mut self, label: &str) {
-        self.harness.get_by_label("Edit").click();
-        self.settle();
-        self.harness.get_by_label("Global settings").click();
-        self.settle();
-        self.harness.get_by_label(label).click();
-        self.settle();
-    }
-
     /// Opens the global settings window and, in the drop-down list that shows `shown`, picks `option`.
     pub fn choose_in_a_global_setting_dropdown(&mut self, shown: &str, option: &str) {
         self.choose_in_a_dropdown_of_the_window_opened_by("Global settings", shown, option);

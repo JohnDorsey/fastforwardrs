@@ -137,14 +137,6 @@ impl RunningLeadUp {
     pub fn is_over(&self) -> bool {
         self.thread.as_ref().is_none_or(JoinHandle::is_finished)
     }
-
-    /// Waits for the thread to end (for the tests: the window never waits for it).
-    #[cfg(test)]
-    pub fn wait_until_it_is_over(&mut self) {
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
 }
 
 impl Drop for RunningLeadUp {

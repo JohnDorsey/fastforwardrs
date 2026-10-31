@@ -313,14 +313,6 @@ impl FastForwardApplication {
             .map_or(0, |state| state.thumbnails.finer.wanted_count())
     }
 
-    /// How many runs of ffmpeg have been started to make finer thumbnails of the video `identifier`.
-    pub fn finer_thumbnail_runs_started(&self, identifier: SourceMediaIdentifier) -> usize {
-        self.sources
-            .files
-            .get(&identifier)
-            .map_or(0, |state| state.thumbnails.finer.runs_started())
-    }
-
     /// How many peaks of the waveform of the sound file `identifier` have been made.
     pub fn waveform_peak_count(&self, identifier: SourceMediaIdentifier) -> usize {
         self.sources

@@ -6,10 +6,7 @@
 
 use std::path::PathBuf;
 
-use super::{
-    PluginScanner, PluginSearchSettings, ScanCache, folders_looked_in_by_default, plugins_found_in,
-    scanner_program_beside_this_program,
-};
+use super::{PluginScanner, PluginSearchSettings, ScanCache, folders_looked_in_by_default, plugins_found_in};
 use crate::project::set_installed_plugins;
 
 /// How plugins are looked for.
@@ -37,17 +34,6 @@ pub struct WhatTheScanFound {
 }
 
 impl PluginSearch {
-    /// The way a person's editor looks: the scan program beside this program, the folders and the cache beside the settings, the usual places. `None` if there is no scan
-    /// program beside this program.
-    pub fn the_usual() -> Option<Self> {
-        Some(Self {
-            scanner_program: scanner_program_beside_this_program()?,
-            settings_file: PluginSearchSettings::default_file(),
-            cache_file: ScanCache::default_file(),
-            look_in_the_usual_places: true,
-        })
-    }
-
     /// The way a person's editor looks, but with the folders and the cache beside `settings_file` (the settings file that was asked for), and the scan program `scanner_program`.
     pub fn beside_the_settings_file(scanner_program: PathBuf, settings_file: Option<&std::path::Path>) -> Self {
         Self {
