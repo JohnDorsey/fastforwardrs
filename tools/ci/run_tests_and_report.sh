@@ -34,13 +34,14 @@ annotate() {
 
 what_ran() {
     local summary skipped
-    summary=$(grep -E '^test result:' "$log" | sed -E 's/; 0 measured; 0 filtered out//' | head -n 30)
+    # (As many as there are programs of tests: 50 integration test programs and a growing number, and each line is about 75 characters. An annotation can be 64 KB.)
+    summary=$(grep -E '^test result:' "$log" | sed -E 's/; 0 measured; 0 filtered out//' | head -n 150)
     if [ "$output_of_passing_tests_is_kept" = yes ]; then
         skipped=$(grep -c 'SKIPPED' "$log")
     else
         skipped="not counted, because cargo does not show what the tests that pass print (--nocapture does)"
     fi
-    annotate "$(printf '%s\nlines that say SKIPPED: %s' "$summary" "$skipped" | head -c 3000)" notice "$title (what ran)"
+    annotate "$(printf '%s\nlines that say SKIPPED: %s' "$summary" "$skipped" | head -c 14000)" notice "$title (what ran)"
 }
 
 if "$@" 2>&1 | tee "$log"; then

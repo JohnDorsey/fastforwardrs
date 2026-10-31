@@ -6,6 +6,11 @@
 #
 # What "supported" means per platform (decision Q-19): Windows and Linux: the whole suite passes. macOS: it builds and the headless
 # tests pass (nobody here can look at the window on a Mac).
+#
+# Jobs (2026-10-31, after the times of run 172 were read through the API: Windows 48 min, Ubuntu 22, macOS 26): the Windows column is three jobs that run side by
+# side (the unit tests, and the integration tests in two halves chosen by tools/ci/select_integration_tests.sh), because its integration tests alone took 32 minutes
+# (tests of the picture engine and of the export on a software adapter, 3 to 5 times slower there than on Ubuntu). Ubuntu and macOS are one job each. Every step runs the
+# same commands as before; what a job leaves to another is written on the step as `if:`.
 name: CI
 
 on:
@@ -19,14 +24,22 @@ env:
 
 jobs:
   checks:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        # `part` says what a job does: `all` (everything), `unit` (format, clippy, library and host tests) or `integration` (the programs of tests in tests/, the steps that
+        # need ffmpeg, the downloads). `integration_tests` says which programs of tests/ the job runs (tools/ci/select_integration_tests.sh): all of them, or the first or the
+        # second half. One entry on each line: tools/ci/test_select_integration_tests.py reads them and checks that no half is left out.
+        include:
+          - { name: "windows-latest (unit tests)", os: windows-latest, part: unit }
+          - { name: "windows-latest (integration tests, first half)", os: windows-latest, part: integration, integration_tests: first }
+          - { name: "windows-latest (integration tests, second half)", os: windows-latest, part: integration, integration_tests: second }
+          - { name: "ubuntu-latest", os: ubuntu-latest, part: all, integration_tests: all }
+          - { name: "macos-latest", os: macos-latest, part: all, integration_tests: all }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -76,15 +89,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Format
+        if: matrix.part != 'integration'
         run: cargo fmt --all --check
 
       - name: Clippy
+        if: matrix.part != 'integration'
         # (The whole workspace: the editor, and beside it `ladspa-host`, the only crate with unsafe code in it, and the plugin library written for the tests.)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       # Every test step goes through tools/ci/run_tests_and_report.sh, which also writes the names of the tests that failed (and what they said) as an annotation of
       # the job: annotations can be read without signing in to GitHub, the log cannot.
       - name: Library tests
+        if: matrix.part != 'integration'
         shell: bash
         env:
           # The tests of the picture engine draw on a software graphics adapter (WARP on Windows, lavapipe on Ubuntu, which is installed above). Where there
@@ -94,40 +110,35 @@ jobs:
 
       # The host of LADSPA plugins loads the plugin library that is written for the tests (it is built beside the tests), and a copy of it that is made bad in four ways.
       - name: Plugin host tests
+        if: matrix.part != 'integration'
         shell: bash
         run: bash tools/ci/run_tests_and_report.sh error "Plugin host tests that failed" cargo test -p ladspa-host --no-fail-fast
 
       # The host of CLAP plugins (over clack) loads the CLAP plugin library that is written for the tests (built beside the tests): eleven plugins, three of which misbehave on purpose.
       - name: CLAP host tests
+        if: matrix.part != 'integration'
         shell: bash
         run: bash tools/ci/run_tests_and_report.sh error "CLAP host tests that failed" cargo test -p clap-host --no-fail-fast
 
       # The integration tests need ffmpeg 9 or newer (the version the program is tested against); on a runner whose ffmpeg is older they say so and do not run.
       - name: Integration tests
-        if: ${{ steps.ffmpeg.outputs.major >= 9 }}
+        if: ${{ matrix.part != 'unit' && steps.ffmpeg.outputs.major >= 9 }}
         shell: bash
         env:
           # The export is made by the picture engine, which the tests run on a software graphics adapter (see the step above). Where there is one, the tests of the
           # export must run: a missing adapter is a failure there and not a quiet skip.
           FASTFORWARDRS_REQUIRE_SOFTWARE_ADAPTER: ${{ runner.os == 'macOS' && '0' || '1' }}
         run: |
-          # All of them but the ones that measure real time and the ones about what ffmpeg itself does, which have steps of their own.
-          separate="application_playback application_sound media_ffmpeg_quirks sound_engine_real_time"
-          selection=""
-          for file in tests/*.rs; do
-            name=$(basename "$file" .rs)
-            case " $separate " in
-              *" $name "*) ;;
-              *) selection="$selection --test $name" ;;
-            esac
-          done
+          # All of them but the ones that measure real time and the ones about what ffmpeg itself does, which have steps of their own; or one half of them
+          # (tools/ci/select_integration_tests.sh, which also keeps the two halves from losing a program).
+          selection=$(bash tools/ci/select_integration_tests.sh ${{ matrix.integration_tests }})
           FASTFORWARDRS_REQUIRE_FFMPEG=1 bash tools/ci/run_tests_and_report.sh error "Integration tests that failed" cargo test --no-fail-fast $selection
 
       # Sound without a gap and a picture on time are measured against the clock. A runner with two or three slow processors cannot be asked to pass them (the first CI runs
       # of Windows and macOS failed them while Ubuntu passed; on the maintainer's computer they pass, also with 24 busy processes running beside them), so here they run one at a
       # time and a failure is reported as a WARNING, with the names, and does not make the build red.
       - name: Integration tests that depend on real time (failures are warnings)
-        if: ${{ steps.ffmpeg.outputs.major >= 9 }}
+        if: ${{ matrix.part != 'unit' && matrix.integration_tests != 'second' && steps.ffmpeg.outputs.major >= 9 }}
         shell: bash
         run: FASTFORWARDRS_REQUIRE_FFMPEG=1 bash tools/ci/run_tests_and_report.sh warning "Real-time tests that failed" cargo test --no-fail-fast --test application_playback --test application_sound --test sound_engine_real_time -- --test-threads=1
 
@@ -135,7 +146,7 @@ jobs:
       # last column of a picture that is 65 across and 48 down with no colour and not opaque. That is not the program's to mend, and the preview that does not use ffmpeg for
       # the colours does not have it, so a failure is a WARNING that says what was found, and does not make the build red.
       - name: Integration tests of what ffmpeg itself does on this system (failures are warnings)
-        if: ${{ steps.ffmpeg.outputs.major >= 9 }}
+        if: ${{ matrix.part != 'unit' && matrix.integration_tests != 'second' && steps.ffmpeg.outputs.major >= 9 }}
         shell: bash
         run: FASTFORWARDRS_REQUIRE_FFMPEG=1 bash tools/ci/run_tests_and_report.sh warning "ffmpeg's own behaviour found" cargo test --no-fail-fast --test media_ffmpeg_quirks
 
@@ -191,6 +202,7 @@ jobs:
       # Which graphics adapters the runner has, written as an annotation of the job (annotations can be read without signing in). The export is made by the picture
       # engine, so whether a runner has an adapter that is not a software one (a Mac: Metal on a virtual GPU?) decides whether the export can be tested on it.
       - name: Show the graphics adapters
+        if: ${{ matrix.part != 'unit' && matrix.integration_tests != 'second' }}
         shell: bash
         continue-on-error: true
         run: |
@@ -198,7 +210,7 @@ jobs:
           echo "::notice title=Graphics adapters of the runner ($RUNNER_OS)::${list:-none listed}"
 
       - name: Integration tests were not run
-        if: ${{ steps.ffmpeg.outputs.major < 9 }}
+        if: ${{ matrix.part != 'unit' && steps.ffmpeg.outputs.major < 9 }}
         run: |
           echo "::warning::ffmpeg ${{ steps.ffmpeg.outputs.major }} is older than 9, so the integration tests were not run"
 
@@ -212,8 +224,8 @@ jobs:
     name: tools (python)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Unit tests of the mutation tool (the end-to-end ones need a Rust toolchain and are run locally)
@@ -234,7 +246,7 @@ jobs:
     name: licences (REUSE, cargo-deny, third-party notices)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Every file has a licence (REUSE 3.3)
         uses: fsfe/reuse-action@v5

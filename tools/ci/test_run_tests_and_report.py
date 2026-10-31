@@ -95,6 +95,19 @@ class WhatRanTests(unittest.TestCase):
         self.assertIn("2 passed", notice)
         self.assertIn("15 passed; 0 failed; 1 ignored", notice)
 
+    def test_the_result_lines_of_all_the_programs_of_tests_are_written_and_not_only_the_first_thirty(self):
+        # Regression test: the notice stopped after 30 programs while the integration tests are 50, so the times of the last 20 were written nowhere that could be read
+        # without signing in to GitHub (found while choosing how to cut the Windows column of the CI in parts that run side by side).
+        lines = [
+            f"test result: ok. {number} passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in {number}.0s" for number in range(1, 61)
+        ]
+        done = run_the_helper("error", *a_command_that_prints(*lines))
+        self.assertEqual(done.status, 0)
+        notice = done.message_of("notice", THE_TITLE_OF_WHAT_RAN)
+        self.assertEqual(notice.count("test result:"), 60)
+        self.assertIn("60 passed; 0 failed; 0 ignored; finished in 60.0s", notice)
+        self.assertIn("lines that say SKIPPED", notice)  # (the line after the results is not cut off either)
+
 
 class SkippedLinesTests(unittest.TestCase):
     """A test that skips itself passes, and the only way to tell it from one that ran is the line that says SKIPPED."""
