@@ -65,6 +65,18 @@ pub fn quieter(ui: &Ui, text: impl Into<String>) -> RichText {
 mod tests {
     use super::*;
 
+    /// What the guidelines for text on a screen (WCAG 2, level AA) ask for text of an ordinary size. It is written as the number it is and not as `LEAST_CONTRAST`, so that a
+    /// constant that is made lower is noticed (a planted mistake of that kind got through tests that compared the text with the constant).
+    const WHAT_THE_GUIDELINES_ASK_FOR: f32 = 4.5;
+
+    #[test]
+    fn the_least_contrast_is_what_the_guidelines_for_text_on_a_screen_ask_for() {
+        assert!(
+            (LEAST_CONTRAST - WHAT_THE_GUIDELINES_ASK_FOR).abs() < f32::EPSILON,
+            "{LEAST_CONTRAST}"
+        );
+    }
+
     #[test]
     fn the_quieter_text_is_readable_against_the_background_of_a_dark_window_and_of_a_light_one_and_is_quieter_than_the_text()
      {
@@ -74,7 +86,7 @@ mod tests {
             let quieter = quieter_text_colour(text, background);
 
             assert!(
-                contrast(quieter, background) >= LEAST_CONTRAST - 0.01,
+                contrast(quieter, background) >= WHAT_THE_GUIDELINES_ASK_FOR - 0.01,
                 "{quieter:?} on {background:?}: {}",
                 contrast(quieter, background)
             );
@@ -88,7 +100,7 @@ mod tests {
         let weak = visuals.weak_text_color();
 
         assert!(
-            contrast(weak, visuals.window_fill) < LEAST_CONTRAST,
+            contrast(weak, visuals.window_fill) < WHAT_THE_GUIDELINES_ASK_FOR,
             "weak text has {}",
             contrast(weak, visuals.window_fill)
         );
@@ -102,7 +114,7 @@ mod tests {
 
         let quieter = quieter_text_colour(Color32::BLACK, Color32::WHITE);
         assert_ne!(quieter, Color32::BLACK);
-        assert!(contrast(quieter, Color32::WHITE) >= LEAST_CONTRAST - 0.01);
+        assert!(contrast(quieter, Color32::WHITE) >= WHAT_THE_GUIDELINES_ASK_FOR - 0.01);
         assert!(contrast(quieter, Color32::WHITE) < 6.0, "it is as quiet as it may be");
     }
 

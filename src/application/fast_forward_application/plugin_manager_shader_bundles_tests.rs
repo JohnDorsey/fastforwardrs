@@ -445,6 +445,10 @@ fn the_text_drawn(window: &Window) -> Vec<(f32, egui::Color32)> {
     found
 }
 
+/// What the guidelines for text on a screen (WCAG 2, level AA) ask for text of an ordinary size: 4.5 to 1. It is written here as the number it is and not as the constant of the
+/// program, so that a constant that is made lower is noticed (a planted mistake of exactly that kind got through a test that compared the text with the constant).
+const WHAT_THE_GUIDELINES_ASK_FOR: f32 = 4.5;
+
 #[test]
 fn the_text_of_the_bundles_tab_is_all_of_one_size_and_none_of_it_is_hard_to_read_against_the_window() {
     let _alone = the_installed_plugins_to_myself();
@@ -464,7 +468,7 @@ fn the_text_of_the_bundles_tab_is_all_of_one_size_and_none_of_it_is_hard_to_read
         for (_, colour) in &text {
             assert!(
                 crate::application::plugin_manager_text::contrast(*colour, background)
-                    >= crate::application::plugin_manager_text::LEAST_CONTRAST - 0.1,
+                    >= WHAT_THE_GUIDELINES_ASK_FOR - 0.1,
                 "{title}: text of {colour:?} on {background:?} is hard to read ({})",
                 crate::application::plugin_manager_text::contrast(*colour, background)
             );
@@ -490,6 +494,43 @@ fn a_tab_says_how_many_of_its_sets_are_fetched_out_of_how_many_there_are_and_the
         "the sets that are fetched are counted"
     );
     assert!(is_shown(&window, "Sound plugins (0/1)"), "and the others are not");
+}
+
+#[test]
+fn a_tab_that_was_chosen_and_is_not_there_any_more_gives_way_to_the_first_tab_and_not_to_nothing() {
+    // (Found by a planted mistake that left the fallback out: nothing had chosen a tab and then made it go away.)
+    let _alone = the_installed_plugins_to_myself();
+    let (mut window, _plugins, _shaders) = window_on_the_bundles_tab(the_fake_fetcher());
+    window.do_this(Command::PluginManager(PluginManagerCommand::SelectBundleKind(
+        BundleKind::Shaders,
+    )));
+    window.settle();
+    assert!(
+        shows_containing(&window, "Download all shaders ("),
+        "the shaders are chosen"
+    );
+
+    window
+        .application_mut()
+        .environment
+        .plugin_search
+        .bundles
+        .shader_manifest = Some(ShaderManifest {
+        format: 1,
+        sets: Vec::new(),
+    });
+    window.settle();
+    window.settle();
+
+    assert!(!shows_containing(&window, "Shaders ("), "their tab is gone");
+    assert!(
+        shows_containing(&window, "Sound plugins ("),
+        "the other tab is still there"
+    );
+    assert!(
+        shows_containing(&window, "Download all ("),
+        "and what is shown is the first tab, with its button, and not nothing"
+    );
 }
 
 #[test]
