@@ -180,6 +180,8 @@ pub(super) struct Interface {
     pub(super) plugin_manager_open: bool,
     /// Which tab of that window is showing.
     pub(super) plugin_manager_tab: crate::application::plugin_manager_window::PluginManagerTab,
+    /// Which kind of download the *Bundles* tab of the plugin manager shows.
+    pub(super) plugin_manager_bundle_kind: crate::application::plugin_manager_bundles::BundleKind,
     /// The source file whose colours the window of its colour space is open for, if there is one.
     pub(super) colours_of_a_file_window_open_for: Option<SourceMediaIdentifier>,
     pub(super) dialog: Option<Dialog>,
@@ -218,6 +220,7 @@ impl Interface {
             plugin_editors: super::plugin_editor_flow::PluginEditors::default(),
             plugin_manager_open: false,
             plugin_manager_tab: crate::application::plugin_manager_window::PluginManagerTab::default(),
+            plugin_manager_bundle_kind: crate::application::plugin_manager_bundles::BundleKind::default(),
             colours_of_a_file_window_open_for: None,
             dialog: startup_dialog,
             missing_sources_warning_open: false,

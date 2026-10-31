@@ -10,6 +10,7 @@ use std::path::Path;
 use egui::{ProgressBar, RichText, Ui};
 
 use super::commands::Command;
+use super::plugin_manager_text::quieter;
 use super::plugin_manager_window::PluginManagerCommand;
 use crate::plugin_bundles::Progress;
 
@@ -30,8 +31,9 @@ pub const NOT_FETCHED_NOTE: &str = "not fetched yet";
 pub const NO_BUILD_FOR_THIS_COMPUTER_NOTE: &str = "no build for this computer";
 
 /// The kinds of what can be fetched: each has a section of its own in the tab (the data is big, and a person who wants the plugins is not made to fetch it).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BundleKind {
+    #[default]
     SoundPlugins,
     /// Patches, wavetables and presets that plugins find beside themselves.
     PluginData,
@@ -84,6 +86,23 @@ pub struct BundleRow {
     /// Whether there is a build of it for this computer (a set that has none is listed, and is not fetched).
     pub has_build: bool,
     pub is_fetched: bool,
+}
+
+impl BundlesView<'_> {
+    /// How many of the sets that have a build for this computer are fetched, and how many there are: the `(n/m)` of the title of the tab.
+    pub fn fetched_of_available(&self) -> (usize, usize) {
+        let available = self.rows.iter().filter(|row| row.has_build);
+        (
+            available.clone().filter(|row| row.is_fetched).count(),
+            available.count(),
+        )
+    }
+
+    /// The title of the tab of this kind: `Sound plugins (2/4)`.
+    pub fn tab_title(&self) -> String {
+        let (fetched, available) = self.fetched_of_available();
+        format!("{} ({fetched}/{available})", self.kind.heading())
+    }
 }
 
 /// What is going on with the download.
@@ -149,9 +168,28 @@ pub fn question(view: &BundlesView<'_>) -> String {
     )
 }
 
+/// The tabs of the kinds of what can be fetched, side by side, and the one that is selected below them. A kind with nothing to fetch (`views` leaves it out) has no tab; if `selected` is
+/// one of those, the first tab is shown.
+pub fn show_tabs(ui: &mut Ui, views: &[&BundlesView<'_>], selected: BundleKind, commands: &mut Vec<Command>) {
+    let Some(shown) = views.iter().find(|view| view.kind == selected).or(views.first()) else {
+        return;
+    };
+    ui.horizontal(|ui| {
+        for view in views {
+            if ui.selectable_label(view.kind == shown.kind, view.tab_title()).clicked() && view.kind != shown.kind {
+                commands.push(Command::PluginManager(PluginManagerCommand::SelectBundleKind(
+                    view.kind,
+                )));
+            }
+        }
+    });
+    ui.separator();
+    show(ui, shown, commands);
+}
+
+/// One kind: what it is, the button (or the question, or the progress) and then the list.
 pub fn show(ui: &mut Ui, view: &BundlesView<'_>, commands: &mut Vec<Command>) {
-    ui.label(RichText::new(view.kind.heading()).strong());
-    ui.label(RichText::new(view.kind.intro()).weak().small());
+    ui.label(quieter(ui, view.kind.intro()));
     ui.add_space(6.0);
     // (What can be done comes before the list, so that the button, the question and the progress are in view without scrolling.)
     show_the_download(ui, view, commands);
@@ -167,14 +205,10 @@ pub fn show(ui: &mut Ui, view: &BundlesView<'_>, commands: &mut Vec<Command>) {
                 } else {
                     NOT_FETCHED_NOTE
                 };
-                ui.label(RichText::new(note).weak());
+                ui.label(quieter(ui, note));
             });
             ui.label(format!("{} ({})", row.contents, row.licence));
-            ui.label(
-                RichText::new(format!("By {}. Source: {}", row.authors, row.source))
-                    .weak()
-                    .small(),
-            );
+            ui.label(quieter(ui, format!("By {}. Source: {}", row.authors, row.source)));
         });
     }
 }

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use egui_kittest::kittest::Queryable;
 
-use super::sound_plugins_tests::{is_shown, open_the_window, shows_containing};
+use super::sound_plugins_tests::{is_shown, open_the_window, show_the_bundle_tab, shows_containing};
 use super::test_window::Window;
 use crate::application::commands::Command;
 use crate::application::plugin_manager_bundles::{
@@ -19,7 +19,7 @@ use crate::application::plugin_manager_bundles::{
 };
 use crate::application::plugin_manager_window::PluginManagerCommand;
 use crate::plugin_bundles::test_support::{FakeFetcher, a_fixture};
-use crate::plugin_bundles::{CANCELLED, Fetcher, Manifest};
+use crate::plugin_bundles::{CANCELLED, Fetcher, Manifest, SetKind};
 use crate::test_support::the_installed_plugins_to_myself;
 
 /// A window with its plugin manager open on the *Bundles* tab, the manifest of `a_fixture` for `windows-x86_64` (whatever this system is), a folder of its own to put plugins in,
@@ -302,11 +302,15 @@ fn the_manifest_in_the_program_is_what_the_tab_lists_when_nothing_is_put_in_its_
     window.harness.get_by_label("Bundles").click();
     window.settle();
 
-    for set in Manifest::embedded().sets {
-        assert!(
-            is_shown(&window, &format!("{} {}", set.name, set.version)),
-            "{}",
-            set.name
-        );
+    // (Each kind has a tab of its own: the sets of plugins are shown first, and the sets of data in the tab of the data.)
+    for (title, kind) in [("Sound plugins", SetKind::Plugins), ("Data for plugins", SetKind::Data)] {
+        show_the_bundle_tab(&mut window, title);
+        for set in Manifest::embedded().sets.into_iter().filter(|set| set.kind == kind) {
+            assert!(
+                is_shown(&window, &format!("{} {}", set.name, set.version)),
+                "{}",
+                set.name
+            );
+        }
     }
 }

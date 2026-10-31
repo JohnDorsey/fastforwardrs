@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 use egui::{Align2, Context, Id, RichText, ScrollArea, Ui, Window, vec2};
 
 use super::commands::Command;
-use super::plugin_manager_bundles::{BundleKind, BundlesView, show as show_bundles};
+use super::plugin_manager_bundles::{BundleKind, BundlesView, show_tabs as show_bundle_tabs};
+use super::plugin_manager_text::quieter;
 use crate::isf::Shape;
 use crate::plugin_scan::{LibraryOutcome, LibraryReport, NotUsed, PluginSearchSettings};
 use crate::shader_files::{FoundShader, ShaderScan};
@@ -51,6 +52,8 @@ pub enum PluginManagerCommand {
     ScanAgain,
     /// Show the other tab.
     SelectTab(PluginManagerTab),
+    /// Show the tab of another kind of download in the *Bundles* tab.
+    SelectBundleKind(BundleKind),
     /// The button of a section of the *Bundles* tab was pressed: the question that comes before the download is shown.
     AskToDownloadBundles(BundleKind),
     CancelAskingToDownloadBundles(BundleKind),
@@ -94,6 +97,8 @@ pub struct PluginManagerView<'a> {
     /// The folder that the *Bundles* tab fetches shaders into (it is one of those too).
     pub fetched_shaders_folder: Option<&'a Path>,
     pub tab: PluginManagerTab,
+    /// Which kind of download the *Bundles* tab shows.
+    pub bundle_kind: BundleKind,
     /// The section of the *Bundles* tab for the sound plugins, the one for the data that plugins use, and the one for the shaders (each of the last two is not shown if the program has
     /// nothing of its kind to fetch).
     pub bundles: BundlesView<'a>,
@@ -146,17 +151,14 @@ fn show_contents(ui: &mut Ui, view: &PluginManagerView<'_>, commands: &mut Vec<C
     match view.tab {
         PluginManagerTab::Plugins => show_the_plugins_tab(ui, view, commands),
         PluginManagerTab::Bundles => {
-            show_bundles(ui, &view.bundles, commands);
-            if !view.data_bundles.rows.is_empty() {
-                ui.add_space(10.0);
-                ui.separator();
-                show_bundles(ui, &view.data_bundles, commands);
-            }
-            if !view.shader_bundles.rows.is_empty() {
-                ui.add_space(10.0);
-                ui.separator();
-                show_bundles(ui, &view.shader_bundles, commands);
-            }
+            // (A tab for each kind that has something to fetch; the sound plugins are always there.)
+            let mut views = vec![&view.bundles];
+            views.extend(
+                [&view.data_bundles, &view.shader_bundles]
+                    .into_iter()
+                    .filter(|view| !view.rows.is_empty()),
+            );
+            show_bundle_tabs(ui, &views, view.bundle_kind, commands);
         }
     }
 }
@@ -174,11 +176,10 @@ fn show_the_plugins_tab(ui: &mut Ui, view: &PluginManagerView<'_>, commands: &mu
     );
     ui.add_space(8.0);
     ui.label(RichText::new(DEPENDENCY_FOLDERS_HEADING).strong());
-    ui.label(
-        RichText::new("A plugin that needs a library that is not beside it fails to load; name the folders that have such libraries here.")
-            .weak()
-            .small(),
-    );
+    ui.label(quieter(
+        ui,
+        "A plugin that needs a library that is not beside it fails to load; name the folders that have such libraries here.",
+    ));
     show_folders(
         ui,
         "dependency folders",
@@ -294,7 +295,7 @@ fn show_folders(
             } else {
                 "usual"
             };
-            ui.add(egui::Label::new(RichText::new(format!("{} ({kind})", folder.display())).weak()).truncate())
+            ui.add(egui::Label::new(quieter(ui, format!("{} ({kind})", folder.display()))).truncate())
                 .on_hover_text(folder.display().to_string());
         }
         if ui.button(ADD_FOLDER_LABEL).clicked() {

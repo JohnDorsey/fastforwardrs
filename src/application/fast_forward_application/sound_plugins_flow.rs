@@ -672,6 +672,7 @@ impl FastForwardApplication {
             fetched_folder: fetched_folder.as_deref(),
             fetched_shaders_folder: fetched_shaders_folder.as_deref(),
             tab: self.interface.plugin_manager_tab,
+            bundle_kind: self.interface.plugin_manager_bundle_kind,
             bundles,
             data_bundles,
             shader_bundles,
@@ -728,6 +729,7 @@ impl FastForwardApplication {
             }
             PluginManagerCommand::ScanAgain => self.start_scanning_plugins(),
             PluginManagerCommand::SelectTab(tab) => self.interface.plugin_manager_tab = tab,
+            PluginManagerCommand::SelectBundleKind(kind) => self.interface.plugin_manager_bundle_kind = kind,
             PluginManagerCommand::AskToDownloadBundles(kind) => self.ask_whether_to_download_the_bundles(kind),
             PluginManagerCommand::CancelAskingToDownloadBundles(kind) => self.do_not_download_the_bundles(kind),
             PluginManagerCommand::DownloadBundles(kind) => self.download_the_bundles(kind),

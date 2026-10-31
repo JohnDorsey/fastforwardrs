@@ -1368,6 +1368,10 @@ fn write_screenshots_of_the_sound_plugins_window_and_a_plugin_on_a_clip() {
     journey.settle();
     journey.harness.get_by_label("Plugin manager...").click();
     save(&mut journey, &folder, "10_sound_plugins_window");
+    // The Bundles tab: a tab for each kind of download, with the button above the list.
+    journey.harness.get_by_label("Bundles").click();
+    journey.settle();
+    save(&mut journey, &folder, "13_the_bundles_tab_of_the_plugin_manager");
 }
 
 /// A Standard MIDI File of two tracks after the tempo track, a melody and a bass, 8 seconds long, a tick a millisecond.

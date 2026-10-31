@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use egui_kittest::kittest::Queryable;
 
-use super::sound_plugins_tests::{is_shown, open_the_window, shows_containing};
+use super::sound_plugins_tests::{is_shown, open_the_window, show_the_bundle_tab, shows_containing};
 use super::test_window::Window;
 use crate::application::commands::Command;
 use crate::application::plugin_manager_bundles::{
@@ -82,9 +82,10 @@ fn wait_until_the_plugin_download_is_over(window: &mut Window) {
 fn the_tab_has_a_section_of_its_own_for_data_with_its_own_button_and_the_plugins_section_does_not_count_it() {
     let _alone = the_installed_plugins_to_myself();
 
-    let (window, _folder) = window_on_the_bundles_tab_with(the_fake_fetcher(), |_| {});
+    let (mut window, _folder) = window_on_the_bundles_tab_with(the_fake_fetcher(), |_| {});
 
-    assert!(is_shown(&window, "Data for plugins"));
+    assert!(shows_containing(&window, "Data for plugins ("), "a tab of its own");
+    show_the_bundle_tab(&mut window, "Data for plugins");
     assert!(shows_containing(
         &window,
         "Patches, wavetables and presets that plugins use"
@@ -96,9 +97,15 @@ fn the_tab_has_a_section_of_its_own_for_data_with_its_own_button_and_the_plugins
     ));
     assert!(shows_containing(&window, "Download all data ("), "its own button");
     assert!(
-        shows_containing(&window, "Download all ("),
-        "and the plugins' button, not in its place"
+        !shows_containing(&window, "Download all ("),
+        "and not the plugins' button, which is in the tab of the plugins"
     );
+    show_the_bundle_tab(&mut window, "Sound plugins");
+    assert!(
+        shows_containing(&window, "Download all ("),
+        "the plugins' button, not in its place"
+    );
+    assert!(!shows_containing(&window, "Download all data ("));
     let fixture = a_fixture_with_data();
     let data_size = fixture.manifest.sets[0].platforms["windows-x86_64"].size;
     let application = window.application();
@@ -118,11 +125,19 @@ fn the_tab_has_a_section_of_its_own_for_data_with_its_own_button_and_the_plugins
         (data_rows[0].count, data_rows[0].has_build, data_rows[0].is_fetched),
         (1, true, false)
     );
+    show_the_bundle_tab(&mut window, "Data for plugins");
     assert_eq!(
         window.harness.query_all_by_label(NOT_FETCHED_NOTE).count(),
-        3,
-        "two sets of plugins that have a build here, and the data"
+        1,
+        "the data, in the tab that is shown"
     );
+    show_the_bundle_tab(&mut window, "Sound plugins");
+    assert_eq!(
+        window.harness.query_all_by_label(NOT_FETCHED_NOTE).count(),
+        2,
+        "two sets of plugins that have a build here"
+    );
+    assert!(shows_containing(&window, "Sound plugins (0/2)") && shows_containing(&window, "Data for plugins (0/1)"));
 }
 
 #[test]
@@ -140,7 +155,10 @@ fn a_manifest_with_no_data_has_no_section_for_it() {
     window.harness.get_by_label("Bundles").click();
     window.settle();
 
-    assert!(!shows_containing(&window, "Data for plugins"));
+    assert!(
+        !shows_containing(&window, "Data for plugins"),
+        "no tab for what there is nothing of"
+    );
     assert!(!shows_containing(&window, "Download all data ("));
     assert!(shows_containing(&window, "Download all ("));
 }
@@ -151,6 +169,7 @@ fn the_button_of_the_data_asks_first_in_its_own_words_and_nothing_is_downloaded_
     let fetcher = the_fake_fetcher();
     let (mut window, folder) = window_on_the_bundles_tab(fetcher.clone());
 
+    show_the_bundle_tab(&mut window, "Data for plugins");
     window.harness.get_by_label_contains("Download all data (").click();
     window.settle();
 
@@ -158,12 +177,14 @@ fn the_button_of_the_data_asks_first_in_its_own_words_and_nothing_is_downloaded_
     assert!(shows_containing(&window, "from example.org and keep it in"));
     assert!(shows_containing(&window, &folder.path().display().to_string()));
     assert!(is_shown(&window, ASK_YES_LABEL));
+    show_the_bundle_tab(&mut window, "Sound plugins");
     assert!(
         shows_containing(&window, "Download all ("),
         "the plugins' button is still there: the questions do not wait for each other"
     );
     assert!(fetcher.asked().is_empty());
 
+    show_the_bundle_tab(&mut window, "Data for plugins");
     window.harness.get_by_label(ASK_NO_LABEL).click();
     window.settle();
 
@@ -200,6 +221,7 @@ fn yes_fetches_only_the_data_into_a_folder_beside_the_plugins_and_begins_no_scan
         None,
         false,
     );
+    show_the_bundle_tab(&mut window, "Data for plugins");
     window.harness.get_by_label_contains("Download all data (").click();
     window.settle();
 
@@ -235,6 +257,7 @@ fn yes_fetches_only_the_data_into_a_folder_beside_the_plugins_and_begins_no_scan
         "the data is fetched, and the plugins are not"
     );
 
+    show_the_bundle_tab(&mut window, "Sound plugins");
     window.harness.get_by_label_contains("Download all (").click();
     window.settle();
     window.harness.get_by_label(ASK_YES_LABEL).click();
@@ -262,6 +285,7 @@ fn a_data_download_that_fails_says_why_and_leaves_nothing() {
     let mut broken = a_fixture_with_data().files;
     broken.remove("https://example.org/data.zip");
     let (mut window, folder) = window_on_the_bundles_tab(Arc::new(FakeFetcher::new(broken)));
+    show_the_bundle_tab(&mut window, "Data for plugins");
     window.harness.get_by_label_contains("Download all data (").click();
     window.settle();
 
@@ -283,10 +307,8 @@ fn a_computer_with_no_builds_of_the_data_is_told_so_in_its_section_too() {
     window.settle();
     window.settle();
 
-    assert_eq!(
-        window.harness.query_all_by_label(NO_BUILDS_NOTE).count(),
-        2,
-        "plugins and data"
-    );
+    assert_eq!(window.harness.query_all_by_label(NO_BUILDS_NOTE).count(), 1, "plugins");
+    show_the_bundle_tab(&mut window, "Data for plugins");
+    assert_eq!(window.harness.query_all_by_label(NO_BUILDS_NOTE).count(), 1, "and data");
     assert!(!shows_containing(&window, "Download all data ("));
 }

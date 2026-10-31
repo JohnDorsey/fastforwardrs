@@ -460,6 +460,12 @@ fn the_placeholder_of_an_installed_plugin_says_when_its_folder_is_not_trusted_or
 
 // --- the window ---
 
+/// Shows the tab of a kind of download in the *Bundles* tab of the plugin manager: the tabs are called `Sound plugins (0/4)`, `Data for plugins (0/1)`, `Shaders (0/2)`.
+pub(super) fn show_the_bundle_tab(window: &mut Window, title: &str) {
+    window.harness.get_by_label_contains(&format!("{title} (")).click();
+    window.settle();
+}
+
 pub(super) fn open_the_window(window: &mut Window) {
     window.harness.get_by_label("Edit").click();
     window.settle();
@@ -836,6 +842,7 @@ fn the_view<'a>(
         fetched_folder: None,
         fetched_shaders_folder: None,
         tab: crate::application::plugin_manager_window::PluginManagerTab::Plugins,
+        bundle_kind: crate::application::plugin_manager_bundles::BundleKind::SoundPlugins,
         bundles: crate::application::plugin_manager_bundles::BundlesView {
             kind: crate::application::plugin_manager_bundles::BundleKind::SoundPlugins,
             rows: &[],

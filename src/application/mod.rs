@@ -29,6 +29,7 @@ mod mouse_buttons;
 mod naming;
 mod opening;
 pub mod plugin_manager_bundles;
+pub mod plugin_manager_text;
 pub mod plugin_manager_window;
 mod plus_button;
 mod preview_panel;
