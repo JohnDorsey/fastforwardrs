@@ -228,7 +228,10 @@ itself (a test of the real speakers fails by itself when the computer is busy), 
 final run of the tests that noticed; `py -m unittest discover -s tools/mutation_testing` tests the runner itself.
 `tools/ci/run_tests_and_report.sh` is the helper that every test step of the CI goes through: it writes what failed, and what ran (the result line of each program of
 tests, and how many tests said that they were skipped, where the run shows that), as annotations of the job, which can be read without signing in to GitHub;
-`py -m unittest discover -s tools/ci` tests it (they need `bash`).
+`tools/ci/select_integration_tests.sh` says which programs of `tests/` a CI job runs: the Windows column is three jobs that run side by side (the unit tests, and the
+integration tests in a first and a second half), because its integration tests took 32 of its 48 minutes; the first half is the four longest programs by name, and the
+second is every other program, so a program of tests that is added later is run without anyone editing the workflow. `py -m unittest discover -s tools/ci` tests both
+(they need `bash`): the halves are every program between them and none twice, and the programs that have steps of their own are the same in the script and in `ci.yml`.
 
 ## Known limits
 
