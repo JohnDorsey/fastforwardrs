@@ -22,11 +22,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: ""
-  # Full debug information in CI, as before `[profile.dev] debug = "line-tables-only"` in Cargo.toml (which a developer's computer has). **An experiment of 2026-10-31:** on Windows,
-  # the programs of integration tests that start helper programs took 40 to 75 % longer in runs 174 and 175 (the first two with line-tables-only) than in run 173
-  # (plugin_scan_clap 19 s, then 34 and 32; plugin_editor_journey 39, 62, 58; sound_plugins_clap_in_the_sound 168, 272, 241), and the programs that only export did not; Ubuntu
-  # did not change. Whether that is the setting or the runners is not known; this puts CI back as it was, to find out. If the next run is not faster there, take this line out.
-  CARGO_PROFILE_DEV_DEBUG: "2"
 
 jobs:
   checks:
