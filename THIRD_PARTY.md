@@ -12,7 +12,7 @@ source of the ffmpeg that is shipped with a release is to be offered with it (`d
 
 | Licence | Libraries |
 |---|---|
-| [MIT License](#MIT) | 356 |
+| [MIT License](#MIT) | 352 |
 | [Unicode License v3](#Unicode-3.0) | 19 |
 | [Apache License 2.0](#Apache-2.0) | 18 |
 | [GNU General Public License v3.0 or later](#GPL-3.0-or-later) | 5 |
@@ -1525,7 +1525,7 @@ DEALINGS IN THE SOFTWARE.
 ## Boost Software License 1.0 <a id="BSL-1.0"></a>
 
 Used by:
-- clipboard-win 5.4.1 (https://github.com/DoumanAsh/clipboard-win)
+- clipboard-win 5.4.3 (https://github.com/DoumanAsh/clipboard-win)
 
 ```text
 Boost Software License - Version 1.0 - August 17th, 2003
@@ -2955,9 +2955,9 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- cc 1.7.0 (https://github.com/rust-lang/cc-rs)
+- cc 1.10.0 (https://github.com/rust-lang/cc-rs)
 - cfg-if 1.0.5 (https://github.com/rust-lang/cfg-if)
-- find-msvc-tools 0.1.14 (https://github.com/rust-lang/cc-rs)
+- find-msvc-tools 0.1.15 (https://github.com/rust-lang/cc-rs)
 - pkg-config 0.3.34 (https://github.com/rust-lang/pkg-config-rs)
 - scoped-tls 1.0.1 (https://github.com/alexcrichton/scoped-tls)
 
@@ -3029,7 +3029,7 @@ DEALINGS IN THE SOFTWARE.
 Used by:
 - bitflags 1.3.2 (https://github.com/bitflags/bitflags)
 - bitflags 2.13.2 (https://github.com/bitflags/bitflags)
-- log 0.4.34 (https://github.com/rust-lang/log)
+- log 0.4.35 (https://github.com/rust-lang/log)
 - num-traits 0.2.19 (https://github.com/rust-num/num-traits)
 
 ```text
@@ -3064,7 +3064,7 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- uuid 1.28.0 (https://github.com/uuid-rs/uuid)
+- uuid 1.29.0 (https://github.com/uuid-rs/uuid)
 
 ```text
 Copyright (c) 2014 The Rust Project Developers
@@ -3206,7 +3206,7 @@ THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- ordered-float 5.5.0 (https://github.com/reem/rust-ordered-float)
+- ordered-float 5.5.1 (https://github.com/reem/rust-ordered-float)
 
 ```text
 Copyright (c) 2015 Jonathan Reem
@@ -3276,7 +3276,7 @@ DEALINGS IN THE SOFTWARE.
 Used by:
 - unicode-bidi 0.3.18 (https://github.com/servo/unicode-bidi)
 - unicode-segmentation 1.13.3 (https://github.com/unicode-rs/unicode-segmentation)
-- unicode-width 0.2.2 (https://github.com/unicode-rs/unicode-width)
+- unicode-width 0.2.3 (https://github.com/unicode-rs/unicode-width)
 - unicode-xid 0.2.6 (https://github.com/unicode-rs/unicode-xid)
 
 ```text
@@ -3606,7 +3606,7 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- equivalent 1.0.2 (https://github.com/indexmap-rs/equivalent)
+- equivalent 1.0.3 (https://github.com/indexmap-rs/equivalent)
 
 ```text
 Copyright (c) 2016--2023
@@ -4071,7 +4071,7 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- smallvec 1.16.3 (https://github.com/servo/rust-smallvec)
+- smallvec 1.16.4 (https://github.com/servo/rust-smallvec)
 
 ```text
 Copyright (c) 2018 The Servo Project Developers
@@ -4323,41 +4323,6 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- getrandom 0.4.3 (https://github.com/rust-random/getrandom)
-
-```text
-Copyright (c) 2018-2026 The rust-random Project Developers
-Copyright (c) 2014 The Rust Project Developers
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-```
-
-## MIT License <a id="MIT"></a>
-
-Used by:
 - slab 0.4.12 (https://github.com/tokio-rs/slab)
 
 ```text
@@ -4462,7 +4427,7 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- font-types 0.12.6 (https://github.com/googlefonts/fontations)
+- font-types 0.12.7 (https://github.com/googlefonts/fontations)
 - read-fonts 0.41.0 (https://github.com/googlefonts/fontations)
 - skrifa 0.44.0 (https://github.com/googlefonts/fontations)
 
@@ -4702,7 +4667,7 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- yazi 0.2.1 (https://github.com/dfrg/yazi)
+- yazi 0.2.2 (https://github.com/dfrg/yazi)
 
 ```text
 Copyright (c) 2020 Chad Brokaw
@@ -4758,7 +4723,7 @@ SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- litrs 1.0.0 (https://github.com/LukasKalbertodt/litrs)
+- litrs 1.0.1 (https://github.com/LukasKalbertodt/litrs)
 
 ```text
 Copyright (c) 2020 Project Developers
@@ -4792,7 +4757,7 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- memmap2 0.9.11 (https://github.com/RazrFalcon/memmap2-rs)
+- memmap2 0.9.12 (https://github.com/RazrFalcon/memmap2-rs)
 
 ```text
 Copyright (c) 2020 Yevhenii Reizner
@@ -5229,10 +5194,10 @@ DEALINGS IN THE SOFTWARE.
 Used by:
 - zbus 5.19.0 (https://github.com/z-galaxy/zbus/)
 - zbus_macros 5.19.0 (https://github.com/z-galaxy/zbus/)
-- zbus_names 4.3.4 (https://github.com/z-galaxy/zbus/)
+- zbus_names 4.3.5 (https://github.com/z-galaxy/zbus/)
 - zbus_xml 5.2.1 (https://github.com/z-galaxy/zbus/)
-- zvariant 5.15.0 (https://github.com/z-galaxy/zbus/)
-- zvariant_derive 5.15.0 (https://github.com/z-galaxy/zbus/)
+- zvariant 5.15.1 (https://github.com/z-galaxy/zbus/)
+- zvariant_derive 5.15.1 (https://github.com/z-galaxy/zbus/)
 
 ```text
 Copyright (c) 2024 Zeeshan Ali Khan & zbus contributors
@@ -5300,7 +5265,7 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- zcheapstr 1.1.0 (https://github.com/z-galaxy/zcheapstr/)
+- zcheapstr 1.2.0 (https://github.com/z-galaxy/zcheapstr/)
 
 ```text
 Copyright (c) 2026 Zeeshan Ali Khan & zcheapstr contributors
@@ -5364,7 +5329,7 @@ SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- libc 0.2.190 (https://github.com/rust-lang/libc)
+- libc 0.2.191 (https://github.com/rust-lang/libc)
 
 ```text
 Copyright (c) The Rust Project Developers
@@ -5666,8 +5631,8 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- zerocopy-derive 0.8.62 (https://github.com/google/zerocopy)
-- zerocopy 0.8.62 (https://github.com/google/zerocopy)
+- zerocopy-derive 0.8.63 (https://github.com/google/zerocopy)
+- zerocopy 0.8.63 (https://github.com/google/zerocopy)
 
 ```text
 Copyright 2023 The Fuchsia Authors
@@ -5702,7 +5667,8 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- utf8_iter 1.0.4 (https://github.com/hsivonen/utf8_iter)
+- utf8_iter 1.1.0 (https://github.com/hsivonen/utf8_iter)
+- utf_types 1.0.0 (https://github.com/hsivonen/utf_types)
 
 ```text
 Copyright Mozilla Foundation
@@ -5902,7 +5868,7 @@ SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- crc32fast 1.5.2 (https://github.com/srijs/rust-crc32fast)
+- crc32fast 1.5.3 (https://github.com/srijs/rust-crc32fast)
 
 ```text
 MIT License
@@ -6150,7 +6116,7 @@ SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- arboard 3.6.1 (https://github.com/1Password/arboard)
+- arboard 3.7.0 (https://github.com/1Password/arboard)
 
 ```text
 MIT License
@@ -6360,16 +6326,12 @@ Used by:
 - windows-strings 0.5.1 (https://github.com/microsoft/windows-rs)
 - windows-sys 0.52.0 (https://github.com/microsoft/windows-rs)
 - windows-sys 0.59.0 (https://github.com/microsoft/windows-rs)
-- windows-sys 0.60.2 (https://github.com/microsoft/windows-rs)
 - windows-sys 0.61.2 (https://github.com/microsoft/windows-rs)
 - windows-targets 0.52.6 (https://github.com/microsoft/windows-rs)
-- windows-targets 0.53.5 (https://github.com/microsoft/windows-rs)
 - windows-threading 0.2.1 (https://github.com/microsoft/windows-rs)
 - windows 0.62.2 (https://github.com/microsoft/windows-rs)
 - windows_x86_64_gnu 0.52.6 (https://github.com/microsoft/windows-rs)
-- windows_x86_64_gnu 0.53.1 (https://github.com/microsoft/windows-rs)
 - windows_x86_64_msvc 0.52.6 (https://github.com/microsoft/windows-rs)
-- windows_x86_64_msvc 0.53.1 (https://github.com/microsoft/windows-rs)
 
 ```text
 MIT License
@@ -6750,22 +6712,22 @@ Used by:
 - quote 1.0.47 (https://github.com/dtolnay/quote)
 - rustc-hash 1.1.0 (https://github.com/rust-lang-nursery/rustc-hash)
 - rustix 0.38.44 (https://github.com/bytecodealliance/rustix)
-- rustix 1.1.5 (https://github.com/bytecodealliance/rustix)
+- rustix 1.1.6 (https://github.com/bytecodealliance/rustix)
 - serde 1.0.229 (https://github.com/serde-rs/serde)
 - serde_core 1.0.229 (https://github.com/serde-rs/serde)
 - serde_derive 1.0.229 (https://github.com/serde-rs/serde)
-- serde_json 1.0.152 (https://github.com/serde-rs/json)
+- serde_json 1.0.154 (https://github.com/serde-rs/json)
 - serde_repr 0.1.21 (https://github.com/dtolnay/serde-repr)
 - smol_str 0.2.2 (https://github.com/rust-analyzer/smol_str)
-- smol_str 0.3.6 (https://github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str)
+- smol_str 0.3.7 (https://github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str)
 - syn 2.0.119 (https://github.com/dtolnay/syn)
-- syn 3.0.7 (https://github.com/dtolnay/syn)
+- syn 3.0.9 (https://github.com/dtolnay/syn)
 - thiserror-impl 1.0.69 (https://github.com/dtolnay/thiserror)
 - thiserror-impl 2.0.21 (https://github.com/dtolnay/thiserror)
 - thiserror 1.0.69 (https://github.com/dtolnay/thiserror)
 - thiserror 2.0.21 (https://github.com/dtolnay/thiserror)
-- typed-path 0.12.3 (https://github.com/chipsenkbeil/typed-path)
-- unicode-ident 1.0.26 (https://github.com/dtolnay/unicode-ident)
+- typed-path 0.12.4 (https://github.com/chipsenkbeil/typed-path)
+- unicode-ident 1.0.27 (https://github.com/dtolnay/unicode-ident)
 - x11-dl 2.21.0 (https://github.com/AltF02/x11-rs.git)
 - zbus-lockstep-macros 0.5.2 (https://github.com/luukvanderduim/zbus-lockstep)
 - zbus-lockstep 0.5.2 (https://github.com/luukvanderduim/zbus-lockstep)
@@ -7148,7 +7110,7 @@ THE SOFTWARE.
 ## MIT License <a id="MIT"></a>
 
 Used by:
-- webbrowser 1.2.4 (https://github.com/amodm/webbrowser-rs)
+- webbrowser 1.2.6 (https://github.com/amodm/webbrowser-rs)
 
 ```text
 The MIT License (MIT)
@@ -8109,7 +8071,7 @@ DEALINGS IN THE FONT SOFTWARE.
 ## Unicode License v3 <a id="Unicode-3.0"></a>
 
 Used by:
-- unicode-ident 1.0.26 (https://github.com/dtolnay/unicode-ident)
+- unicode-ident 1.0.27 (https://github.com/dtolnay/unicode-ident)
 
 ```text
 UNICODE LICENSE V3
@@ -8157,24 +8119,24 @@ authorization of the copyright holder.
 ## Unicode License v3 <a id="Unicode-3.0"></a>
 
 Used by:
-- icu_collections 2.3.0 (https://github.com/unicode-org/icu4x)
-- icu_locale_core 2.3.0 (https://github.com/unicode-org/icu4x)
-- icu_normalizer 2.3.0 (https://github.com/unicode-org/icu4x)
-- icu_normalizer_data 2.3.0 (https://github.com/unicode-org/icu4x)
-- icu_properties 2.3.0 (https://github.com/unicode-org/icu4x)
-- icu_properties_data 2.3.0 (https://github.com/unicode-org/icu4x)
-- icu_provider 2.3.1 (https://github.com/unicode-org/icu4x)
+- icu_collections 2.4.0 (https://github.com/unicode-org/icu4x)
+- icu_locale_core 2.4.0 (https://github.com/unicode-org/icu4x)
+- icu_normalizer 2.4.0 (https://github.com/unicode-org/icu4x)
+- icu_normalizer_data 2.4.0 (https://github.com/unicode-org/icu4x)
+- icu_properties 2.4.0 (https://github.com/unicode-org/icu4x)
+- icu_properties_data 2.4.0 (https://github.com/unicode-org/icu4x)
+- icu_provider 2.4.0 (https://github.com/unicode-org/icu4x)
 - litemap 0.8.3 (https://github.com/unicode-org/icu4x)
 - potential_utf 0.1.6 (https://github.com/unicode-org/icu4x)
-- tinystr 0.8.4 (https://github.com/unicode-org/icu4x)
+- tinystr 0.8.5 (https://github.com/unicode-org/icu4x)
 - writeable 0.6.4 (https://github.com/unicode-org/icu4x)
 - yoke-derive 0.8.4 (https://github.com/unicode-org/icu4x)
-- yoke 0.8.3 (https://github.com/unicode-org/icu4x)
+- yoke 0.8.4 (https://github.com/unicode-org/icu4x)
 - zerofrom-derive 0.1.8 (https://github.com/unicode-org/icu4x)
 - zerofrom 0.1.8 (https://github.com/unicode-org/icu4x)
 - zerotrie 0.2.5 (https://github.com/unicode-org/icu4x)
-- zerovec-derive 0.11.6 (https://github.com/unicode-org/icu4x)
-- zerovec 0.11.8 (https://github.com/unicode-org/icu4x)
+- zerovec-derive 0.11.7 (https://github.com/unicode-org/icu4x)
+- zerovec 0.11.9 (https://github.com/unicode-org/icu4x)
 
 ```text
 UNICODE LICENSE V3
