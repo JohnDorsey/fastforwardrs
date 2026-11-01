@@ -40,6 +40,7 @@ The top-level [`README.md`](../README.md) is for someone who wants to install th
 | [`engine-phase-13-report.md`](engine-phase-13-report.md) | phase 13 report: what was asked, what exists, what was checked, what the maintainer should know, what is open |
 | [`engine-phase-14-processes-design.md`](engine-phase-14-processes-design.md) | phase 14 design and as built: instruments (and, later, other sound plugins) in processes of their own: the program, the frames, the setting, what it costs |
 | [`engine-phase-14-report.md`](engine-phase-14-report.md) | phase 14 report: what was asked, what exists, what was checked, what the maintainer should know, what is open |
+| [`housekeeping-2026-10-31.md`](housekeeping-2026-10-31.md) | a day of housekeeping: CI from 48 to about 21 minutes and how it was measured, debug information, the minimum Rust version, dead code, the gaps that planted mistakes found, and what is not this repository's to fix (the Windows runners) |
 | [`groups-feature-spec.md`](groups-feature-spec.md) | tags, clip groups and track groups |
 | [`licence-plugin-clarification-draft.md`](licence-plugin-clarification-draft.md) | the options for the plugin clarification (`LICENSE-PLUGIN-CLARIFICATION` is the adopted one) |
 
