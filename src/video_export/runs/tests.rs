@@ -233,7 +233,8 @@ fn a_plan_with_no_video_has_no_runs() {
 /// A mask that is the video `layer`, which is the picture of its track over the frames `first..end` of the timeline.
 fn a_mask_of(layer: Layer, first: u64, end: u64) -> crate::composition::MaskPicture {
     crate::composition::MaskPicture {
-        track: layer.track,
+        which: crate::project::MaskUse::of_a_track(layer.track),
+        layers_behind: 0,
         section: PictureSection {
             first_timeline_frame: first,
             end_timeline_frame: end,

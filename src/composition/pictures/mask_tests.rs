@@ -45,7 +45,13 @@ fn first_clip_of(project: &Project, position: usize) -> ClipId {
 
 /// The tracks of the masks of a section, in order.
 fn tracks_of_the_masks(section: &PictureSection) -> Vec<TrackId> {
-    section.masks.iter().map(|mask| mask.track).collect()
+    section.masks.iter().map(|mask| track_of(mask.which)).collect()
+}
+
+/// The track that a mask is the picture of. (The sources are tracks.)
+fn track_of(which: crate::project::MaskUse) -> TrackId {
+    let crate::project::MaskSource::Track(track) = which.source;
+    track
 }
 
 fn the_shader_operation(section: &PictureSection, at: u64) -> (String, Vec<f32>, Vec<TrackId>) {
@@ -55,7 +61,11 @@ fn the_shader_operation(section: &PictureSection, at: u64) -> (String, Vec<f32>,
             PictureOperation::Shader {
                 key, numbers, masks, ..
             },
-        ] => (key.clone(), numbers.clone(), masks.clone()),
+        ] => (
+            key.clone(),
+            numbers.clone(),
+            masks.iter().map(|used| track_of(*used)).collect(),
+        ),
         other => panic!("one operation of a shader was expected: {other:?}"),
     }
 }
@@ -282,7 +292,7 @@ fn a_number_of_the_effect_of_a_clip_group_that_is_read_from_a_mask_puts_the_mask
         panic!("one operation of a shader was expected: {operations:?}");
     };
     assert!(key.contains("+masks["), "{key}");
-    assert_eq!(masks, &[mask_track]);
+    assert_eq!(masks, &[crate::project::MaskUse::of_a_track(mask_track)]);
     assert_eq!(numbers[4], 0.5, "where the mask has nothing");
 }
 
@@ -358,7 +368,8 @@ fn tracks_that_read_each_other_because_a_clip_was_moved_do_not_make_the_plan_loo
     let second_in_first = &section.masks[0].section;
     for inner in second_in_first.masks.iter() {
         assert_ne!(
-            inner.track, second,
+            track_of(inner.which),
+            second,
             "a track is not its own mask, however far round it is"
         );
     }
@@ -532,4 +543,62 @@ fn two_numbers_of_one_effect_read_from_one_track_are_one_mask_and_from_two_track
     assert_eq!(one_mask.2, [first], "and two numbers of one track are one mask");
     assert_ne!(one_mask.0, key, "and the other shader");
     assert_eq!(tracks_of_the_masks(&plan.sections[0]), [second, first]);
+}
+
+#[test]
+fn the_layers_behind_the_track_of_a_mask_are_counted_and_a_track_that_is_hidden_has_no_layer_to_count() {
+    // Three tracks: the front one is the host (a text, which does not cover the picture: a video that does would leave out the layers behind it, and they would be none to count), the middle
+    // one is the mask (also a text, so that it covers nothing either), and the back one, a video, is behind the mask.
+    let mut project = project_of(vec![
+        vec![(0, text(100))],
+        vec![(0, text(100))],
+        vec![(0, long_video(0, 100, 1))],
+    ]);
+    let (mask_track, back_track, host_clip) = (
+        project.tracks()[1].id(),
+        project.tracks()[2].id(),
+        first_clip_of(&project, 0),
+    );
+    read_from(&mut project, host_clip, 0, mask_track, MaskChannel::Red, 0.5);
+
+    let plan = plan(&project);
+    assert_eq!(plan.sections[0].masks[0].layers_behind, 1, "the back track's layer");
+
+    project.set_track_hidden(back_track, true).unwrap();
+    let plan = super::tests::plan(&project);
+    assert_eq!(
+        plan.sections[0].masks[0].layers_behind, 0,
+        "a hidden track is not in the frame, so it is not behind anything"
+    );
+}
+
+#[test]
+fn two_numbers_that_read_one_track_with_another_setting_of_the_backdrop_read_two_masks_and_the_shader_is_the_same() {
+    let mut project = project_of(vec![vec![(0, long_video(0, 100, 1))], vec![(0, long_video(0, 100, 1))]]);
+    let (mask_track, host_clip) = (project.tracks()[0].id(), first_clip_of(&project, 1));
+    project.set_track_hidden(mask_track, true).unwrap();
+    read_from(&mut project, host_clip, 0, mask_track, MaskChannel::Red, 0.5);
+    let instance = project
+        .chain_of_the_member(Member::Clip(host_clip))
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap()
+        .instance();
+    project
+        .set_driven_value(
+            Member::Clip(host_clip),
+            instance,
+            1,
+            Some(DrivenValue::from_a_track(mask_track, MaskChannel::Red, 4.0).with_the_real_backdrop(false)),
+        )
+        .unwrap();
+
+    let plan = plan(&project);
+
+    let section = &plan.sections[0];
+    assert_eq!(section.masks.len(), 2, "one for each setting");
+    assert!(section.masks[0].which.real_backdrop && !section.masks[1].which.real_backdrop);
+    let (_, _, masks) = the_shader_operation(section, 5);
+    assert_eq!(masks, [mask_track, mask_track]);
 }

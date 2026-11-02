@@ -76,6 +76,27 @@ pub struct DrivenValue {
     pub value_where_nothing: f32,
     /// How the channel's value becomes the place in the range: straight, or by a graph the person drew.
     pub map: MaskMap,
+    /// Whether a **transition** among the effects of the clips of the source **sees the real backdrop**: the tracks behind the source in the frame (`docs/shader-masks-design.md`, 10). While a
+    /// clip of the source has a transition, the mask is then the source over the tracks behind it, as the frame shows it; when it is off the mask is the source on its own and a transition
+    /// is done over nothing. On when a value is first read from a mask.
+    pub real_backdrop: bool,
+}
+
+/// What a mask is: what it is made of, and whether the transitions in it see the real backdrop. **Two values that read the same source with another setting read two masks.**
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MaskUse {
+    pub source: MaskSource,
+    pub real_backdrop: bool,
+}
+
+impl MaskUse {
+    /// The mask of the track `track`, with the transitions seeing the real backdrop (what a value read from a mask has until it is said otherwise).
+    pub fn of_a_track(track: TrackId) -> Self {
+        Self {
+            source: MaskSource::Track(track),
+            real_backdrop: true,
+        }
+    }
 }
 
 impl DrivenValue {
@@ -86,6 +107,21 @@ impl DrivenValue {
             channel,
             value_where_nothing,
             map: MaskMap::Straight,
+            real_backdrop: true,
+        }
+    }
+
+    /// The same value, with the transitions of the source seeing the real backdrop or not.
+    #[must_use]
+    pub fn with_the_real_backdrop(self, real_backdrop: bool) -> Self {
+        Self { real_backdrop, ..self }
+    }
+
+    /// The mask that the value reads.
+    pub fn mask_use(&self) -> MaskUse {
+        MaskUse {
+            source: self.source,
+            real_backdrop: self.real_backdrop,
         }
     }
 
@@ -151,6 +187,17 @@ impl DrivenValues {
         values.extend(driven.map(|driven| (place, driven)));
         values.sort_by_key(|(found, _)| *found);
         Some(Self { values })
+    }
+
+    /// The masks that the values read, each once, in the order they are first met in: the number of a mask among them is the number the shader reads it by.
+    pub fn uses(&self) -> Vec<MaskUse> {
+        let mut uses: Vec<MaskUse> = Vec::new();
+        for (_, driven) in &self.values {
+            if !uses.contains(&driven.mask_use()) {
+                uses.push(driven.mask_use());
+            }
+        }
+        uses
     }
 
     /// The tracks that any of the values is read from, each once, in the order they are first met in.

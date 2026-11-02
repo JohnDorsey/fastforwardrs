@@ -150,7 +150,10 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// **Version 25 added `graph` to a `driven` number**: the graph of line segments that maps the value of the mask's channel to the place in the number's range, as a list of points, each
 /// `[place, height]`, from 2 to 8 of them, the first at the place 0 and the last at the place 1, the places going up and every number in 0 to 1 (left out for the straight line, which is
 /// what a number is until a graph is drawn). A file where the graph is not one is refused with the reason. A file of version 24 has none: every number is mapped straight.
-pub const FILE_FORMAT_VERSION: u32 = 25;
+///
+/// **Version 26 added `real_backdrop` to a `driven` number**: `false` when the transitions among the effects of the clips of the source are done over nothing and not over the tracks behind it
+/// in the frame (written only when it is `false`; a number is read with the real backdrop when it is not said). A file of version 25 has none: every number sees the real backdrop.
+pub const FILE_FORMAT_VERSION: u32 = 26;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;

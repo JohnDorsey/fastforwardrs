@@ -22,11 +22,20 @@ use crate::rgba_picture::RgbaPicture;
 pub fn layers_of_a_section<'a>(
     section: &'a PictureSection,
     frame: TimelineFrameIndex,
+    video: impl FnMut(&Layer, &VisibleVideo) -> VideoInThePicture<'a>,
+    image: impl FnMut(SourceMediaIdentifier) -> (Option<&'a RgbaPicture>, PictureColour),
+) -> Vec<PreviewLayer<'a>> {
+    layers_of(&section.layers, frame, video, image)
+}
+
+/// The layers `layers` as they are at `frame`, as [`layers_of_a_section`] makes them of those of a section.
+fn layers_of<'a>(
+    layers: &'a [Layer],
+    frame: TimelineFrameIndex,
     mut video: impl FnMut(&Layer, &VisibleVideo) -> VideoInThePicture<'a>,
     mut image: impl FnMut(SourceMediaIdentifier) -> (Option<&'a RgbaPicture>, PictureColour),
 ) -> Vec<PreviewLayer<'a>> {
-    section
-        .layers
+    layers
         .iter()
         .map(|layer| PreviewLayer {
             clip: layer.clip,
@@ -67,7 +76,7 @@ pub fn masks_of_a_section<'a>(
         .masks
         .iter()
         .map(|mask| PreviewMask {
-            track: mask.track,
+            which: mask.which,
             layers: layers_of_a_section(
                 &mask.section,
                 frame,
@@ -76,6 +85,17 @@ pub fn masks_of_a_section<'a>(
             ),
             groups: groups_of_a_section(&mask.section, frame),
             masks: masks_of_a_section(&mask.section, frame, &mut *video, &mut *image),
+            // (The layers behind the mask's track are layers of this section: their videos are its own.)
+            behind: layers_of(
+                &section.layers[..mask.layers_behind.min(section.layers.len())],
+                frame,
+                |layer, visible| video(section, layer, visible),
+                &mut *image,
+            ),
+            behind_groups: groups_of_a_section(section, frame)
+                .into_iter()
+                .filter(|group| group.end_layer <= mask.layers_behind)
+                .collect(),
         })
         .collect()
 }

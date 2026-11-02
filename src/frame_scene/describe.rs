@@ -31,7 +31,7 @@ use crate::engine::{
 };
 use crate::media::{CompressedPicture, ThumbnailKey};
 use crate::playback::{SuppliedFrame, SuppliedPicture, colour_for_the_engine};
-use crate::project::{Corner, PictureOperation, SpeedFactor, SpeedIndicatorLayout, TextObject, TrackId};
+use crate::project::{Corner, MaskUse, PictureOperation, SpeedFactor, SpeedIndicatorLayout, TextObject};
 use crate::rgba_picture::RgbaPicture;
 use crate::speed_indicator::{
     SMALLEST_HEIGHT_IN_PIXELS, indicator_aspect_ratio, place_indicator, render_speed_indicator,
@@ -282,13 +282,13 @@ pub fn describe_frame(
 }
 
 /// The groups that the masks read at one place of a frame are, by the track each is the picture of: the layers of the track on its own, as a group the size of the frame.
-type MaskGroups = Vec<(TrackId, GroupDescription)>;
+type MaskGroups = Vec<(MaskUse, GroupDescription)>;
 
 /// The group of the mask made of `track` among `mask_groups`, or one with nothing in it (a track that is being made inside itself has nothing: the value is the call's number there).
-fn group_of_the_mask(mask_groups: &[(TrackId, GroupDescription)], track: TrackId) -> GroupDescription {
+fn group_of_the_mask(mask_groups: &[(MaskUse, GroupDescription)], which: MaskUse) -> GroupDescription {
     mask_groups
         .iter()
-        .find(|(found, _)| *found == track)
+        .find(|(found, _)| *found == which)
         .map_or_else(|| GroupDescription { layers: Vec::new() }, |(_, group)| group.clone())
 }
 
@@ -310,8 +310,26 @@ impl<Supply: PictureSupply> Describer<'_, '_, Supply> {
             .iter()
             .map(|mask| {
                 let inside = self.describe_masks(&mask.masks);
-                let layers = self.describe_layers(&mask.layers, 0, mask.layers.len(), &mask.groups, &inside, None);
-                (mask.track, GroupDescription { layers })
+                // A transition in the mask sees the real backdrop, if it is to: the layers behind the mask's track in the frame are put in the mask first, **only while the track has a
+                // transition** (a mask that has none is the track on its own). (Their own effects that read masks read nothing: the masks that they would read are not described yet.)
+                let has_a_transition = mask.layers.iter().any(|layer| {
+                    layer.operations.iter().any(|operation| {
+                        matches!(
+                            operation,
+                            PictureOperation::Shader {
+                                reads_the_backdrop: true,
+                                ..
+                            }
+                        )
+                    })
+                });
+                let mut layers = if mask.which.real_backdrop && has_a_transition {
+                    self.describe_layers(&mask.behind, 0, mask.behind.len(), &mask.behind_groups, &[], None)
+                } else {
+                    Vec::new()
+                };
+                layers.extend(self.describe_layers(&mask.layers, 0, mask.layers.len(), &mask.groups, &inside, None));
+                (mask.which, GroupDescription { layers })
             })
             .collect()
     }
@@ -325,7 +343,7 @@ impl<Supply: PictureSupply> Describer<'_, '_, Supply> {
         first: usize,
         end: usize,
         groups: &[PreviewGroup],
-        mask_groups: &[(TrackId, GroupDescription)],
+        mask_groups: &[(MaskUse, GroupDescription)],
         symbol: Option<SymbolOnThePreview>,
     ) -> Vec<LayerDescription> {
         let mut layers = Vec::new();
@@ -406,7 +424,7 @@ fn describe_layer(
     colour_of_a_layer_without_a_picture: [u8; 4],
     working: WorkingSpace,
     supply: &mut impl PictureSupply,
-    mask_groups: &[(TrackId, GroupDescription)],
+    mask_groups: &[(MaskUse, GroupDescription)],
 ) -> Option<LayerDescription> {
     let corners = corners_of(layer, picture_size);
     // (A text, a symbol and a thumbnail are sRGB. The picture of a video or of a picture file is what its file says, or what the user says, or what is assumed of it: it
@@ -516,7 +534,7 @@ fn calls_of_the_operations(
     operations: &[PictureOperation],
     working: WorkingSpace,
     supply: &mut impl PictureSupply,
-    mask_groups: &[(TrackId, GroupDescription)],
+    mask_groups: &[(MaskUse, GroupDescription)],
 ) -> (Vec<EffectCall>, Vec<bool>) {
     let mut calls = Vec::with_capacity(operations.len());
     let mut reads_the_backdrop = Vec::with_capacity(operations.len());
@@ -582,7 +600,7 @@ fn call_of_an_operation(
     operation: &PictureOperation,
     working: WorkingSpace,
     supply: &mut impl PictureSupply,
-    mask_groups: &[(TrackId, GroupDescription)],
+    mask_groups: &[(MaskUse, GroupDescription)],
 ) -> Option<EffectCall> {
     if operation.changes_nothing() {
         return None;

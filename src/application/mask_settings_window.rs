@@ -22,6 +22,7 @@ pub const VALUE_WHERE_NOTHING_LABEL: &str = "Where the track has nothing";
 pub const USE_THE_SLIDER_AGAIN_LABEL: &str = "Use the slider again";
 pub const GRAPH_LABEL: &str = "Graph";
 pub const STRAIGHT_LINE_AGAIN_LABEL: &str = "Straight line again";
+pub const REAL_BACKDROP_LABEL: &str = "Transitions see the real backdrop";
 
 /// What the box of the track says while no track is chosen.
 pub const NO_TRACK_CHOSEN_LABEL: &str = "Choose a track";
@@ -140,6 +141,7 @@ pub fn show(context: &Context, open_for: &mut Option<WhichValue>, project: &Proj
                                         value_where_nothing: driven
                                             .map_or(slider_now, |driven| driven.value_where_nothing),
                                         map: driven.map_or(MaskMap::Straight, |driven| driven.map),
+                                        real_backdrop: driven.is_none_or(|driven| driven.real_backdrop),
                                     }));
                                 }
                             }
@@ -193,6 +195,19 @@ pub fn show(context: &Context, open_for: &mut Option<WhichValue>, project: &Proj
                             }));
                         }
                     });
+                    ui.end_row();
+
+                    ui.label("");
+                    let mut sees = driven.is_none_or(|driven| driven.real_backdrop);
+                    let changed = ui
+                        .add_enabled(driven.is_some(), egui::Checkbox::new(&mut sees, REAL_BACKDROP_LABEL))
+                        .on_hover_text(
+                            "While a clip of the track has a transition, the mask is the track over the tracks behind it, as the picture shows it. Off: the transition is done over nothing.",
+                        )
+                        .changed();
+                    if changed && let Some(driven) = driven {
+                        commands.push(set(driven.with_the_real_backdrop(sees)));
+                    }
                     ui.end_row();
 
                     ui.label(VALUE_WHERE_NOTHING_LABEL);

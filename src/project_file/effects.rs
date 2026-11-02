@@ -191,6 +191,13 @@ pub(super) struct DrivenDocument {
     /// in 0 to 1. Left out for the straight line, which is what a value is until a graph is drawn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph: Option<Vec<[f32; 2]>>,
+    /// Whether the transitions of the source see the real backdrop (format 26 and after): `true` when it is not said, which is how a value is first read from a mask; written only when it is `false`.
+    #[serde(default = "is_the_real_backdrop_by_default", skip_serializing_if = "is_true")]
+    pub real_backdrop: bool,
+}
+
+fn is_the_real_backdrop_by_default() -> bool {
+    true
 }
 
 /// What a mask is made of, as a file says it.
@@ -550,6 +557,7 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
                 channel: one.channel.into(),
                 value_where_nothing: one.where_nothing,
                 map,
+                real_backdrop: one.real_backdrop,
             },
         ));
     }
@@ -653,6 +661,7 @@ pub(super) fn effect_documents_of(effects: &Effects, project: &Project) -> Vec<E
                                 source: MaskSourceDocument::Track(u32::try_from(place).ok()?),
                                 channel: one.channel.into(),
                                 where_nothing: one.value_where_nothing,
+                                real_backdrop: one.real_backdrop,
                                 graph: match one.map {
                                     MaskMap::Straight => None,
                                     MaskMap::Graph(graph) => {

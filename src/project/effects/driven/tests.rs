@@ -138,3 +138,21 @@ fn a_track_that_is_gone_takes_the_values_that_were_read_from_it_with_it_and_no_o
         "a track that nothing is read from changes nothing"
     );
 }
+
+#[test]
+fn a_value_sees_the_real_backdrop_until_it_is_said_otherwise_and_two_settings_of_one_track_are_two_masks() {
+    let seeing = from(3, MaskChannel::Red, 0.0);
+    let not_seeing = from(3, MaskChannel::Green, 0.0).with_the_real_backdrop(false);
+
+    assert!(seeing.real_backdrop, "on when a value is first read from a mask");
+    assert_eq!(seeing.mask_use(), MaskUse::of_a_track(track(3)));
+    assert_ne!(seeing.mask_use(), not_seeing.mask_use());
+    let values =
+        DrivenValues::from_places(vec![(0, seeing), (1, not_seeing), (2, from(3, MaskChannel::Blue, 0.0))]).unwrap();
+    assert_eq!(
+        values.uses(),
+        [seeing.mask_use(), not_seeing.mask_use()],
+        "the third reads the first's mask: the same track, the same setting"
+    );
+    assert_eq!(values.tracks(), [track(3)], "and it is one track");
+}

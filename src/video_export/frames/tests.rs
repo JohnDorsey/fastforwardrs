@@ -1655,3 +1655,79 @@ fn the_engine_draws_the_number_that_a_graph_makes_of_the_picture_of_a_hidden_tra
         );
     });
 }
+
+/// Three picture files: a green one at the back that is the whole frame, a red one over it that is the whole frame and has a transition that is half done on its clip, and in front of them a
+/// narrow one with the shader that shows its number as a grey, read from the **green** of the picture of the red one's track, which sees the real backdrop or not.
+fn a_transition_over_a_green_picture_that_a_narrow_picture_in_front_reads(real_backdrop: bool) -> Project {
+    use crate::project::{DrivenValue, EffectKind, MaskChannel, Member};
+    let mut project = Project::empty();
+    for (identifier, width) in [(4, 320), (2, 320), (3, 100)] {
+        project
+            .import_source(picture_source(identifier, width, 180), frame(0))
+            .expect("the picture file goes on a track in front of the others");
+    }
+    let (host_clip, red_track, red_clip) = (
+        project.tracks()[0].placement_at_index(0).unwrap().id,
+        project.tracks()[1].id(),
+        project.tracks()[1].placement_at_index(0).unwrap().id,
+    );
+    let file = crate::isf::read(A_TRANSITION_HALF_DONE).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "half.fs", A_TRANSITION_HALF_DONE)).unwrap();
+    project.add_effect(AnimationTarget::Clip(red_clip), kind).unwrap();
+    let file = crate::isf::read(SHOW_THE_LEVEL).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "level.fs", SHOW_THE_LEVEL)).unwrap();
+    let instance = project.add_effect(AnimationTarget::Clip(host_clip), kind).unwrap();
+    project
+        .set_driven_value(
+            Member::Clip(host_clip),
+            instance,
+            0,
+            Some(DrivenValue::from_a_track(red_track, MaskChannel::Green, 0.0).with_the_real_backdrop(real_backdrop)),
+        )
+        .unwrap();
+    project
+}
+
+#[test]
+fn a_transition_in_a_mask_is_done_over_the_tracks_behind_it_when_it_sees_the_real_backdrop_and_over_nothing_when_it_does_not()
+ {
+    use crate::engine::FrameRenderer;
+    let picture = |colour: [u8; 4]| RgbaPicture {
+        width_in_pixels: 2,
+        height_in_pixels: 2,
+        rgba_pixels: colour.repeat(4),
+    };
+    for (real_backdrop, wanted_green) in [(true, 120_u8), (false, 20)] {
+        let project = a_transition_over_a_green_picture_that_a_narrow_picture_in_front_reads(real_backdrop);
+        let plan = plan_of(&project);
+        let images = HashMap::from([
+            (SourceMediaIdentifier::new(4), picture([0, 200, 0, 255])),
+            (SourceMediaIdentifier::new(2), picture([200, 40, 40, 255])),
+            (SourceMediaIdentifier::new(3), picture([10, 10, 10, 255])),
+        ]);
+        let mut describer = describer_of(&plan, &script_of_pictures(1), images, Box::new(NoFontsYet));
+        let (described, sent) = describe(&mut describer, 10);
+
+        crate::engine::testing::with_software_graphics!(graphics, {
+            let mut renderer = FrameRenderer::new(graphics.device.clone());
+            let (finished, statistics) =
+                rendered_on(&mut renderer, &mut std::collections::HashSet::new(), &described, &sent);
+
+            assert_eq!(statistics.effects_not_run, 0, "real backdrop {real_backdrop}");
+            let (width, height) = (finished.width_in_pixels, finished.height_in_pixels);
+            // The frame: the red picture half way from the green behind it to itself, whatever the setting: (100, 120, 20).
+            let seen = finished.pixel(width / 16, height / 2);
+            assert!(
+                seen[0].abs_diff(100) <= 2 && seen[1].abs_diff(120) <= 2 && seen[2].abs_diff(20) <= 2,
+                "real backdrop {real_backdrop}: the frame is {seen:?}"
+            );
+            // The grey the narrow picture makes of the green of the mask: the green of the frame as it is seen when the mask sees the real backdrop, and a mixture of nothing and the red
+            // picture's own green (40) by the half that it covers when it does not.
+            let grey = finished.pixel(width / 2, height / 2);
+            assert!(
+                grey[..3].iter().all(|level| level.abs_diff(wanted_green) <= 3),
+                "real backdrop {real_backdrop}: the grey is {grey:?}, wanted {wanted_green}"
+            );
+        });
+    }
+}

@@ -93,11 +93,15 @@ impl EffectClock {
     }
 }
 
-/// A mask that the effects of a section read: **the picture of one track on its own**, as the plan makes it of the track alone (whether or not the track's eye is open, and without the
+/// A mask that the effects of a section read: **the picture of its source on its own**, as the plan makes it of the track alone (whether or not the track's eye is open, and without the
 /// effects of the groups it is in), with the masks that its own effects read.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MaskPicture {
-    pub track: TrackId,
+    /// What the mask is made of, and whether the transitions in it see the real backdrop.
+    pub which: crate::project::MaskUse,
+    /// How many of the layers of the section that has the mask, from the back, are **behind the source in the frame** (the layers of the tracks behind its track): what a transition in the
+    /// mask sees as the real backdrop, if `which` says it does. (The layers of the pieces of a section are the same, so it is the same for each.)
+    pub layers_behind: usize,
     /// The stretch of the timeline, which contains the frames of the section that has the mask and may be longer, over which the track's picture is made of the same layers. (A video that
     /// the track shows is one range of source frames over the whole of it, however many pieces the section that has it is cut into: nothing makes its stream of pictures start again.)
     pub section: PictureSection,
@@ -316,21 +320,18 @@ fn imported_pictures_of(effect: &LayerEffect) -> Vec<ImportedPicture> {
 /// The key that the engine has the shader of `effect` under, the tracks of the masks it reads in the order it numbers them, and the numbers of the graphs that map its numbers (after the numbers
 /// of all its inputs, in the order of the numbers): for a shader whose numbers are all on their sliders, its own key and none; for one that has a number read from a mask, the key of the
 /// shader that does that (made, and given to the engine, if it was not). `None` if that shader cannot be made.
-fn shader_and_masks_of(effect: &LayerEffect) -> Option<(String, Vec<TrackId>, Vec<f32>)> {
+fn shader_and_masks_of(effect: &LayerEffect) -> Option<(String, Vec<crate::project::MaskUse>, Vec<f32>)> {
     if effect.driven.is_empty() {
         return Some((effect.kind.key().to_owned(), Vec::new(), Vec::new()));
     }
-    let tracks = effect.driven.tracks();
+    let uses = effect.driven.uses();
     let mut inputs: Vec<crate::isf::DrivenInput> = Vec::new();
     let mut graph_numbers: Vec<f32> = Vec::new();
     for (slot, driven) in effect.driven.iter() {
         let Some(parameter) = effect.kind.parameters().get(slot) else {
             continue;
         };
-        let Some(mask) = tracks
-            .iter()
-            .position(|track| driven.source.tracks().any(|source| source == *track))
-        else {
+        let Some(mask) = uses.iter().position(|used| *used == driven.mask_use()) else {
             continue;
         };
         inputs.push(crate::isf::DrivenInput {
@@ -343,7 +344,7 @@ fn shader_and_masks_of(effect: &LayerEffect) -> Option<(String, Vec<TrackId>, Ve
         graph_numbers.extend(driven.map.numbers_of_the_call().into_iter().flatten());
     }
     let key = crate::isf::driven_variant_of(effect.kind.descriptor(), &inputs)?;
-    Some((key, tracks, graph_numbers))
+    Some((key, uses, graph_numbers))
 }
 
 /// What `effects` do to a picture at `timeline_frame`, one after another in the order they are applied in. An effect that does nothing at the frame is left out, and neighbouring

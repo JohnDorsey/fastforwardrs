@@ -121,10 +121,15 @@ pub struct PreviewGroup {
 
 /// A mask that the effects of a frame read (`docs/shader-masks-design.md`): the picture of one track on its own, as layers, with the masks that those layers read.
 pub struct PreviewMask<'a> {
-    pub track: TrackId,
+    /// What the mask is made of, and whether the transitions in it see the real backdrop.
+    pub which: crate::project::MaskUse,
     pub layers: Vec<PreviewLayer<'a>>,
     pub groups: Vec<PreviewGroup>,
     pub masks: Vec<PreviewMask<'a>>,
+    /// The layers of the frame that are behind the mask's track in it, the one at the back first, and the groups that are wholly among them: **the real backdrop**, which a transition in the
+    /// mask sees if `which` says so (and which the mask is put over only while one is done: a mask that has no transition is the track on its own).
+    pub behind: Vec<PreviewLayer<'a>>,
+    pub behind_groups: Vec<PreviewGroup>,
 }
 
 /// The fast-forward symbol: shown over the layer of this clip, which is the front-most video.

@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::engine::{CORNERS_OF_THE_WHOLE_PICTURE, FrameColour, GroupDescription, LayerSource};
-use crate::project::{CanvasArea, SpeedIndicatorLayout};
+use crate::project::{CanvasArea, MaskUse, SpeedIndicatorLayout};
 
 /// A supply that has every picture.
 struct HasEverything;
@@ -26,7 +26,8 @@ fn a_picture() -> RgbaPicture {
     }
 }
 
-fn the_shader(key: &str, masks: Vec<TrackId>) -> PictureOperation {
+fn the_shader(key: &str, tracks: Vec<TrackId>) -> PictureOperation {
+    let masks = tracks.into_iter().map(MaskUse::of_a_track).collect();
     PictureOperation::Shader {
         key: key.to_owned(),
         numbers: vec![0.0, 0.0, 0.0, 0.0, 0.25],
@@ -60,10 +61,12 @@ fn a_layer<'a>(
 
 fn a_mask<'a>(track: u32, layers: Vec<PreviewLayer<'a>>, masks: Vec<PreviewMask<'a>>) -> PreviewMask<'a> {
     PreviewMask {
-        track: TrackId::new(track),
+        which: MaskUse::of_a_track(TrackId::new(track)),
         layers,
         groups: Vec::new(),
         masks,
+        behind: Vec::new(),
+        behind_groups: Vec::new(),
     }
 }
 
@@ -266,4 +269,61 @@ fn a_frame_with_no_masks_is_described_as_it_always_was() {
         with_none.layers, with_a_mask_nothing_reads.layers,
         "a mask that no effect reads changes nothing about the layers"
     );
+}
+
+// ---- the real backdrop of a transition in a mask
+
+/// A transition (a shader that reads what is behind its layer) with the key `key`.
+fn a_transition(key: &str) -> PictureOperation {
+    PictureOperation::Shader {
+        key: key.to_owned(),
+        numbers: vec![0.0, 0.0, 0.0, 0.0, 0.5],
+        state: None,
+        images: Vec::new(),
+        reads_the_backdrop: true,
+        masks: Vec::new(),
+    }
+}
+
+/// The layers of the group of the one mask of the host's call, for a mask with a layer that has `operations`, with one layer behind its track, and the real backdrop on or off.
+fn layers_of_the_mask_with(operations: Vec<PictureOperation>, real_backdrop: bool) -> usize {
+    let (picture, in_the_mask, behind) = (a_picture(), a_picture(), a_picture());
+    let host = a_layer(
+        1,
+        1,
+        1,
+        &picture,
+        vec![the_shader("isf:masked+masks[amount=0:Red]", vec![TrackId::new(7)])],
+    );
+    let mut mask = a_mask(7, vec![a_layer(2, 7, 2, &in_the_mask, operations)], Vec::new());
+    mask.which.real_backdrop = real_backdrop;
+    mask.behind = vec![a_layer(3, 8, 3, &behind, Vec::new())];
+    let mut the_host_and_its_mask = the_shader("isf:masked+masks[amount=0:Red]", vec![TrackId::new(7)]);
+    if let PictureOperation::Shader { masks, .. } = &mut the_host_and_its_mask {
+        masks[0].real_backdrop = real_backdrop;
+    }
+    let host = PreviewLayer {
+        operations: vec![the_host_and_its_mask],
+        ..host
+    };
+
+    describe(&the_frame(vec![host], vec![mask], None)).layers[0].effects[0].masks[0]
+        .layers
+        .len()
+}
+
+#[test]
+fn a_mask_with_a_transition_is_put_over_the_layers_behind_its_track_if_the_transitions_see_the_real_backdrop() {
+    // The transition is wrapped in a layer of its own (a group of the clip, and the layer over the whole frame with the transition): the layers behind come first, then that.
+    assert_eq!(layers_of_the_mask_with(vec![a_transition("isf:wipe")], true), 2);
+}
+
+#[test]
+fn a_mask_with_a_transition_is_the_track_on_its_own_if_the_transitions_do_not_see_the_real_backdrop() {
+    assert_eq!(layers_of_the_mask_with(vec![a_transition("isf:wipe")], false), 1);
+}
+
+#[test]
+fn a_mask_with_no_transition_is_the_track_on_its_own_whatever_the_setting_says() {
+    assert_eq!(layers_of_the_mask_with(Vec::new(), true), 1);
 }

@@ -44,7 +44,7 @@ pub use descriptor::{
 };
 pub use driven::{
     DrivenValue, DrivenValues, Graph, LEAST_DISTANCE_BETWEEN_PLACES, MOST_POINTS_OF_A_GRAPH, MaskChannel, MaskMap,
-    MaskSource, NUMBERS_OF_A_GRAPH,
+    MaskSource, MaskUse, NUMBERS_OF_A_GRAPH,
 };
 pub use installed::{
     EffectPreset, InstalledPlugin, PluginAddress, installed_plugin_for, installed_plugins, installed_shaders,

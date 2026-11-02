@@ -12,24 +12,43 @@ use std::collections::{BTreeSet, HashMap};
 
 use super::{Layer, LayerContent, MaskPicture, PicturePlan, PictureSection, Scope, VisibleVideo, plan_pictures_of};
 use crate::project::tracks::TrackId;
-use crate::project::{Project, SourceMediaIdentifier, TimelineFrameIndex};
+use crate::project::{MaskSource, MaskUse, Project, SourceMediaIdentifier, TimelineFrameIndex};
 
-/// The tracks that the effects of the layers and the groups of `section` read their masks from, each once, in the order they are first read in.
-fn tracks_read_by(section: &PictureSection) -> Vec<TrackId> {
-    let mut tracks: Vec<TrackId> = Vec::new();
+/// The masks that the effects of the layers and the groups of `section` read, each once, in the order they are first read in.
+fn masks_read_by(section: &PictureSection) -> Vec<MaskUse> {
+    let mut masks: Vec<MaskUse> = Vec::new();
     let effects = section
         .layers
         .iter()
         .flat_map(|layer| &layer.effects)
         .chain(section.groups.iter().flat_map(|group| &group.effects));
     for effect in effects {
-        for track in effect.driven.tracks() {
-            if !tracks.contains(&track) {
-                tracks.push(track);
+        for used in effect.driven.uses() {
+            if !masks.contains(&used) {
+                masks.push(used);
             }
         }
     }
-    tracks
+    masks
+}
+
+/// The track that a source is the picture of. (Only a track for now.)
+fn track_of(source: MaskSource) -> TrackId {
+    let MaskSource::Track(track) = source;
+    track
+}
+
+/// How many of the layers of `section`, from the back, are behind the track `track` in the frame: those of the tracks that are after it in the project's list (the layers go from the back
+/// to the front, and the tracks from the front to the back).
+fn layers_behind(project: &Project, section: &PictureSection, track: TrackId) -> usize {
+    let Some(place) = project.track_position(track) else {
+        return 0;
+    };
+    section
+        .layers
+        .iter()
+        .take_while(|layer| project.track_position(layer.track).is_some_and(|other| other > place))
+        .count()
 }
 
 /// The part `from..until` of `section` (a stretch inside it): the same layers and groups, each video showing the part of its range that the stretch is.
@@ -73,16 +92,18 @@ pub(super) fn with_the_masks_attached(
     sections: Vec<PictureSection>,
     making: &[TrackId],
 ) -> Vec<PictureSection> {
-    // The picture of each track that is read as a mask, made once.
-    let mut plans: HashMap<TrackId, PicturePlan> = HashMap::new();
+    // The picture of each source that is read as a mask, made once (whether or not the transitions in it see the real backdrop is not a matter of the plan: it is a matter of what the
+    // layers behind are, and those are the section's).
+    let mut plans: HashMap<MaskSource, PicturePlan> = HashMap::new();
     for section in &sections {
-        for track in tracks_read_by(section) {
-            if plans.contains_key(&track) || making.contains(&track) || project.track(track).is_none() {
+        for used in masks_read_by(section) {
+            let track = track_of(used.source);
+            if plans.contains_key(&used.source) || making.contains(&track) || project.track(track).is_none() {
                 continue;
             }
             let inside: Vec<TrackId> = making.iter().copied().chain([track]).collect();
             plans.insert(
-                track,
+                used.source,
                 plan_pictures_of(project, is_usable, Scope::OnlyTrack(track), &inside),
             );
         }
@@ -93,9 +114,9 @@ pub(super) fn with_the_masks_attached(
 
     let mut cut_up = Vec::with_capacity(sections.len());
     for section in sections {
-        let read: Vec<TrackId> = tracks_read_by(&section)
+        let read: Vec<MaskUse> = masks_read_by(&section)
             .into_iter()
-            .filter(|track| plans.contains_key(track))
+            .filter(|used| plans.contains_key(&used.source))
             .collect();
         if read.is_empty() {
             cut_up.push(section);
@@ -103,7 +124,7 @@ pub(super) fn with_the_masks_attached(
         }
         let cuts: BTreeSet<u64> = read
             .iter()
-            .flat_map(|track| &plans[track].sections)
+            .flat_map(|used| &plans[&used.source].sections)
             .flat_map(|mask| [mask.first_timeline_frame, mask.end_timeline_frame])
             .filter(|frame| *frame > section.first_timeline_frame && *frame < section.end_timeline_frame)
             .collect();
@@ -120,11 +141,12 @@ pub(super) fn with_the_masks_attached(
             };
             piece.masks = read
                 .iter()
-                .filter_map(|track| {
-                    plans[track]
+                .filter_map(|used| {
+                    plans[&used.source]
                         .section_at(TimelineFrameIndex::new(from))
                         .map(|mask| MaskPicture {
-                            track: *track,
+                            which: *used,
+                            layers_behind: layers_behind(project, &section, track_of(used.source)),
                             section: mask.clone(),
                         })
                 })

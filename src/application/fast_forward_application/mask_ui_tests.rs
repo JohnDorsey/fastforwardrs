@@ -14,8 +14,8 @@ use super::undo_tests::undo;
 use crate::application::commands::Command;
 use crate::application::mask_graph::{self, place_on_the_screen};
 use crate::application::mask_settings_window::{
-    CHANNEL_LABEL, NO_TRACK_CHOSEN_LABEL, STRAIGHT_LINE_AGAIN_LABEL, TRACK_LABEL, USE_THE_SLIDER_AGAIN_LABEL,
-    VALUE_WHERE_NOTHING_LABEL, WhichValue, name_of_a_channel,
+    CHANNEL_LABEL, NO_TRACK_CHOSEN_LABEL, REAL_BACKDROP_LABEL, STRAIGHT_LINE_AGAIN_LABEL, TRACK_LABEL,
+    USE_THE_SLIDER_AGAIN_LABEL, VALUE_WHERE_NOTHING_LABEL, WhichValue, name_of_a_channel,
 };
 use crate::application::properties_panel::{
     KeyframeButton, keyframe_button_label, label_of_the_thumbnail, mask_button_label,
@@ -512,6 +512,47 @@ fn while_no_track_is_chosen_the_graph_is_shown_and_cannot_be_changed() {
         None,
         "nothing is read from a mask by touching the graph"
     );
+}
+
+// ---- whether the transitions of the mask see the real backdrop
+
+#[test]
+fn the_window_has_the_checkbox_of_the_real_backdrop_which_is_on_until_it_is_turned_off_and_on_again() {
+    let (mut window, clip) = window_with_the_window_of_the_mask_open();
+    assert!(driven_now(&window, clip).unwrap().real_backdrop, "on by default");
+    assert!(is_shown(&window, REAL_BACKDROP_LABEL));
+
+    let checkbox = window.rectangle_of(REAL_BACKDROP_LABEL).center();
+    window.click(checkbox);
+    assert!(!driven_now(&window, clip).unwrap().real_backdrop, "turned off");
+    window.settle();
+    let checkbox = window.rectangle_of(REAL_BACKDROP_LABEL).center();
+    window.click(checkbox);
+    assert!(driven_now(&window, clip).unwrap().real_backdrop, "and on again");
+}
+
+#[test]
+fn turning_the_real_backdrop_off_keeps_the_rest_of_what_the_number_is_read_as() {
+    let (mut window, clip) = window_with_the_window_of_the_mask_open();
+    let before = driven_now(&window, clip).unwrap();
+
+    let checkbox = window.rectangle_of(REAL_BACKDROP_LABEL).center();
+    window.click(checkbox);
+
+    let after = driven_now(&window, clip).unwrap();
+    assert_eq!(after, before.with_the_real_backdrop(false));
+}
+
+#[test]
+fn the_checkbox_of_the_real_backdrop_cannot_be_used_while_no_track_is_chosen() {
+    let (mut window, clip, _) = window_with_the_shader_on_the_video();
+    window.do_this(Command::ShowTheMaskSettings(which(clip)));
+    window.settle();
+
+    let checkbox = window.rectangle_of(REAL_BACKDROP_LABEL).center();
+    window.click(checkbox);
+
+    assert_eq!(driven_now(&window, clip), None);
 }
 
 // ---- the rows of the effects of a group

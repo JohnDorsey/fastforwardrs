@@ -392,3 +392,59 @@ fn an_effect_with_many_values_and_no_graph_is_not_refused_for_want_of_room() {
 
     assert!(project_from_json_text(&saved(&project)).is_ok());
 }
+
+// ---- version 26: whether the transitions of the mask see the real backdrop
+
+#[test]
+fn a_value_that_sees_the_real_backdrop_writes_nothing_of_it_and_one_that_does_not_writes_false() {
+    let (project, ..) = project_with_a_value_read_from_the_front_track();
+    let seeing = as_json(&saved(&project));
+    assert!(
+        the_effect_of_the_back_tracks_first_clip(&seeing)["driven"]["amount"]
+            .get("real_backdrop")
+            .is_none()
+    );
+
+    let (mut project, front, back) = project_with_a_value_read_from_the_front_track();
+    let clip = project.track(back).unwrap().placement_at_index(0).unwrap().id;
+    let instance = project
+        .chain_of_the_member(Member::Clip(clip))
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap()
+        .instance();
+    project
+        .set_driven_value(
+            Member::Clip(clip),
+            instance,
+            0,
+            Some(DrivenValue::from_a_track(front, MaskChannel::Brightness, 0.25).with_the_real_backdrop(false)),
+        )
+        .unwrap();
+    let text = saved(&project);
+    let not_seeing = as_json(&text);
+
+    assert_eq!(
+        the_effect_of_the_back_tracks_first_clip(&not_seeing)["driven"]["amount"]["real_backdrop"],
+        json!(false)
+    );
+    let loaded = project_from_json_text(&text).unwrap();
+    let effect = loaded.tracks()[1].entries()[0].effects().iter().next().unwrap().clone();
+    assert!(!effect.driven_values().iter().next().unwrap().1.real_backdrop);
+    assert_eq!(saved(&loaded), text, "nothing is lost");
+}
+
+#[test]
+fn a_file_of_version_25_has_no_setting_and_every_number_sees_the_real_backdrop() {
+    let (project, ..) = project_with_a_value_read_from_the_front_track();
+    let text = saved(&project);
+    const { assert!(FILE_FORMAT_VERSION >= 26, "the setting came with format 26") };
+    let twenty_five = text.replace(&version_line(FILE_FORMAT_VERSION), &version_line(25));
+
+    let loaded = project_from_json_text(&twenty_five).unwrap();
+
+    let effect = loaded.tracks()[1].entries()[0].effects().iter().next().unwrap().clone();
+    assert!(effect.driven_values().iter().next().unwrap().1.real_backdrop);
+    assert_eq!(saved(&loaded), text);
+}

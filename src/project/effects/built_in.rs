@@ -576,9 +576,9 @@ pub enum PictureOperation {
         state: Option<(u64, u64)>,
         images: Vec<ImportedPicture>,
         reads_the_backdrop: bool,
-        /// The tracks whose pictures are the masks that the shader reads, in the order its numbers are (`docs/shader-masks-design.md`): the first is mask 0 of the call, and so on. The `key`
+        /// The masks that the shader reads, in the order its numbers are (`docs/shader-masks-design.md`): the first is mask 0 of the call, and so on. The `key`
         /// is already the key of the shader that reads them. None for a shader that reads no mask.
-        masks: Vec<crate::project::tracks::TrackId>,
+        masks: Vec<crate::project::MaskUse>,
     },
 }
 
