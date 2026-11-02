@@ -10,6 +10,7 @@ What was measured and with what, for [`../shader-masks-design.md`](../shader-mas
 | `results/matrix_*` | the output of `gpu_cost` for each adapter, each size, and a flat mask (the control: the same value everywhere, and the uniform given the same value) and a ramp |
 | `results/engine_benchmark_*` | the output of the program's own `engine_benchmark` example (`--frames 60 --in-flight 1`, at the size in the name) |
 | `results/decode_of_test_clips.txt` | the time ffmpeg takes to decode a frame of H.264 |
+| `results/engine_mask_scenes_*` | **the engine as built (phase 2, 2026-11-01)**: the program's own `engine_benchmark` (`--frames 60 --in-flight 1`, the adapter and size in the name), whose ladder has two scenes more, *four pictures, a shader that reads no mask* and *the same shader reading a mask*; the difference of the two is what the engine takes for a mask (`../shader-masks-design.md`, 4.4). These are the one set of numbers here that is made by the program and not by a harness of its own, so they can be repeated with `cargo run --release --example engine_benchmark -- --adapter N --size WxH --frames 60 --in-flight 1` |
 
 To repeat: `git archive HEAD` into a folder, apply `rewrite_poc.diff`, add the two files, `cargo test --lib --release poc_write_the_shaders` (it writes the WGSL), then `cargo run --release --example gpu_cost -- AMD 1920x1080 8,32,128,b32 flat` (the first words are part of the adapter's name, the size, the loops (`b32` is the shader with branches), and `flat` or `ramp`).
 

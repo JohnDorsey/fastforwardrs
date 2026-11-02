@@ -435,3 +435,67 @@ fn the_images_a_shader_brings_are_each_one_of_its_pictures_once_and_there_are_no
     );
     assert_eq!(with(vec![ImageSlot::Picture]).imported_images(), 0);
 }
+
+#[test]
+fn a_mask_is_one_of_the_pictures_a_shader_reads_and_each_is_numbered_once() {
+    let with = |images: Vec<ImageSlot>| ShaderStructure {
+        images,
+        buffers: Vec::new(),
+        passes: vec![pass(None)],
+        pass_index_number: None,
+    };
+    let structure = with(vec![ImageSlot::Picture, ImageSlot::Mask(0), ImageSlot::Mask(2)]);
+
+    assert_eq!(structure.masks(), 3, "the number after the largest");
+    assert_eq!(
+        structure.what_each_image_reads(0),
+        [ImageSource::Picture, ImageSource::Mask(0), ImageSource::Mask(2)]
+    );
+    assert_eq!(structure.check(), Ok(()));
+    assert_eq!(ShaderStructure::one_pass_of_one_picture().masks(), 0);
+    let said = with(vec![ImageSlot::Picture, ImageSlot::Mask(1), ImageSlot::Mask(1)])
+        .check()
+        .unwrap_err();
+    assert!(said.contains("mask 1 is two of the pictures"), "{said}");
+    // The largest number there can be is the one before the most pictures there can be.
+    assert_eq!(with(vec![ImageSlot::Mask(MOST_IMAGES_OF_A_SHADER - 1)]).check(), Ok(()));
+    let said = with(vec![ImageSlot::Mask(MOST_IMAGES_OF_A_SHADER)])
+        .check()
+        .unwrap_err();
+    assert!(
+        said.contains("mask") && said.contains("which there cannot be"),
+        "{said}"
+    );
+    // A mask is a picture like any other for the most pictures a shader may read.
+    let too_many = with(
+        (0..MOST_IMAGES_OF_A_SHADER)
+            .map(ImageSlot::Mask)
+            .chain([ImageSlot::Picture])
+            .collect(),
+    );
+    assert!(
+        too_many.check().unwrap_err().contains("pictures"),
+        "{:?}",
+        too_many.check()
+    );
+}
+
+#[test]
+fn an_expression_of_a_size_says_which_numbers_of_the_call_it_reads() {
+    use SizeExpression::{Binary, Function, Negate, Value, Width};
+    let expression = Binary(
+        Operator::Divide,
+        Box::new(Width),
+        Box::new(Function(
+            MathFunction::Max,
+            vec![
+                Value(4),
+                Negate(Box::new(Binary(Operator::Add, Box::new(Value(6)), Box::new(Value(4))))),
+            ],
+        )),
+    );
+
+    assert_eq!(expression.places_of_the_numbers_it_reads(), [4, 6, 4]);
+    assert!(Width.places_of_the_numbers_it_reads().is_empty());
+    assert!(number(3.0).places_of_the_numbers_it_reads().is_empty());
+}

@@ -17,6 +17,9 @@
 //! * **A global is given its initialiser by a generated function that runs before the shader's `main`** (`_isf_set_up_globals`), and not where it is declared: **naga drops the initialiser of a
 //!   global that is not a constant, without a word**, so `float ratio = RENDERSIZE.x / RENDERSIZE.y;` made `ratio` zero. (Found by the corpus of the Vidvox shaders, phase 6.6: Circle Crop was black
 //!   at every progress.) A `const`, an array and a declaration inside a condition of the preprocessor are left alone.
+//! * **A float input can be read from a mask** ([`rewrite_with_driven_inputs`], `docs/shader-masks-design.md`): the input's name stands for a global, `_isf_driven_NAME`, that a generated
+//!   function (`_isf_set_up_driven`) fills in **once per pixel, before anything else of the shader runs**, from one read of the mask picture (one more image of the shader, bound after the
+//!   others). The shader's text is not changed and its uses of the input (in a loop, in an initialiser) are reads of a global, not of the picture.
 //!
 //! What is refused, with the line: a `sampler2D` anywhere in the code (an image is read by its name, in the macros), and brackets nested more deeply than a compiler's stack is known
 //! to take.
@@ -27,6 +30,55 @@ use super::reader::{IsfFile, IsfInputKind, IsfProblem};
 
 /// How many `vec4` the uniform block has: 17, which is 68 numbers: the 64 of a call and the engine's four.
 pub const VEC4S_OF_THE_UNIFORM_BLOCK: usize = 17;
+
+/// What the name of the image of a mask begins with (the number of the mask follows): the image of the mask `n` of a shader is called `_isf_mask_n`. (A name that begins with `_isf_`
+/// is never a shader's own.)
+pub const MASK_IMAGE_PREFIX: &str = "_isf_mask_";
+
+/// The name of the image that the mask with this number is read as.
+pub fn image_name_of_the_mask(number: usize) -> String {
+    format!("{MASK_IMAGE_PREFIX}{number}")
+}
+
+/// Which part of the colour of a mask gives the value of a driven input. All of them are worked out from the **codes** of the colour, the numbers a shader reads, and not from light.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MaskChannel {
+    Red,
+    Green,
+    Blue,
+    /// The luma of the codes, with the weights of Rec. 709: 0.2126 red, 0.7152 green and 0.0722 blue.
+    Brightness,
+}
+
+impl MaskChannel {
+    pub const ALL: [Self; 4] = [Self::Red, Self::Green, Self::Blue, Self::Brightness];
+
+    /// The GLSL that works out this channel from the (premultiplied) colour `colour`, a `vec4`.
+    fn expression_for(self, colour: &str) -> String {
+        match self {
+            Self::Red => format!("{colour}.r"),
+            Self::Green => format!("{colour}.g"),
+            Self::Blue => format!("{colour}.b"),
+            Self::Brightness => format!("dot({colour}.rgb, vec3(0.2126, 0.7152, 0.0722))"),
+        }
+    }
+}
+
+/// A float input of a shader whose value is read, at each pixel, from a **mask**: a picture that the engine draws and the shader is given as one more image. (The slider's own number is
+/// what the input is **where the mask has nothing**; see `rewrite_with_driven_inputs`.)
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DrivenInput {
+    /// The name of the input in the shader.
+    pub name: String,
+    /// Which mask: the masks of a shader are numbered from 0, and inputs may share one.
+    pub mask: usize,
+    pub channel: MaskChannel,
+}
+
+/// A GLSL number for `value` (always with a point or an exponent, so that it is a float).
+fn glsl_float(value: f32) -> String {
+    format!("{value:?}")
+}
 
 /// Where in a call's numbers the inputs of the shader begin (the four before them are the shader's own).
 pub const NUMBERS_BEFORE_THE_INPUTS: usize = 4;
@@ -450,8 +502,105 @@ fn lift_the_initialisers_of_globals(body: &str) -> (String, Vec<(String, String)
     (lifted, assignments)
 }
 
-/// Rewrites the shader of `file`.
+/// A float input that is read from a mask, with what the rewriting step needs of it.
+struct InputReadFromAMask<'file> {
+    name: &'file str,
+    minimum: f32,
+    maximum: f32,
+    /// Which of the numbers of a call is the input's own: the value it has where the mask has nothing.
+    own_number: usize,
+    read_from: &'file DrivenInput,
+}
+
+/// The globals that the inputs read from masks are, and the function that fills them in: each mask is read once (at the pixel being made), and each input is worked out from that one
+/// read. `inputs` are the inputs in the order of the file; `masks` is how many masks there are (each is read from by some input: see [`what_is_wrong_with_the_driven_inputs`]).
+fn function_that_sets_up_the_driven_inputs(inputs: &[InputReadFromAMask<'_>], masks: usize) -> String {
+    let mut text = String::new();
+    for input in inputs {
+        text.push_str(&format!("float _isf_driven_{};\n", input.name));
+    }
+    text.push_str("void _isf_set_up_driven() {\n");
+    for mask in 0..masks {
+        text.push_str(&format!(
+            "    vec4 _isf_mask_{mask}_here = _isf_IMG_NORM_PIXEL__isf_mask_{mask}(isf_FragNormCoord);\n    float _isf_mask_{mask}_cover = _isf_mask_{mask}_here.a;\n"
+        ));
+    }
+    for input in inputs {
+        let (name, mask) = (input.name, input.read_from.mask);
+        let channel = input
+            .read_from
+            .channel
+            .expression_for(&format!("_isf_mask_{mask}_here"));
+        text.push_str(&format!(
+            "    float _isf_unit_of_the_channel_{name} = (_isf_mask_{mask}_cover > 0.0) ? clamp({channel} / _isf_mask_{mask}_cover, 0.0, 1.0) : 0.0;\n    _isf_driven_{name} = mix({own}, {minimum} + {range} * _isf_unit_of_the_channel_{name}, _isf_mask_{mask}_cover);\n",
+            own = number_expression(input.own_number),
+            minimum = glsl_float(input.minimum),
+            range = glsl_float(input.maximum - input.minimum),
+        ));
+    }
+    text.push_str("}\n");
+    text
+}
+
+/// What is wrong with reading the inputs `driven` from masks, if anything is: an input that is not there or is not a float, one that is read twice, one that sets the size of a buffer (a
+/// size is worked out once for the whole picture), a range too wide for a float, and masks that skip a number.
+fn what_is_wrong_with_the_driven_inputs(file: &IsfFile, driven: &[DrivenInput]) -> Option<IsfProblem> {
+    let says = |message: String| Some(IsfProblem::nowhere_in_particular(message));
+    let that_set_a_size = super::structure::inputs_that_set_a_size(file);
+    for (place, one) in driven.iter().enumerate() {
+        let name = &one.name;
+        let Some(input) = file.inputs.iter().find(|input| input.name == *name) else {
+            return says(format!(
+                "the shader has no input called {name}, so there is nothing to read from a mask"
+            ));
+        };
+        let IsfInputKind::Float { minimum, maximum, .. } = input.kind else {
+            return says(format!(
+                "the input {name} is not a number (a float), so it cannot be read from a mask: only a number that can vary smoothly across a picture can"
+            ));
+        };
+        if driven[..place].iter().any(|earlier| earlier.name == *name) {
+            return says(format!("the input {name} is read from a mask twice"));
+        }
+        if that_set_a_size.contains(name) {
+            return says(format!(
+                "the input {name} sets the size of a buffer of the shader, which is worked out once for the whole picture, so it cannot vary across it"
+            ));
+        }
+        if !(maximum - minimum).is_finite() {
+            return says(format!(
+                "the range of the input {name} is too wide for a number to be read from a mask"
+            ));
+        }
+    }
+    let masks = driven.iter().map(|one| one.mask + 1).max().unwrap_or(0);
+    (0..masks)
+        .find(|number| driven.iter().all(|one| one.mask != *number))
+        .and_then(|missing| {
+            says(format!(
+                "mask {} is used and mask {missing} is not: the masks of a shader are numbered from 0, with none left out",
+                masks - 1
+            ))
+        })
+}
+
+/// Rewrites the shader of `file`, with no input read from a mask. (What the tests of the rewriting step call; the program always says which inputs are driven, and none is a list.)
+#[cfg(test)]
 pub fn rewrite(file: &IsfFile) -> Result<Rewritten, IsfProblem> {
+    rewrite_with_driven_inputs(file, &[])
+}
+
+/// Rewrites the shader of `file`, with the float inputs `driven` read from masks.
+///
+/// Each mask is one more image of the shader (named by [`image_name_of_the_mask`]), after the others, and is read **once** at the pixel being made. A mask is premultiplied: its opacity is
+/// how much of the pixel it covers. For an input the **unit** is the channel of the colour with the opacity divided out (0 where nothing covers), and the value is
+/// `mix(the input's own number in the call, MIN + (MAX - MIN) * unit, how much covers)`: so **where the mask has nothing, the input is the number the call has for it** (the engine puts
+/// the value of a slider made for the purpose there), where it has everything the range of the input is spread over the channel, and in between it is a mixture. The map from the unit to
+/// the value is a straight line for now.
+pub fn rewrite_with_driven_inputs(file: &IsfFile, driven: &[DrivenInput]) -> Result<Rewritten, IsfProblem> {
+    if let Some(problem) = what_is_wrong_with_the_driven_inputs(file, driven) {
+        return Err(problem);
+    }
     let code = without_comments(&file.body);
     if let Some((line, column)) = first_use_of(&code, "sampler2D") {
         return Err(IsfProblem::here(
@@ -485,6 +634,10 @@ pub fn rewrite(file: &IsfFile) -> Result<Rewritten, IsfProblem> {
             image_names.push(name);
         }
     }
+    // (The masks come last, so that every image the shader has is where it would be without them.)
+    let images_of_the_shader = image_names.len();
+    let masks = driven.iter().map(|one| one.mask + 1).max().unwrap_or(0);
+    image_names.extend((0..masks).map(image_name_of_the_mask));
 
     let mut notes = Vec::new();
     let mut prelude = String::new();
@@ -499,11 +652,25 @@ pub fn rewrite(file: &IsfFile) -> Result<Rewritten, IsfProblem> {
     ));
     let mut number = NUMBERS_BEFORE_THE_INPUTS;
     let mut names_of_the_shader: HashSet<&str> = HashSet::new();
+    // (The inputs that are read from a mask, in the order of the file.)
+    let mut inputs_read_from_masks: Vec<InputReadFromAMask<'_>> = Vec::new();
     for input in &file.inputs {
         names_of_the_shader.insert(input.name.as_str());
         let n = |offset: usize| number_expression(number + offset);
         let expression = match &input.kind {
-            IsfInputKind::Float { .. } => Some(n(0)),
+            IsfInputKind::Float { minimum, maximum, .. } => match driven.iter().find(|one| one.name == input.name) {
+                Some(read_from) => {
+                    inputs_read_from_masks.push(InputReadFromAMask {
+                        name: &input.name,
+                        minimum: *minimum,
+                        maximum: *maximum,
+                        own_number: number,
+                        read_from,
+                    });
+                    Some(format!("_isf_driven_{}", input.name))
+                }
+                None => Some(n(0)),
+            },
             IsfInputKind::Long { .. } => Some(format!("int({})", n(0))),
             IsfInputKind::Bool { .. } | IsfInputKind::Event => Some(format!("({} != 0.0)", n(0))),
             IsfInputKind::Color { .. } => Some(format!("vec4({}, {}, {}, {})", n(0), n(1), n(2), n(3))),
@@ -548,9 +715,12 @@ pub fn rewrite(file: &IsfFile) -> Result<Rewritten, IsfProblem> {
             n = name
         ));
     }
+    if !inputs_read_from_masks.is_empty() {
+        prelude.push_str(&function_that_sets_up_the_driven_inputs(&inputs_read_from_masks, masks));
+    }
     let prelude_lines = prelude.matches('\n').count() as u32;
 
-    let (body, count) = rewrite_image_calls(&file.body, &image_names);
+    let (body, count) = rewrite_image_calls(&file.body, &image_names[..images_of_the_shader]);
     if count > 0 {
         notes.push(format!("{count} calls of the macros of images were rewritten"));
     }
@@ -600,8 +770,14 @@ pub fn rewrite(file: &IsfFile) -> Result<Rewritten, IsfProblem> {
         glsl.push_str("}\n");
     }
     glsl.push_str(&format!(
-        "\nlayout(location = 0) out vec4 _isf_out;\nvoid main() {{\n    vec4 real = _isf_real_fragcoord();\n    _isf_fragcoord = vec4(real.x, _isf_u[{last}].y - real.y, real.z, real.w);\n    isf_FragNormCoord = vec2(real.x / _isf_u[{last}].x, 1.0 - real.y / _isf_u[{last}].y);\n    _isf_color = vec4(0.0);\n{set_up_call}    _isf_user_main();\n    _isf_out = _isf_color;\n}}\n",
+        "\nlayout(location = 0) out vec4 _isf_out;\nvoid main() {{\n    vec4 real = _isf_real_fragcoord();\n    _isf_fragcoord = vec4(real.x, _isf_u[{last}].y - real.y, real.z, real.w);\n    isf_FragNormCoord = vec2(real.x / _isf_u[{last}].x, 1.0 - real.y / _isf_u[{last}].y);\n    _isf_color = vec4(0.0);\n{driven_call}{set_up_call}    _isf_user_main();\n    _isf_out = _isf_color;\n}}\n",
         last = VEC4S_OF_THE_UNIFORM_BLOCK - 1,
+        // (The inputs read from masks first of all: the initialisers of the globals may use them.)
+        driven_call = if inputs_read_from_masks.is_empty() {
+            ""
+        } else {
+            "    _isf_set_up_driven();\n"
+        },
         set_up_call = if set_up.is_empty() { "" } else { "    _isf_set_up_globals();\n" }
     ));
     Ok(Rewritten {
@@ -614,3 +790,6 @@ pub fn rewrite(file: &IsfFile) -> Result<Rewritten, IsfProblem> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod driven_tests;

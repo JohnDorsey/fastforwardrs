@@ -99,6 +99,10 @@ mod linear_light_tests;
 #[cfg(test)]
 mod lut_tests;
 #[cfg(test)]
+mod mask_plan_tests;
+#[cfg(test)]
+mod mask_tests;
+#[cfg(test)]
 mod multi_pass_tests;
 #[cfg(test)]
 pub(crate) mod oracle_tests;

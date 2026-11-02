@@ -31,6 +31,7 @@ fn call(key: &str, values: Vec<f32>) -> EffectCall {
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     }
 }
 
@@ -143,6 +144,7 @@ fn the_steps_of_a_two_pass_shader_draw_the_buffer_and_then_the_picture_and_say_w
             pass: 0,
             first_step: 0,
             backdrop_step: None,
+            mask_steps: Vec::new(),
             images: 2,
             target_format: TargetFormat::EightBit,
             target_buffer: Some(0),
@@ -159,6 +161,7 @@ fn the_steps_of_a_two_pass_shader_draw_the_buffer_and_then_the_picture_and_say_w
             pass: 1,
             first_step: 0,
             backdrop_step: None,
+            mask_steps: Vec::new(),
             images: 2,
             target_format: TargetFormat::Half,
             target_buffer: None,
@@ -307,6 +310,7 @@ fn the_step_that_makes_the_backdrop_draws_a_picture_the_size_of_the_frame_and_th
             pass: 0,
             first_step: 2,
             backdrop_step: Some(1),
+            mask_steps: Vec::new(),
             images: 2,
             target_format: TargetFormat::Half,
             target_buffer: None,
@@ -394,4 +398,177 @@ fn two_calls_that_read_the_backdrop_each_say_their_own_step() {
         .map(|step| step.shader.as_ref().and_then(|shader| shader.backdrop_step))
         .collect();
     assert_eq!(backdrops, vec![None, Some(0), None, Some(2)]);
+}
+
+/// A filter that reads `masks` masks, in one pass.
+fn a_filter_with_masks(masks: usize) -> Arc<ShaderStructure> {
+    Arc::new(ShaderStructure {
+        images: std::iter::once(ImageSlot::Picture)
+            .chain((0..masks).map(ImageSlot::Mask))
+            .collect(),
+        buffers: Vec::new(),
+        passes: vec![PassSpec {
+            target: None,
+            width: None,
+            height: None,
+        }],
+        pass_index_number: Some(3),
+    })
+}
+
+fn only_the_masked_filter(key: &str) -> Option<Arc<ShaderStructure>> {
+    match key {
+        "test:one_mask" => Some(a_filter_with_masks(1)),
+        "test:two_masks" => Some(a_filter_with_masks(2)),
+        _ => None,
+    }
+}
+
+fn the_mask(call: usize, mask: usize) -> EffectStep {
+    EffectStep::Mask { call, mask }
+}
+
+#[test]
+fn the_step_that_makes_a_mask_draws_a_picture_the_size_of_the_frame_and_the_call_that_reads_it_says_which_steps_those_are()
+ {
+    let effects = [call("test:two_masks", vec![0.0; 4])];
+    let steps = [the_mask(0, 0), the_mask(0, 1), first(0)];
+    let plan = plan_the_steps(
+        &steps,
+        &effects,
+        only_the_masked_filter,
+        base_shape(),
+        (640, 360),
+        frame_shape(),
+        4096,
+    );
+
+    for mask_step in &plan[..2] {
+        assert_eq!(
+            *mask_step,
+            StepPlan {
+                shape: frame_shape(),
+                size: (1280, 720),
+                shader: None
+            },
+            "a mask is as big as the frame, and not as big as the picture the effects work on"
+        );
+    }
+    assert_eq!(plan[2].size, (640, 360));
+    assert_eq!(
+        plan[2].shader,
+        Some(ShaderStep {
+            pass: 0,
+            first_step: 2,
+            backdrop_step: None,
+            mask_steps: vec![0, 1],
+            images: 3,
+            target_format: TargetFormat::Half,
+            target_buffer: None,
+            reads: vec![ImageSource::Picture, ImageSource::Mask(0), ImageSource::Mask(1)],
+        })
+    );
+}
+
+#[test]
+fn each_call_says_the_steps_of_its_own_masks_and_a_call_with_none_says_none() {
+    let effects = [
+        call("test:one_mask", vec![0.0; 4]),
+        call(COLOUR_MATRIX_KEY, vec![]),
+        call("test:two_masks", vec![0.0; 4]),
+    ];
+    let steps = [
+        the_mask(0, 0),
+        first(0),
+        first(1),
+        the_mask(2, 0),
+        the_mask(2, 1),
+        first(2),
+    ];
+    let plan = plan_the_steps(
+        &steps,
+        &effects,
+        only_the_masked_filter,
+        base_shape(),
+        (640, 360),
+        frame_shape(),
+        4096,
+    );
+
+    let mask_steps: Vec<Option<Vec<usize>>> = plan
+        .iter()
+        .map(|step| step.shader.as_ref().map(|shader| shader.mask_steps.clone()))
+        .collect();
+    assert_eq!(
+        mask_steps,
+        vec![None, Some(vec![0]), None, None, None, Some(vec![3, 4])],
+        "the masks of the call 2 are the steps 3 and 4, by the number of the mask"
+    );
+}
+
+#[test]
+fn every_pass_of_a_call_has_the_steps_that_made_its_masks() {
+    let two_passes_and_a_mask = Arc::new(ShaderStructure {
+        images: vec![ImageSlot::Picture, ImageSlot::Mask(0), ImageSlot::Buffer(0)],
+        buffers: vec![BufferSpec {
+            persistent: false,
+            float: true,
+        }],
+        passes: vec![
+            PassSpec {
+                target: Some(0),
+                width: None,
+                height: None,
+            },
+            PassSpec {
+                target: None,
+                width: None,
+                height: None,
+            },
+        ],
+        pass_index_number: Some(3),
+    });
+    let effects = [call("test:two", vec![0.0; 4])];
+    let steps = [the_mask(0, 0), first(0), later(0, 1)];
+    let plan = plan_the_steps(
+        &steps,
+        &effects,
+        |key| (key == "test:two").then(|| Arc::clone(&two_passes_and_a_mask)),
+        base_shape(),
+        (640, 360),
+        frame_shape(),
+        4096,
+    );
+
+    let mask_steps: Vec<Option<Vec<usize>>> = plan
+        .iter()
+        .map(|step| step.shader.as_ref().map(|shader| shader.mask_steps.clone()))
+        .collect();
+    assert_eq!(mask_steps, vec![None, Some(vec![0]), Some(vec![0])]);
+    assert_eq!(
+        plan[2].shader.as_ref().map(|shader| shader.reads.clone()),
+        Some(vec![
+            ImageSource::Picture,
+            ImageSource::Mask(0),
+            ImageSource::DrawnByPass(0)
+        ])
+    );
+}
+
+#[test]
+fn a_shader_that_reads_no_mask_has_no_step_of_one() {
+    let plan = plan_the_steps(
+        &[first(0)],
+        &[call("test:transition", vec![0.0; 4])],
+        only_the_transition,
+        base_shape(),
+        (640, 360),
+        frame_shape(),
+        4096,
+    );
+
+    assert_eq!(
+        plan[0].shader.as_ref().map(|shader| shader.mask_steps.clone()),
+        Some(Vec::new())
+    );
 }

@@ -11,7 +11,7 @@
 use naga::front::glsl::{Frontend, Options};
 
 use super::reader::{IsfFile, IsfProblem, Shape};
-use super::rewrite::{Rewritten, rewrite};
+use super::rewrite::{DrivenInput, Rewritten, rewrite_with_driven_inputs};
 use super::structure::structure_of;
 use crate::engine::ShaderStructure;
 
@@ -52,7 +52,13 @@ fn place_in_the_file(
 
 /// Compiles the shader of `file`, on the thread that calls this. (See [`compile_in_a_worker`] for the one that does not trust the compiler.)
 pub fn compile(file: &IsfFile) -> Result<CompiledShader, Vec<IsfProblem>> {
-    let rewritten = rewrite(file).map_err(|problem| vec![problem])?;
+    compile_with_driven_inputs(file, &[])
+}
+
+/// Compiles the shader of `file` with the float inputs `driven` read from masks (see [`DrivenInput`] and the rewriting step's `rewrite_with_driven_inputs`), on the thread that calls this. The masks are the last of the
+/// shader's [`image_names`](CompiledShader::image_names), and the [`structure`](CompiledShader::structure) says which mask each is.
+pub fn compile_with_driven_inputs(file: &IsfFile, driven: &[DrivenInput]) -> Result<CompiledShader, Vec<IsfProblem>> {
+    let rewritten = rewrite_with_driven_inputs(file, driven).map_err(|problem| vec![problem])?;
     let lines_of_the_file = file.body.lines().count() as u32;
     let mut frontend = Frontend::default();
     let mut module = frontend
@@ -137,7 +143,15 @@ pub fn compile(file: &IsfFile) -> Result<CompiledShader, Vec<IsfProblem>> {
 
 /// Compiles the shader of `file` on a thread of its own, which a panic does not take the program down with: a panic is a problem like any other.
 pub fn compile_in_a_worker(file: &IsfFile) -> Result<CompiledShader, Vec<IsfProblem>> {
-    in_a_worker(|| compile(file))
+    compile_in_a_worker_with_driven_inputs(file, &[])
+}
+
+/// Compiles the shader of `file` with the float inputs `driven` read from masks, on a thread of its own (see [`compile_in_a_worker`]).
+pub fn compile_in_a_worker_with_driven_inputs(
+    file: &IsfFile,
+    driven: &[DrivenInput],
+) -> Result<CompiledShader, Vec<IsfProblem>> {
+    in_a_worker(|| compile_with_driven_inputs(file, driven))
 }
 
 /// Does `job` on a thread of its own with a large stack, and makes a panic in it a problem.

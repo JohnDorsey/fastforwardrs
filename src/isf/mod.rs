@@ -14,7 +14,10 @@ mod rewrite;
 mod size_expression;
 mod structure;
 
-pub use compile::{CompiledShader, ENTRY_POINT, compile, compile_in_a_worker};
+pub use compile::{
+    CompiledShader, ENTRY_POINT, compile, compile_in_a_worker, compile_in_a_worker_with_driven_inputs,
+    compile_with_driven_inputs,
+};
 
 pub use descriptor::{
     descriptor_of, descriptor_with_images_of, key_is_of_the_source, key_is_of_the_text, key_of,
@@ -25,6 +28,9 @@ pub use registry::{compiled_shader_of, depends_on_earlier_frames, is_usable, sha
 pub use reader::{
     IsfFile, IsfImportedImage, IsfInput, IsfInputKind, IsfPass, IsfProblem, MOST_NUMBERS_OF_THE_INPUTS, Shape, read,
 };
-pub use rewrite::{MOST_NESTING, NUMBERS_BEFORE_THE_INPUTS, VEC4S_OF_THE_UNIFORM_BLOCK};
+pub use rewrite::{
+    DrivenInput, MASK_IMAGE_PREFIX, MOST_NESTING, MaskChannel, NUMBERS_BEFORE_THE_INPUTS, VEC4S_OF_THE_UNIFORM_BLOCK,
+    image_name_of_the_mask,
+};
 pub use size_expression::{LONGEST_EXPRESSION, MOST_NESTING_OF_AN_EXPRESSION, read_size_expression};
 pub use structure::structure_of;

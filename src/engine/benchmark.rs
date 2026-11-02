@@ -37,7 +37,8 @@ use super::guard::{DEFAULT_MOST_PASSES_OF_A_LOOP, guard_wgsl};
 use super::pictures::PictureProblem;
 use super::yuv::YuvColour;
 use super::{
-    EffectCall, EffectsThatRun, FrameDescription, LayerDescription, LayerSource, PictureData, PictureId, plan_frame,
+    EffectCall, EffectsThatRun, FrameDescription, GroupDescription, ImageSlot, LayerDescription, LayerSource, PassSpec,
+    PictureData, PictureId, ShaderStructure, plan_frame,
 };
 
 /// The key of the blur that the benchmark gives the engine as a shader.
@@ -46,11 +47,43 @@ const BLUR_KEY: &str = "benchmark:blur";
 /// The key of the pass that stands in for the lookup in a table.
 const LOOKUP_KEY: &str = "benchmark:lookup";
 
+/// The key of the shader that works on the picture and reads no mask (what the next one is held against).
+const SHADE_KEY: &str = "benchmark:shade";
+
+/// The key of the shader that does the same and reads a mask: the cost of a mask is what a scene with this takes more than a scene with the one before.
+const SHADE_BY_A_MASK_KEY: &str = "benchmark:shade_by_a_mask";
+
 /// What the shaders of the benchmark are given of the engine (see `effect_shaders`).
 const THE_BINDINGS: &str = "
 @group(0) @binding(0) var<uniform> numbers: array<vec4<f32>, 16>;
 @group(0) @binding(1) var picture: texture_2d<f32>;
 @group(0) @binding(2) var picture_sampler: sampler;
+";
+
+/// What a shader that reads a mask is given besides: the mask, the picture of a group that the engine drew off the frame and made into codes (`docs/shader-masks-design.md`).
+const THE_BINDINGS_OF_A_MASK: &str = "
+@group(0) @binding(3) var mask: texture_2d<f32>;
+@group(0) @binding(4) var mask_sampler: sampler;
+";
+
+/// Darkens the picture by a fixed amount (the first number): a pass of one read, which is what the next one is held against.
+const SHADE: &str = "
+@fragment
+fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    let here = textureLoad(picture, vec2<i32>(position.xy), 0);
+    return here * (0.5 + 0.5 * numbers[0].x);
+}
+";
+
+/// The same, by the red of the mask where the pixel is: one more read, of a picture that the engine drew for it.
+const SHADE_BY_A_MASK: &str = "
+@fragment
+fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    let size = vec2<f32>(textureDimensions(picture));
+    let here = textureLoad(picture, vec2<i32>(position.xy), 0);
+    let level = textureSampleLevel(mask, mask_sampler, position.xy / size, 0.0).r;
+    return here * (0.5 + 0.5 * level);
+}
 ";
 
 /// A blur along a line: the numbers are the step between two reads (across, down, in pixels), how many reads there are each side of the pixel, and how wide
@@ -272,6 +305,20 @@ pub fn run(adapter: &AdapterChoice, settings: &BenchmarkSettings) -> Result<Benc
             .map_err(|problem| BenchmarkProblem::BadShader(problem.to_string()))?;
         renderer.install_effect(key, &shader)?;
     }
+    renderer.install_effect(
+        SHADE_KEY,
+        &guard_wgsl(&format!("{THE_BINDINGS}\n{SHADE}"), DEFAULT_MOST_PASSES_OF_A_LOOP)
+            .map_err(|problem| BenchmarkProblem::BadShader(problem.to_string()))?,
+    )?;
+    renderer.install_effect_with_structure(
+        SHADE_BY_A_MASK_KEY,
+        &guard_wgsl(
+            &format!("{THE_BINDINGS}\n{THE_BINDINGS_OF_A_MASK}\n{SHADE_BY_A_MASK}"),
+            DEFAULT_MOST_PASSES_OF_A_LOOP,
+        )
+        .map_err(|problem| BenchmarkProblem::BadShader(problem.to_string()))?,
+        &shader_that_reads_a_mask(),
+    )?;
 
     let (width, height) = settings.frame_size;
     let pictures = pictures_of(width, height)?;
@@ -406,7 +453,23 @@ fn known_effects() -> EffectsThatRun {
     let mut known = EffectsThatRun::built_in_only();
     known.add_shader(BLUR_KEY);
     known.add_shader(LOOKUP_KEY);
+    known.add_shader(SHADE_KEY);
+    known.add_shader_with_masks(SHADE_BY_A_MASK_KEY, 1, 0, 1);
     known
+}
+
+/// What the engine is told of the shader that reads a mask: the picture it works on, and mask 0, in one pass.
+fn shader_that_reads_a_mask() -> ShaderStructure {
+    ShaderStructure {
+        images: vec![ImageSlot::Picture, ImageSlot::Mask(0)],
+        buffers: Vec::new(),
+        passes: vec![PassSpec {
+            target: None,
+            width: None,
+            height: None,
+        }],
+        pass_index_number: None,
+    }
 }
 
 /// What the benchmark makes frames of: two video pictures (in planes, as the engine takes them from ffmpeg), a picture of RGBA bytes, and a smaller one with
@@ -495,6 +558,10 @@ enum Effect {
     /// A blur along the rows and then down the columns.
     Blur,
     LookupStandIn,
+    /// A shader of one pass that reads no mask.
+    Shade,
+    /// The same shader, reading a mask that is a group of the third picture (which is not video: it is on the card, and is drawn off the frame and made into codes for the shader).
+    ShadeByAMask,
 }
 
 impl Scene {
@@ -518,6 +585,7 @@ fn calls_of(effect: Effect) -> Vec<EffectCall> {
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     match effect {
         Effect::ColourMatrix => vec![EffectCall::colour_matrix([
@@ -530,6 +598,17 @@ fn calls_of(effect: Effect) -> Vec<EffectCall> {
             call(BLUR_KEY, &[0.0, 1.0, 8.0, 4.0]),
         ],
         Effect::LookupStandIn => vec![call(LOOKUP_KEY, &[0.5])],
+        Effect::Shade => vec![call(SHADE_KEY, &[0.5])],
+        Effect::ShadeByAMask => vec![EffectCall {
+            masks: vec![GroupDescription {
+                layers: vec![LayerDescription {
+                    source: LayerSource::Picture(PictureId(3)),
+                    corners: upright(0.0, 0.0, 1.0, 1.0),
+                    effects: Vec::new(),
+                }],
+            }],
+            ..call(SHADE_BY_A_MASK_KEY, &[0.5])
+        }],
     }
 }
 
@@ -590,6 +669,16 @@ fn the_scenes() -> Vec<Scene> {
         Scene {
             name: "four pictures, the lookup stand-in",
             layers: four(Vec::new(), Vec::new(), vec![Effect::LookupStandIn]),
+            sends_video_pictures: false,
+        },
+        Scene {
+            name: "four pictures, a shader that reads no mask",
+            layers: four(Vec::new(), vec![Effect::Shade], Vec::new()),
+            sends_video_pictures: false,
+        },
+        Scene {
+            name: "four pictures, the same shader reading a mask (a group drawn off the frame)",
+            layers: four(Vec::new(), vec![Effect::ShadeByAMask], Vec::new()),
             sends_video_pictures: false,
         },
         Scene {

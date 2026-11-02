@@ -15,13 +15,13 @@ A shader's number input (`float`) today has one value, from a slider. The mainta
 
 * **Can it be done without editing the shaders? Yes [V].** The program already rewrites every shader's GLSL before it compiles it (`src/isf/rewrite.rs`), and each input is a macro of the rewritten text (`#define radius (_isf_u[5].y)`). A driven input is a different macro. The user's file, and the copy of it kept in the project, do not change; what the project keeps is *which input is driven by what*, and the rewrite is done again, **in about 0.4 ms** [V: 0.33 ms for a shader that is not driven, 0.39 to 0.41 ms for one that is, a release build].
 * **Can it be made to read the mask once per pixel? Yes [V]**, in a few dozen lines of the rewriter (`shader-masks-measurements/rewrite_poc.diff`): a global (`_isf_driven_radius`) that a generated function fills in from the mask before the shader's `main` runs (and before the initialisers of its globals, which may use the input). The generated WGSL has one read of the mask, before the loop, and the shader makes the same picture [V: with a mask that is the same everywhere it matches the shader that reads a uniform to within 2 of 255 (rounding), in at most 5,735 of 8.3 million bytes; with a mask that changes it differs where the mask differs from the uniform, as it must].
-* **What it costs.** A mask that is a track costs **about as much as one more video layer** each frame, and **nothing but a texture read** if it does not change (a picture, a generator that does not move). The read of the mask in the shader costs **nothing you can measure beside the shader's own work** on the two adapters tried (section 4.2).
+* **What it costs.** *(Corrected 2026-11-01, after the engine was built and measured: this sentence first said "about as much as one more video layer, and nothing but a texture read if it does not change", which the engine's numbers do not bear out.)* As built, **a mask is drawn and made into codes in every frame, even one that does not change**, and that costs **0.5 to 0.9 ms at 720p, 1.3 to 1.8 ms at 1080p and about 7.4 ms at 4K on the AMD graphics** (and nothing you can measure on the RTX 3090 below 4K), **before** the decode and the upload of a mask that is a video (section 4.1) are counted. Keeping a mask that does not change from one frame to the next is not built (section 4.4 says what it would save). The read of the mask in the shader costs **nothing you can measure beside the shader's own work** on the two adapters tried (section 4.2).
 
 ## 3. How it works, and why it stays simple
 
 ```
                        per driven input of an effect
-   source (a track)  ──►  channel (R G B A brightness)  ──►  map (a line / later a graph)  ──►  the value the shader sees
+   source (a track)  ──►  channel (R G B brightness)  ──►  map (a line / later a graph)  ──►  the value the shader sees
         │                                                        applied once per pixel, before main
         └─ rendered off the frame, as a picture of its own (the size of the frame), once for all the inputs that use it
 ```
@@ -30,9 +30,9 @@ A shader's number input (`float`) today has one value, from a slider. The mainta
 
 | Piece | What it is | Where it lives |
 |---|---|---|
-| a driven input | `{ input, source, channel, map }`, kept with the effect's values; the slider's value is kept and unused | the project (file format 24) |
+| a driven input | `{ input, source, channel, map, value where the source has nothing }`, kept with the effect's values; the slider's value is kept and unused | the project (file format 24) |
 | `source` | `Track(TrackId)` now; `TrackGroup`, `ClipGroup`, `VirtualLayer` later | an enum in the project; one function in `composition` turns it into a group description for a frame |
-| `channel` | red, green, blue, alpha, brightness | an enum; the shader text says which |
+| `channel` | red, green, blue, brightness (of the codes) | an enum; the shader text says which |
 | `map` | `Linear` (the input's MIN to MAX, to begin with) now; a **graph** later | an enum; a graph is **data, not shader text** (see below) |
 | the off-frame groups | `FrameDescription` gets a list of them, drawn first; an effect call names one by its place | the engine |
 | the value in the shader | one read of the mask per pixel, before `main`, per source; the channel and the map are a few operations on it | the rewriter |
@@ -64,10 +64,10 @@ A mask that is a video has to be made like any other picture of video, every fra
 | draw the planes into a texture as colours | 0.017 | 0.35 | 0.07 | 1.4 |
 | **memory of one more texture** (8 bits of each colour; half floats are twice that) | 7.9 MB | 7.9 MB | 31.6 MB | 31.6 MB |
 
-* **One more live mask ≈ decode + send + draw**: about **1.8 ms at 1080p and 6.9 ms at 4K on the AMD graphics** (the decode is on the processor and overlaps the card's work, so it costs less than the sum). For scale, the program's own benchmark makes the whole stack (four layers, two blurs, a matrix, a lookup, new video in every frame) in **9.5 ms at 720p, 22.8 ms at 1080p and 97 ms at 4K** on the AMD graphics, and in **2.5 ms at 1080p and 9.3 ms at 4K** on the RTX 3090. The preview draws at 720p at most (`playback::preview_picture_size`), so the preview pays less than the 1080p column; the export pays the full size but does not have to keep up with a clock.
+* **One more live mask ≈ decode + send + draw**: the first estimate was **1.8 ms at 1080p and 6.9 ms at 4K on the AMD graphics** (the decode is on the processor and overlaps the card's work, so it costs less than the sum). **That estimate left out most of what the engine does with a mask**: its "draw" was the planes of a video picture drawn into a texture (0.35 and 1.4 ms), and the engine also puts the mask's group together in half floats and makes it into the codes of a screen with a pass of its own (section 4.4: 1.3 to 1.8 ms and about 7.4 ms for those two, for a mask that is a picture already on the card). **A live video mask is the engine's cost of 4.4 plus the upload of 4.1, and its decode on the processor** (the engine's 1.3 to 1.8 ms and the upload's 0.8 to 0.9 make 2.1 to 2.7 ms at 1080p, and 7.2 to 7.6 and 3.0 to 3.1 make 10.2 to 10.7 ms at 4K, on the AMD graphics; the decode, 0.5 ms and 2.4 ms, is on the processor and overlaps the card's work). For scale, the program's own benchmark makes the whole stack (four layers, two blurs, a matrix, a lookup, new video in every frame) in **9.5 ms at 720p, 22.8 ms at 1080p and 97 ms at 4K** on the AMD graphics, and in **2.5 ms at 1080p and 9.3 ms at 4K** on the RTX 3090. The preview draws at 720p at most (`playback::preview_picture_size`), so the preview pays less than the 1080p column; the export pays the full size but does not have to keep up with a clock.
 * **Sending the planes is 2 to 3 times cheaper than sending RGBA**: the program's choice to send what the decoder gives and to convert on the card is right, and a mask should do the same.
 * **The decode of real footage** takes longer than the test clip's (a camera's 10 to 100 Mbit/s against 2.6 and 7.4 here): **[B]** not measured.
-* **A mask that does not change** (a picture, a generator that does not move, a still) is drawn once and kept: its cost per frame is the read in the shader, below. **[B]** the program does not yet keep such a texture between frames; it is a part of phase 2.
+* **A mask that does not change** (a picture, a generator that does not move, a still) could be drawn once and kept, so that its cost per frame would be the read in the shader, below. **It is not built**: see 4.4.
 
 ### 4.2 Reading the mask in a shader, at every use or once
 
@@ -97,21 +97,39 @@ Shaders with a loop of K rounds that read the picture once in each round and use
 | **a track that is hidden and is a mask** | its decode, send and draw (4.1), once, however many inputs read it | [B] |
 | **the file** | a driven input is a few numbers; a graph is a few points | [B] |
 
+### 4.4 What the engine takes for a mask, as built (phase 2) [V]
+
+The engine's own benchmark (`cargo run --release --example engine_benchmark -- --adapter N --size WxH --frames 60 --in-flight 1`) has two scenes more since phase 2: **four pictures with a shader of one pass that reads no mask**, and **the same shader reading a mask** that is a group of one picture (not video: it is on the card already, so nothing is decoded or sent). What the second takes more than the first is what the engine does for a mask: **the group is put together in half floats (one pass), made into the codes of a screen (one pass), and read by the shader (one more texture read per pixel)**. Mean time of a frame in milliseconds, the raw tables in `shader-masks-measurements/results/engine_mask_scenes_*.txt`:
+
+| | no mask | with the mask | the mask takes |
+|---|---|---|---|
+| AMD, 720p (three runs) | 2.02 to 2.11 | 2.63 to 2.89 | **+0.52, +0.75, +0.87** |
+| AMD, 1080p (two runs) | 4.63 and 4.90 | 6.45 and 6.19 | **+1.82, +1.29** |
+| AMD, 4K (two runs) | 20.46 and 20.38 | 27.63 and 27.94 | **+7.17, +7.56** |
+| RTX 3090, 720p | 0.83 and 0.92 | 0.92 and 0.93 | +0.09, +0.01 |
+| RTX 3090, 1080p | 1.99 and 1.93 | 1.85 and 1.90 | −0.14, −0.03 (nothing you can measure) |
+| RTX 3090, 4K | 5.92 and 6.58 | 6.40 and 6.10 | +0.48, −0.48 (nothing you can measure) |
+
+* **Runs differ by up to 0.4 ms from one another on the AMD graphics at 1080p**, so the figures are ranges. The scenes are in the compatibility mode (the numbers are codes already), where the pass that makes a mask into codes copies; **in light it does the conversion, which is the same pass with more arithmetic** (not measured).
+* **The cost is the two full-frame passes**, which the AMD graphics (integrated, sharing the memory of the processor) pays for in bandwidth: a picture of the frame in half floats is 7.4 MB at 720p, 16.6 MB at 1080p and 66 MB at 4K, and the mask makes two of them (the group, and the group in codes), each written once and read once. The discrete card has the bandwidth to hide them.
+* **What can be saved**, in order of what it would give, and none of it is built: (1) **keep a mask that does not change** (a picture, a colour, a generator that does not move) between frames, which saves both passes (the whole of the cost above, but the read in the shader); (2) **draw the mask at half the size of the frame** (a quarter of both passes; a mask is usually smooth); (3) **do the conversion into codes in the shader's one read of the mask**, which saves the second pass but puts the working space's curve and primaries into the generated GLSL; (4) leave out the second pass in the compatibility mode (it copies). Each is a change in the engine and not in the design, and all of them leave `EffectCall::masks` as it is.
+* **The gate** (720p and 60 frames to the second on the AMD graphics) is the whole stack of the benchmark in 8.4 ms, with 16.7 ms to spend: one mask is 0.5 to 0.9 ms of it.
+
 ## 5. A plan, in pieces that can each be checked
 
 0. **Done: the eye** (`f383d15`): a track can be hidden; the plan leaves it out; file format 23.
-1. **The rewriter**: a driven input, read once per pixel, in `rewrite.rs`, with tests: **every float input of the 218 shaders of the collection** compiles driven (the corpus test that exists for the shaders does this for the plain ones); the size-expression check; the order (the value is set before the globals' initialisers). No window, no engine.
-2. **The engine** (the risky piece): off-frame groups in `FrameDescription`, an effect call that names one, the order of drawing, the cycle check, and keeping a mask that does not change. Checked with the engine's own benchmark, which gets a scene with a mask, against the numbers in section 4.
+1. **The rewriter** (**done**): `rewrite_with_driven_inputs` / `compile_with_driven_inputs` in `src/isf`: a driven input, read once per pixel, with tests. As built: each mask is one more image of the shader (`_isf_mask_N`, after the images it has; `ImageSlot::Mask(N)` in the engine's description); the value of an input is `mix(its own number in the call, MIN + (MAX - MIN) * unit, how much the mask covers)` where `unit` is the channel of the mask's colour with its opacity divided out (0 where nothing covers); an input that sets the size of a buffer, a name that is not a float, an input twice, or masks that skip a number are refused with a message. **Checked [V]**: the rewritten text of all 218 shaders of the collection is byte for byte what it was (SHA-256 of each, before and after); **all 520 float inputs** compile read from a mask alone, and 195 shaders compile with all their floats read from three masks at once (`every_float_input_of_the_corpus_can_be_read_from_a_mask`, run by hand); none of the 218 shaders has a float that sets a size, so that refusal is tested only on a shader written for the test. Not checked yet: the pixels (phase 2 draws them).
+2. **The engine** (**done, except keeping a mask that does not change**): the mask is **a group on the effect call** (`EffectCall::masks`), not a list in the `FrameDescription` as first thought: the engine already numbers a group after the container its layer is in and draws the containers from the last to the first, so a mask is drawn before the effect that reads it with no new ordering, and no cycle can be written (the tree is finite; the project refuses a track that is its own mask). `EffectStep::Mask { call, mask }` makes each mask into codes right before the call (as `EffectStep::Backdrop` does for the backdrop). A call is run only if it has as many masks as its shader reads. Tested with no graphics card (the plan, the steps, the numbering, the fingerprint) and on the software adapter with the real rewriter (the channels, the range, the number of the call where the mask has nothing, partly see-through masks, two masks, masks in groups and groups in masks, effects in a mask, loops, light and codes); two deliberate mistakes (no conversion into codes, no division by the opacity) are each caught by the tests made for them. Checked with the engine's own benchmark, which gets a scene with a mask, against the numbers in section 4.
 3. **The project and the file** (format 24): the driven inputs, the effects' snapshots, undo, the `Command`s.
 4. **The window**: the button beside the keyframe buttons, a chooser of the track (and the channel), the slider hidden while an input is driven, the box of the effect saying what drives it.
 5. **Later, each with its own tests**: a track group, a contiguous clip group, a virtual layer as a source; a graph as a map.
 
-## 6. What I would like the maintainer to decide
+## 6. What the maintainer decided (2026-11-01)
 
-1. **What a value outside the layer is.** Where the source has no clip (a gap) the picture is clear black and clear: should its value be the **low end** of the input's range (my suggestion: brightness 0, so the low end), or should the input fall back to the slider's value there? (The second means the slider is not entirely ignored.)
-2. **Brightness**: worked out from the colours as they are on the screen (the codes, as the shaders see them; my suggestion) or from light.
-3. **A track that is seen is allowed as a source** (my suggestion: yes, nothing forbids it; the eye is only for when it should not be in the picture), and a track can drive inputs on several clips.
-4. **What the box of a driven input shows**: only that it is driven, and by what? (There is room for the channel, and later for the graph.)
+1. **What the value is where the source has nothing** (a gap in the track: the picture is clear there): **a value of its own, set by a slider made for this, in the settings window of the mask.** It is not the slider of the input (which is hidden and ignored while the input is driven) and it is not the low end of the range. It is carried to the shader in the input's own place among the numbers of the call, which nothing else uses while the input is driven, so the shader needs nothing more for it. Where the source is partly clear (a soft edge, a track that is half opaque), the value is a mixture of this value and the mask's, by how much the mask covers.
+2. **Brightness is worked out from the codes** (the numbers the shaders read), with the weights of Rec. 709 (0.2126, 0.7152, 0.0722). The channels offered are red, green, blue and brightness.
+3. **A track that is seen can be a source**, and a track can drive inputs on several clips.
+4. **What the box of a driven input shows: the thumbnail of the mask**, in the place where the slider was. **Clicking the thumbnail opens the settings window of the mask**, which has the choice of the track, the choice of the channel, the slider for the value where the source has nothing, and (later) the graph of line segments that maps the mask's value to the value used.
 
 ## 7. What was not measured
 

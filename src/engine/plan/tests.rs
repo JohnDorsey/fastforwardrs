@@ -145,6 +145,7 @@ fn an_effect_the_engine_does_not_have_or_cannot_use_is_left_out_and_counted() {
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let too_few_numbers = EffectCall {
         key: COLOUR_MATRIX_KEY.to_owned(),
@@ -152,6 +153,7 @@ fn an_effect_the_engine_does_not_have_or_cannot_use_is_left_out_and_counted() {
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let too_many_numbers = EffectCall {
         key: COLOUR_MATRIX_KEY.to_owned(),
@@ -159,6 +161,7 @@ fn an_effect_the_engine_does_not_have_or_cannot_use_is_left_out_and_counted() {
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let not_a_number = EffectCall {
         key: COLOUR_MATRIX_KEY.to_owned(),
@@ -166,6 +169,7 @@ fn an_effect_the_engine_does_not_have_or_cannot_use_is_left_out_and_counted() {
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let infinite = EffectCall {
         key: COLOUR_MATRIX_KEY.to_owned(),
@@ -173,6 +177,7 @@ fn an_effect_the_engine_does_not_have_or_cannot_use_is_left_out_and_counted() {
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let plan = plan_of_the_built_in_effects(&description_of(vec![
         layer_with(1, vec![unknown, redder(), too_few_numbers]),
@@ -278,6 +283,7 @@ fn a_matrix(call: usize) -> EffectToRun {
         passes: 1,
         converts_itself: true,
         reads_the_backdrop: false,
+        masks: 0,
     }
 }
 
@@ -288,6 +294,7 @@ fn a_shader(call: usize) -> EffectToRun {
         passes: 1,
         converts_itself: false,
         reads_the_backdrop: false,
+        masks: 0,
     }
 }
 
@@ -298,6 +305,7 @@ fn a_pass_of_light(call: usize) -> EffectToRun {
         passes: 1,
         converts_itself: false,
         reads_the_backdrop: false,
+        masks: 0,
     }
 }
 
@@ -360,6 +368,7 @@ fn a_blur_is_given_one_number_and_a_crop_five_and_the_passes_of_a_blur_are_two()
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let crop = |numbers: &[f32]| EffectCall {
         key: CROP_KEY.to_owned(),
@@ -367,6 +376,7 @@ fn a_blur_is_given_one_number_and_a_crop_five_and_the_passes_of_a_blur_are_two()
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let plan_of = |effects: Vec<EffectCall>| plan_frame(&description_of(vec![layer_with(1, effects)]), &known);
     // (A layer, its effects, the place and the output: two passes besides the effects.)
@@ -544,6 +554,7 @@ fn a_plan_in_light_has_the_conversions_of_a_shader_and_counts_their_passes() {
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let mut description = in_light();
     description.layers = vec![
@@ -584,6 +595,7 @@ fn a_colour_matrix_is_given_nine_numbers_or_twelve_and_no_other_number() {
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let with = |offsets: [f32; 3]| [nine.as_slice(), offsets.as_slice()].concat();
     for (numbers, runs) in [
@@ -655,6 +667,7 @@ fn a_shader_given_with_several_passes_takes_them_in_a_plan_and_counts_them_and_o
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     assert_eq!(known.passes_of("test:passes", KindOfEffect::Shader), 3);
     assert_eq!(known.passes_of("test:none", KindOfEffect::Shader), 1);
@@ -705,6 +718,7 @@ fn a_colour_matrix_of_twelve_numbers_that_changes_nothing_is_left_out_and_not_co
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     };
     let plan = plan_of_the_built_in_effects(&description_of(vec![layer_with(1, vec![call([0.0; 3])])]));
     assert_eq!(

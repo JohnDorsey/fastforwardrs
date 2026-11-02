@@ -24,6 +24,9 @@ pub struct ShaderStep {
     /// The place, among the steps of the layer's effects, of the step that made the backdrop into codes for this call (phase 6.6), if the shader reads the backdrop and the plan put such
     /// a step before the call.
     pub backdrop_step: Option<usize>,
+    /// The place, among the steps of the layer's effects, of the step that made each of the masks of this call into codes (`docs/shader-masks-design.md`): the step of the mask number `n` is
+    /// `mask_steps[n]`. Empty for a shader that reads no mask.
+    pub mask_steps: Vec<usize>,
     /// How many pictures the shader reads (the bindings the step needs).
     pub images: usize,
     /// The format of what the step draws into.
@@ -48,7 +51,7 @@ pub struct StepPlan {
 /// What each of `steps` draws and reads. `effects` are the effects of the layer, which the steps are numbered among; `structure_of` says what a shader that was given to the engine is
 /// made of; `base_shape` is the shape of the picture that the effects work on (what a step that is not a pass of a shader draws into); `picture_size` is its size; `frame_shape` is the
 /// shape of the picture that the layers are put together in (what the step that makes the backdrop into codes draws into: the backdrop is the size of the frame, whatever the picture
-/// of the layer is); `largest_side` is the most pixels across that the card allows a texture to be.
+/// of the layer is, and so is a mask); `largest_side` is the most pixels across that the card allows a texture to be.
 pub fn plan_the_steps(
     steps: &[EffectStep],
     effects: &[EffectCall],
@@ -60,6 +63,8 @@ pub fn plan_the_steps(
 ) -> Vec<StepPlan> {
     let mut first_step_of_the_call: Vec<(usize, usize)> = Vec::new();
     let mut backdrop_step_of_the_call: Vec<(usize, usize)> = Vec::new();
+    // (The call, the number of the mask among the call's, and the step.)
+    let mut mask_steps_of_the_calls: Vec<(usize, usize, usize)> = Vec::new();
     steps
         .iter()
         .enumerate()
@@ -74,6 +79,14 @@ pub fn plan_the_steps(
                 }
                 EffectStep::Backdrop { call } => {
                     backdrop_step_of_the_call.push((call, place));
+                    return StepPlan {
+                        shape: frame_shape,
+                        size: (frame_shape.width_in_pixels, frame_shape.height_in_pixels),
+                        shader: None,
+                    };
+                }
+                EffectStep::Mask { call, mask } => {
+                    mask_steps_of_the_calls.push((call, mask, place));
                     return StepPlan {
                         shape: frame_shape,
                         size: (frame_shape.width_in_pixels, frame_shape.height_in_pixels),
@@ -116,6 +129,15 @@ pub fn plan_the_steps(
                         .rev()
                         .find(|(of, _)| *of == call)
                         .map(|(_, backdrop)| *backdrop),
+                    mask_steps: {
+                        let mut of_the_call: Vec<(usize, usize)> = mask_steps_of_the_calls
+                            .iter()
+                            .filter(|(of, _, _)| *of == call)
+                            .map(|(_, mask, step)| (*mask, *step))
+                            .collect();
+                        of_the_call.sort_unstable();
+                        of_the_call.into_iter().map(|(_, step)| step).collect()
+                    },
                     images: structure.images.len(),
                     target_format: facts.format,
                     target_buffer: facts.target,

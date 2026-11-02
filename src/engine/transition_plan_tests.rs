@@ -135,6 +135,7 @@ fn a_wipe_to_run(call: usize) -> EffectToRun {
         passes: 1,
         converts_itself: false,
         reads_the_backdrop: true,
+        masks: 0,
     }
 }
 
@@ -145,6 +146,7 @@ fn a_matrix_to_run(call: usize) -> EffectToRun {
         passes: 1,
         converts_itself: true,
         reads_the_backdrop: false,
+        masks: 0,
     }
 }
 

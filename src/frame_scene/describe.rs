@@ -581,6 +581,7 @@ fn call_of_an_operation(
                 table: None,
                 state: state.map(|(id, frame)| EffectState { id, frame }),
                 images: ids,
+                masks: Vec::new(),
             }
         }
         PictureOperation::Crop {

@@ -10,6 +10,7 @@
 //! A description has a [`fingerprint`](FrameDescription::fingerprint), which is also the key of the cache of finished frames: it is made of all that
 //! decides what the frame looks like, so an edit that changes a frame changes its key and nothing has to be thrown away by hand.
 
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
@@ -183,6 +184,11 @@ pub struct EffectCall {
     /// pictures that the engine is sent, as those of the layers are, **made so that the shader reads their codes as they are** (they are not converted to light).
     #[serde(default)]
     pub images: Vec<PictureId>,
+    /// The masks that the shader reads (`docs/shader-masks-design.md`), in the order its structure numbers them (`ImageSlot::Mask`): each is **a group of layers that is drawn off the frame**, in
+    /// a picture of its own the size of the frame, clear where nothing is, for the shader to read the value of a float input from at each pixel. It is a group like the group of a layer, and
+    /// it is numbered as a container after the one that the effect's layer is in, so it is drawn before the effect runs. None for any effect that is not a shader with inputs read from masks.
+    #[serde(default)]
+    pub masks: Vec<GroupDescription>,
 }
 
 impl EffectCall {
@@ -194,6 +200,7 @@ impl EffectCall {
             table: None,
             state: None,
             images: Vec::new(),
+            masks: Vec::new(),
         }
     }
 
@@ -205,6 +212,7 @@ impl EffectCall {
             table: None,
             state: None,
             images: Vec::new(),
+            masks: Vec::new(),
         }
     }
 
@@ -216,6 +224,7 @@ impl EffectCall {
             table: None,
             state: None,
             images: Vec::new(),
+            masks: Vec::new(),
         }
     }
 
@@ -227,6 +236,7 @@ impl EffectCall {
             table: None,
             state: None,
             images: Vec::new(),
+            masks: Vec::new(),
         }
     }
 
@@ -239,6 +249,7 @@ impl EffectCall {
             table: None,
             state: None,
             images: Vec::new(),
+            masks: Vec::new(),
         }
     }
 
@@ -257,6 +268,7 @@ impl EffectCall {
             table: Some(table),
             state: None,
             images: Vec::new(),
+            masks: Vec::new(),
         }
     }
 
@@ -268,6 +280,7 @@ impl EffectCall {
             table: None,
             state: None,
             images: Vec::new(),
+            masks: Vec::new(),
         }
     }
 }
@@ -310,6 +323,7 @@ impl FrameDescription {
     pub fn flatten(&self) -> FlatLayers<'_> {
         let mut layers: Vec<FlatLayer<'_>> = Vec::new();
         let mut containers: Vec<std::ops::Range<usize>> = Vec::new();
+        let mut containers_of_masks: HashMap<(usize, usize, usize), usize> = HashMap::new();
         // (The layers of each container, the frame's first. A group found in a container is put at the end, so that it comes after the container it is in.)
         let mut pending: Vec<&[LayerDescription]> = vec![&self.layers];
         let mut next = 0;
@@ -323,6 +337,16 @@ impl FrameDescription {
                     }
                     LayerSource::Picture(_) | LayerSource::Solid(_) => None,
                 };
+                // (The masks of its effects are groups too, found after the layer's own. A layer that is only a colour has no picture for an effect to work on: its effects are not run, and what
+                // they would read is not drawn.)
+                if !matches!(layer.source, LayerSource::Solid(_)) {
+                    for (call, effect) in layer.effects.iter().enumerate() {
+                        for (mask, group) in effect.masks.iter().enumerate() {
+                            pending.push(&group.layers);
+                            containers_of_masks.insert((layers.len(), call, mask), pending.len() - 1);
+                        }
+                    }
+                }
                 layers.push(FlatLayer {
                     layer,
                     container: next,
@@ -332,7 +356,11 @@ impl FrameDescription {
             containers.push(first..layers.len());
             next += 1;
         }
-        FlatLayers { layers, containers }
+        FlatLayers {
+            layers,
+            containers,
+            containers_of_masks,
+        }
     }
 
     /// The pictures that the frame is made of, in the layers of the frame and of its groups, each once, in the order they are met in.
@@ -420,6 +448,15 @@ pub struct FlatLayers<'a> {
     pub layers: Vec<FlatLayer<'a>>,
     /// For each container, which of `layers` are its own.
     pub containers: Vec<std::ops::Range<usize>>,
+    /// The container of each mask, by the number of the layer whose effect reads it, the number of the effect among the layer's effects, and the number of the mask among the effect's.
+    containers_of_masks: HashMap<(usize, usize, usize), usize>,
+}
+
+impl FlatLayers<'_> {
+    /// The container that is the mask number `mask` of the effect number `call` of the layer number `layer`, if there is one.
+    pub fn container_of_the_mask(&self, layer: usize, call: usize, mask: usize) -> Option<usize> {
+        self.containers_of_masks.get(&(layer, call, mask)).copied()
+    }
 }
 
 /// One layer of a [`FlatLayers`].
@@ -444,6 +481,9 @@ fn number_the_pictures_of(layers: &mut [LayerDescription], number: &dyn Fn(Pictu
             for id in &mut effect.images {
                 *id = number(*id);
             }
+            for mask in &mut effect.masks {
+                number_the_pictures_of(&mut mask.layers, number);
+            }
         }
     }
 }
@@ -463,6 +503,10 @@ fn hash_layers(layers: &[LayerDescription], hasher: &mut DefaultHasher) {
             effect.table.hash(hasher);
             effect.state.hash(hasher);
             effect.images.hash(hasher);
+            effect.masks.len().hash(hasher);
+            for mask in &effect.masks {
+                hash_layers(&mask.layers, hasher);
+            }
             effect.values.len().hash(hasher);
             for value in &effect.values {
                 value.to_bits().hash(hasher);
@@ -671,6 +715,7 @@ mod tests {
                 table: None,
                 state: None,
                 images: Vec::new(),
+                masks: Vec::new(),
             }],
         });
         let mut second = FrameDescription::black((8, 8));
@@ -684,6 +729,7 @@ mod tests {
                     table: None,
                     state: None,
                     images: Vec::new(),
+                    masks: Vec::new(),
                 },
                 EffectCall {
                     key: String::new(),
@@ -691,6 +737,7 @@ mod tests {
                     table: None,
                     state: None,
                     images: Vec::new(),
+                    masks: Vec::new(),
                 },
             ],
         });
@@ -824,5 +871,180 @@ mod tests {
         );
         let back = numbered.with_the_pictures_numbered_by(|id| PictureId((id.0 - 5) / 10));
         assert_eq!(back, original, "and nothing but the pictures is changed");
+    }
+
+    /// An effect that has the masks `masks` (each a group of the layers it lists).
+    fn masked_by(masks: Vec<Vec<LayerDescription>>) -> EffectCall {
+        EffectCall {
+            masks: masks.into_iter().map(|layers| GroupDescription { layers }).collect(),
+            ..EffectCall::exposure(1.0)
+        }
+    }
+
+    #[test]
+    fn a_mask_is_a_container_of_its_own_numbered_after_the_container_that_its_effect_is_in() {
+        let mut original = description();
+        original.layers[0].effects.push(masked_by(vec![vec![layer(7)]]));
+        original.layers.push(a_group_of(vec![LayerDescription {
+            effects: vec![masked_by(vec![vec![layer(8), layer(9)], vec![]])],
+            ..layer(2)
+        }]));
+
+        let flat = original.flatten();
+
+        // The containers in the order they are found: the frame (its three layers); the mask of its first layer; the group; the first mask of the layer of the group; the second.
+        let sizes: Vec<usize> = flat.containers.iter().map(|container| container.len()).collect();
+        assert_eq!(sizes, [3, 1, 1, 2, 0]);
+        // (The layers are numbered container by container: 0 to 2 are the frame's, 3 is the first mask's, 4 is the group's, 5 and 6 are the second's.)
+        assert_eq!(flat.container_of_the_mask(0, 0, 0), Some(1));
+        assert_eq!(flat.container_of_the_mask(4, 0, 0), Some(3));
+        assert_eq!(flat.container_of_the_mask(4, 0, 1), Some(4));
+        // Nothing else has a mask.
+        assert_eq!(
+            flat.container_of_the_mask(0, 0, 1),
+            None,
+            "there is no second mask on the first layer"
+        );
+        assert_eq!(
+            flat.container_of_the_mask(0, 1, 0),
+            None,
+            "there is no second effect on the first layer"
+        );
+        assert_eq!(flat.container_of_the_mask(4, 0, 2), None, "there is no third mask");
+        assert_eq!(
+            flat.container_of_the_mask(1, 0, 0),
+            None,
+            "the colour has an effect and it has no mask"
+        );
+        // A container is always numbered after the one it is in: what drawing from the last to the first relies on.
+        for (call_layer, mask_container) in [(0, 1), (4, 3), (4, 4)] {
+            assert!(mask_container > flat.layers[call_layer].container, "layer {call_layer}");
+        }
+    }
+
+    #[test]
+    fn the_mask_of_an_effect_on_a_layer_that_is_only_a_colour_is_not_a_container_because_the_effect_is_not_run() {
+        let mut original = FrameDescription::black((8, 8));
+        original.layers.push(LayerDescription {
+            source: LayerSource::Solid([1, 2, 3, 255]),
+            corners: CORNERS_OF_THE_WHOLE_PICTURE,
+            effects: vec![masked_by(vec![vec![layer(7)]])],
+        });
+
+        let flat = original.flatten();
+
+        assert_eq!(flat.containers.len(), 1);
+        assert_eq!(flat.container_of_the_mask(0, 0, 0), None);
+        assert!(
+            original.pictures_used().is_empty(),
+            "nothing draws the mask, so its picture is not wanted"
+        );
+    }
+
+    #[test]
+    fn the_pictures_of_a_mask_are_pictures_of_the_frame_and_are_numbered_with_the_others() {
+        let mut original = description();
+        original.layers[0]
+            .effects
+            .push(masked_by(vec![vec![layer(30), a_group_of(vec![layer(31)])]]));
+        let numbered = original
+            .clone()
+            .with_the_pictures_numbered_by(|id| PictureId(id.0 * 10 + 5));
+
+        assert_eq!(
+            original.pictures_used(),
+            [PictureId(1), PictureId(30), PictureId(31)],
+            "the picture of the layer, then those of the mask in the order they are met in"
+        );
+        assert_eq!(
+            numbered.pictures_used(),
+            [PictureId(15), PictureId(305), PictureId(315)]
+        );
+        let back = numbered.with_the_pictures_numbered_by(|id| PictureId((id.0 - 5) / 10));
+        assert_eq!(back, original);
+    }
+
+    #[test]
+    fn everything_of_a_mask_is_part_of_the_fingerprint_of_the_frame() {
+        let with = |mask: Vec<LayerDescription>| {
+            let mut frame = description();
+            frame.layers[0].effects.push(masked_by(vec![mask]));
+            frame
+        };
+        let original = with(vec![layer(7)]);
+        let others = [
+            ("the effect has no mask", {
+                let mut frame = description();
+                frame.layers[0].effects.push(masked_by(vec![]));
+                frame
+            }),
+            ("another picture in the mask", with(vec![layer(8)])),
+            ("a layer more in the mask", with(vec![layer(7), layer(8)])),
+            ("the mask is empty", with(vec![])),
+            (
+                "a mask that is a colour",
+                with(vec![LayerDescription {
+                    source: LayerSource::Solid([1, 2, 3, 4]),
+                    ..layer(0)
+                }]),
+            ),
+            (
+                "a mask that has an effect",
+                with(vec![LayerDescription {
+                    effects: vec![EffectCall::exposure(0.5)],
+                    ..layer(7)
+                }]),
+            ),
+            (
+                "a mask that is moved",
+                with(vec![LayerDescription {
+                    corners: [(0.0, 0.0), (0.5, 0.0), (0.5, 1.0), (0.0, 1.0)],
+                    ..layer(7)
+                }]),
+            ),
+        ];
+
+        assert_eq!(original.fingerprint(), with(vec![layer(7)]).fingerprint());
+        for (name, other) in &others {
+            assert_ne!(other.fingerprint(), original.fingerprint(), "{name}");
+            assert_ne!(
+                other.fingerprint_of_what_is_shown(),
+                original.fingerprint_of_what_is_shown(),
+                "{name}"
+            );
+        }
+        // Two masks are not one mask with the layers of both.
+        let mut two = description();
+        two.layers[0]
+            .effects
+            .push(masked_by(vec![vec![layer(7)], vec![layer(8)]]));
+        let mut one = description();
+        one.layers[0].effects.push(masked_by(vec![vec![layer(7), layer(8)]]));
+        assert_ne!(two.fingerprint(), one.fingerprint());
+    }
+
+    #[test]
+    fn a_frame_depends_on_earlier_frames_if_an_effect_in_a_mask_has_a_state() {
+        let mut original = description();
+        original.layers[0].effects.push(masked_by(vec![vec![LayerDescription {
+            effects: vec![stateful_at(5, 21)],
+            ..layer(7)
+        }]]));
+
+        assert!(original.depends_on_earlier_frames());
+        assert_eq!(original.most_frames_a_state_has_gone_on_for(), Some(21));
+    }
+
+    #[test]
+    fn a_description_from_before_masks_is_read_as_one_whose_effects_have_none() {
+        let text = r#"{"key":"engine:exposure","values":[1.0]}"#;
+        let call: EffectCall = serde_json::from_str(text).unwrap();
+        assert!(call.masks.is_empty());
+        let with_masks = EffectCall {
+            masks: vec![GroupDescription { layers: vec![layer(7)] }],
+            ..call.clone()
+        };
+        let read_back: EffectCall = serde_json::from_str(&serde_json::to_string(&with_masks).unwrap()).unwrap();
+        assert_eq!(read_back, with_masks);
     }
 }

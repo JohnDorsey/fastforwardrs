@@ -151,6 +151,7 @@ pub(super) fn call(key: &str, numbers: &[f32]) -> EffectCall {
         table: None,
         state: None,
         images: Vec::new(),
+        masks: Vec::new(),
     }
 }
 

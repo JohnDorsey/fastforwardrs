@@ -26,10 +26,10 @@ fn the_scenes_are_a_ladder_and_each_takes_the_passes_that_it_is_made_of() {
         .map(|scene| plan_frame(&scene.description((64, 36)), &known))
         .collect();
     // A black frame is cleared and made into its output; the layers are all put in their places by one pass; an effect that is a pass of its own is one pass,
-    // and a blur is two (along the rows, and down the columns).
+    // and a blur is two (along the rows, and down the columns). A mask is two passes more than the shader without one: the group is put together, and made into codes.
     assert_eq!(
         plans.iter().map(|plan| plan.passes_recorded()).collect::<Vec<_>>(),
-        vec![2, 2, 2, 3, 4, 3, 8, 8],
+        vec![2, 2, 2, 3, 4, 3, 3, 5, 8, 8],
         "{:?}",
         scenes.iter().map(|scene| scene.name).collect::<Vec<_>>()
     );
@@ -176,6 +176,7 @@ fn the_lookup_stand_in_of_the_benchmark_leaves_a_picture_of_one_colour_as_it_is_
                 table: None,
                 state: None,
                 images: Vec::new(),
+                masks: Vec::new(),
             }],
         );
         for pixel in frame.rgba_pixels.as_chunks::<4>().0 {

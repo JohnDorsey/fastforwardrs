@@ -298,3 +298,54 @@ fn a_filter_and_a_generator_do_not_read_the_backdrop() {
     assert!(!good(BLUR).reads_the_backdrop());
     assert!(!good(PLASMA).reads_the_backdrop());
 }
+
+#[test]
+fn the_image_of_a_mask_is_a_mask_of_its_number_and_comes_after_the_images_the_shader_has() {
+    let file = read(BLUR).unwrap();
+
+    let names = ["inputImage", "bufferHorizontal", "_isf_mask_0", "_isf_mask_1"].map(str::to_owned);
+    let structure = structure_of(&file, &names).unwrap();
+    assert_eq!(
+        structure.images,
+        [
+            ImageSlot::Picture,
+            ImageSlot::Buffer(0),
+            ImageSlot::Mask(0),
+            ImageSlot::Mask(1)
+        ]
+    );
+    assert_eq!(structure.masks(), 2);
+    assert_eq!(
+        structure.what_each_image_reads(0),
+        [
+            ImageSource::Picture,
+            ImageSource::Clear,
+            ImageSource::Mask(0),
+            ImageSource::Mask(1)
+        ]
+    );
+}
+
+#[test]
+fn a_name_that_only_looks_like_the_image_of_a_mask_is_not_one() {
+    let file = read(BLUR).unwrap();
+    for name in ["_isf_mask_", "_isf_mask_x", "_isf_mask_-1", "mask_0"] {
+        let names = ["inputImage", "bufferHorizontal", name].map(str::to_owned);
+        let why = structure_of(&file, &names).unwrap_err();
+        assert!(why[0].message.contains("cannot give it yet"), "{name}: {why:?}");
+    }
+}
+
+#[test]
+fn the_inputs_that_set_the_size_of_a_buffer_are_the_ones_its_expressions_read() {
+    let source = shader(
+        ", { \"NAME\": \"cells\", \"TYPE\": \"float\", \"MIN\": 1.0, \"MAX\": 64.0 }, { \"NAME\": \"rows\", \"TYPE\": \"long\", \"VALUES\": [1, 2] }, { \"NAME\": \"gain\", \"TYPE\": \"float\" }, { \"NAME\": \"on\", \"TYPE\": \"bool\" }",
+        "{ \"TARGET\": \"small\", \"WIDTH\": \"$WIDTH / cells\", \"HEIGHT\": \"max($HEIGHT / rows, 1)\" }, {}",
+    );
+    let file = read(&source).unwrap();
+
+    assert_eq!(inputs_that_set_a_size(&file), ["cells", "rows"]);
+    // A shader whose buffers have no expression of their own, and one with no buffers, have none.
+    assert!(inputs_that_set_a_size(&read(BLUR).unwrap()).is_empty());
+    assert!(inputs_that_set_a_size(&read(PLASMA).unwrap()).is_empty());
+}

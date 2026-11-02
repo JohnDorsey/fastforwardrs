@@ -5,12 +5,53 @@
 //! Made from the header of the file and the order that the rewriting step bound the images in.
 
 use super::reader::{IsfFile, IsfInputKind, IsfProblem};
-use super::rewrite::NUMBERS_BEFORE_THE_INPUTS;
+use super::rewrite::{MASK_IMAGE_PREFIX, NUMBERS_BEFORE_THE_INPUTS};
 use super::size_expression::{NamesOfNumbers, read_size_expression};
 use crate::engine::{BufferSpec, ImageSlot, PassSpec, ShaderStructure, SizeExpression};
 
+/// Which mask an image is, if the rewriting step made it the image of a mask (see [`MASK_IMAGE_PREFIX`]).
+fn mask_number_of_the_image(name: &str) -> Option<usize> {
+    name.strip_prefix(MASK_IMAGE_PREFIX)?.parse().ok()
+}
+
+/// The inputs that sizes can be made from: the ones that are one number, and where that number is among the numbers of a call.
+fn names_of_the_numbers_of(file: &IsfFile) -> Vec<(&str, usize)> {
+    let mut names: Vec<(&str, usize)> = Vec::new();
+    let mut place = NUMBERS_BEFORE_THE_INPUTS;
+    for input in &file.inputs {
+        if matches!(
+            input.kind,
+            IsfInputKind::Float { .. } | IsfInputKind::Long { .. } | IsfInputKind::Bool { .. }
+        ) {
+            names.push((input.name.as_str(), place));
+        }
+        place += input.kind.numbers();
+    }
+    names
+}
+
+/// The names of the inputs of `file` that a size of a buffer is made from (`"WIDTH": "$WIDTH / cells"`). A size is worked out once for the whole picture, from the numbers of the
+/// call, so an input that sets one cannot have a different value at each pixel. (An expression that cannot be read is not looked into: [`structure_of`] tells what is wrong with it.)
+pub(super) fn inputs_that_set_a_size(file: &IsfFile) -> Vec<String> {
+    let names = names_of_the_numbers_of(file);
+    let names: NamesOfNumbers<'_> = &names;
+    let mut places_read: Vec<usize> = Vec::new();
+    for pass in &file.passes {
+        for text in [&pass.width, &pass.height].into_iter().flatten() {
+            if let Ok(expression) = read_size_expression(text, names) {
+                places_read.extend(expression.places_of_the_numbers_it_reads());
+            }
+        }
+    }
+    names
+        .iter()
+        .filter(|(_, place)| places_read.contains(place))
+        .map(|(name, _)| (*name).to_owned())
+        .collect()
+}
+
 /// What the engine is told of the shader of `file`, whose images the rewriting step bound in the order of `image_names` (the image inputs, then the targets of the passes, then
-/// the imported images).
+/// the imported images, then the masks).
 pub fn structure_of(file: &IsfFile, image_names: &[String]) -> Result<ShaderStructure, Vec<IsfProblem>> {
     let says = |message: String| vec![IsfProblem::nowhere_in_particular(message)];
 
@@ -43,18 +84,7 @@ pub fn structure_of(file: &IsfFile, image_names: &[String]) -> Result<ShaderStru
         }
     }
 
-    // The inputs that sizes can be made from: the ones that are one number, and where that number is among the numbers of a call.
-    let mut names: Vec<(&str, usize)> = Vec::new();
-    let mut place = NUMBERS_BEFORE_THE_INPUTS;
-    for input in &file.inputs {
-        if matches!(
-            input.kind,
-            IsfInputKind::Float { .. } | IsfInputKind::Long { .. } | IsfInputKind::Bool { .. }
-        ) {
-            names.push((input.name.as_str(), place));
-        }
-        place += input.kind.numbers();
-    }
+    let names = names_of_the_numbers_of(file);
     let names: NamesOfNumbers<'_> = &names;
 
     let mut passes = Vec::with_capacity(file.passes.len().max(1));
@@ -93,6 +123,10 @@ pub fn structure_of(file: &IsfFile, image_names: &[String]) -> Result<ShaderStru
             None if name == "inputImage" || name == "endImage" => ImageSlot::Picture,
             // (What is behind the layer: what a transition reads as its start. The registry sees to it that a shader has both of the two pictures of a transition or neither.)
             None if name == "startImage" => ImageSlot::Backdrop,
+            // (A mask that an input is read from: the engine draws it, and the call says from what.)
+            None if mask_number_of_the_image(name).is_some() => {
+                ImageSlot::Mask(mask_number_of_the_image(name).expect("checked in the line above"))
+            }
             // (The images the shader brings with it: the nth is the nth that its header lists.)
             None if file.imported.iter().any(|image| image.name == *name) => ImageSlot::Imported(
                 file.imported

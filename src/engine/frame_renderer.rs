@@ -391,6 +391,7 @@ impl FrameRenderer {
             self.effects_that_run
                 .add_shader_with_images(key, structure.passes.len(), structure.imported_images());
         }
+        self.effects_that_run.set_the_masks_of(key, structure.masks());
         Ok(())
     }
 
@@ -1008,9 +1009,9 @@ impl FrameRenderer {
                                             writer.i32(0).i32(1).f32(sigma).i32(half_width);
                                         })
                                     }
-                                    // (A pass of the colour matrix that only converts: it mixes nothing and cuts nothing off. The step that makes the backdrop into codes is one that
-                                    // converts into them.)
-                                    EffectStep::Conversion { .. } | EffectStep::Backdrop { .. } => {
+                                    // (A pass of the colour matrix that only converts: it mixes nothing and cuts nothing off. The step that makes the backdrop into codes, and the one
+                                    // that makes a mask into codes, are ones that convert into them.)
+                                    EffectStep::Conversion { .. } | EffectStep::Backdrop { .. } | EffectStep::Mask { .. } => {
                                         let into_display = !matches!(*step, EffectStep::Conversion { into_display: false });
                                         let parts = MixingParts {
                                             offsets: [0.0; 3],
@@ -1128,7 +1129,7 @@ impl FrameRenderer {
                                 EffectStep::Call { call, .. } | EffectStep::LaterPass { call, .. } => self
                                     .effects_that_run
                                     .kind_of(&flat.layers[*layer].layer.effects[call].key),
-                                EffectStep::Conversion { .. } | EffectStep::Backdrop { .. } => {
+                                EffectStep::Conversion { .. } | EffectStep::Backdrop { .. } | EffectStep::Mask { .. } => {
                                     Some(KindOfEffect::ColourMatrix)
                                 }
                             };
@@ -1140,11 +1141,17 @@ impl FrameRenderer {
                                     size: NonZeroU64::new(u64::from(slot.size)),
                                 }),
                             };
-                            // (What a step works on: the picture the step before it made, or, for the step that makes the backdrop into codes, what the layers behind the layer made.)
-                            let works_on = if matches!(step, EffectStep::Backdrop { .. }) {
-                                &accumulation_view
-                            } else {
-                                input_view
+                            // (What a step works on: the picture the step before it made, or, for the step that makes the backdrop into codes, what the layers behind the layer made, or, for
+                            // the step that makes a mask into codes, the picture of the group that is the mask.)
+                            let works_on = match *step {
+                                EffectStep::Backdrop { .. } => &accumulation_view,
+                                EffectStep::Mask { call, mask } => {
+                                    &group_views[flat
+                                        .container_of_the_mask(*layer, call, mask)
+                                        .expect("a mask that a step makes into codes is a container of the frame")
+                                        - 1]
+                                }
+                                _ => input_view,
                             };
                             let picture_binding = wgpu::BindGroupEntry {
                                 binding: 1,
@@ -1170,6 +1177,12 @@ impl FrameRenderer {
                                                     .unwrap_or(&effect_views[effect_picture_numbers[layer][drawn]])
                                             }
                                             ImageSource::Clear => &self.clear_pixel,
+                                            // (A mask, as the step before the call made it into codes.)
+                                            ImageSource::Mask(mask) => &effect_views[effect_picture_numbers[layer][shader_step
+                                                .mask_steps
+                                                .get(*mask)
+                                                .copied()
+                                                .expect("a call that reads a mask has the step that makes it")]],
                                             // (What the layers behind the layer made, as the step before the call made it into codes.)
                                             ImageSource::Backdrop => &effect_views[effect_picture_numbers[layer][shader_step
                                                 .backdrop_step
@@ -1188,9 +1201,10 @@ impl FrameRenderer {
                                                     .get(&(*layer, step_call(step)))
                                                     .and_then(|buffers| buffers.base[buffer].as_ref())
                                                     .unwrap_or(&self.clear_pixel),
-                                                ImageSlot::Picture | ImageSlot::Imported(_) | ImageSlot::Backdrop => {
-                                                    &self.clear_pixel
-                                                }
+                                                ImageSlot::Picture
+                                                | ImageSlot::Imported(_)
+                                                | ImageSlot::Backdrop
+                                                | ImageSlot::Mask(_) => &self.clear_pixel,
                                             },
                                         };
                                         entries.push(wgpu::BindGroupEntry {
@@ -1293,8 +1307,8 @@ impl FrameRenderer {
                             render_pass.set_bind_group(0, &bind_group, &[slot.offset]);
                             render_pass.draw(0..3, 0..1);
                             drop(render_pass);
-                            // (The backdrop is made for the call that comes next, which works on the picture that the step before made, as it would have.)
-                            if !matches!(step, EffectStep::Backdrop { .. }) {
+                            // (The backdrop and the masks are made for the call that comes next, which works on the picture that the step before made, as it would have.)
+                            if !matches!(step, EffectStep::Backdrop { .. } | EffectStep::Mask { .. }) {
                                 input_view = &effect_views[picture_number];
                             }
                         }
@@ -1612,8 +1626,8 @@ fn colour_matrix_numbers(values: &[f32]) -> ([[f32; 3]; 3], [f32; 3]) {
 fn step_call(step: &EffectStep) -> usize {
     match step {
         EffectStep::Call { call, .. } | EffectStep::LaterPass { call, .. } => *call,
-        EffectStep::Conversion { .. } | EffectStep::Backdrop { .. } => {
-            unreachable!("a conversion, and the step that makes the backdrop, are not run by a shader")
+        EffectStep::Conversion { .. } | EffectStep::Backdrop { .. } | EffectStep::Mask { .. } => {
+            unreachable!("a conversion, and the steps that make the backdrop and the masks, are not run by a shader")
         }
     }
 }

@@ -116,6 +116,10 @@ pub enum EffectStep {
     /// display codes, for the call with this number among the layer's effects that reads it (phase 6.6). It is right before that call and **does not change the picture that the next
     /// effect works on**: the call reads this picture and the layer's own. (In the compatibility mode the numbers already are codes, and the pass copies.)
     Backdrop { call: usize },
+    /// A pass of its own that makes the mask number `mask` of the call with this number among the layer's effects (the picture of a group that is drawn off the frame: see
+    /// [`EffectCall::masks`]) into a picture of display codes, for the call to read (`docs/shader-masks-design.md`). It is right before the call, once for each mask, and **does not
+    /// change the picture that the next effect works on**: the call reads this picture and the layer's own.
+    Mask { call: usize, mask: usize },
 }
 
 /// What [`steps_of_a_run_of_effects`] needs to know of an effect that runs.
@@ -131,6 +135,8 @@ pub struct EffectToRun {
     /// Whether the effect reads what is behind the layer (a shader that was given with a picture of that kind: see [`EffectsThatRun::reads_the_backdrop`]), so that a step makes
     /// the backdrop into codes before it. Only a shader does, and a shader works on the codes of a screen.
     pub reads_the_backdrop: bool,
+    /// How many masks the effect reads (a shader that was given as one that does: see [`EffectsThatRun::masks_of`]), so that a step makes each into codes before it.
+    pub masks: usize,
 }
 
 /// The steps that run `effects`, in order, on a picture of light (`working_space_is_light`) or of codes already (the compatibility mode), and give light back.
@@ -164,6 +170,12 @@ pub fn steps_of_a_run_of_effects(effects: &[EffectToRun], working_space_is_light
     ) {
         if effect.reads_the_backdrop {
             steps.push(EffectStep::Backdrop { call: effect.call });
+        }
+        for mask in 0..effect.masks {
+            steps.push(EffectStep::Mask {
+                call: effect.call,
+                mask,
+            });
         }
         steps.push(EffectStep::Call {
             call: effect.call,
@@ -278,6 +290,8 @@ struct FactsOfAShader {
     imported_images: usize,
     /// Whether it reads what is behind its layer (phase 6.6).
     reads_the_backdrop: bool,
+    /// How many masks it reads (which a call has to have the groups of).
+    masks: usize,
 }
 
 /// The effects the engine can run: the ones it has of its own, and the ones that were given to it as shaders.
@@ -314,8 +328,23 @@ impl EffectsThatRun {
                 passes: passes.max(1),
                 imported_images: imported,
                 reads_the_backdrop: false,
+                masks: 0,
             },
         );
+    }
+
+    /// The effect under `key` is also run, by a shader that is run in `passes` passes (at least one), brings `imported` images with it, and **reads `masks` masks** (`docs/shader-masks-design.md`):
+    /// a call that does not have that many groups for them is not run.
+    pub fn add_shader_with_masks(&mut self, key: &str, passes: usize, imported: usize, masks: usize) {
+        self.add_shader_with_images(key, passes, imported);
+        self.set_the_masks_of(key, masks);
+    }
+
+    /// The shader that was given under `key` reads `masks` masks. (Nothing happens for a key that was not given.)
+    pub fn set_the_masks_of(&mut self, key: &str, masks: usize) {
+        if let Some(facts) = self.keys_of_shaders.get_mut(key) {
+            facts.masks = masks;
+        }
     }
 
     /// The effect under `key` is also run, by a shader that is run in `passes` passes (at least one), brings `imported` images with it, and **reads what is behind its layer** as well as the
@@ -332,6 +361,11 @@ impl EffectsThatRun {
         self.keys_of_shaders
             .get(key)
             .is_some_and(|facts| facts.reads_the_backdrop)
+    }
+
+    /// How many masks the shader under `key` reads (none for anything that is not a shader that was given).
+    pub fn masks_of(&self, key: &str) -> usize {
+        self.keys_of_shaders.get(key).map_or(0, |facts| facts.masks)
     }
 
     /// How many images the shader under `key` brings with it (none for anything that is not a shader that was given).
@@ -485,6 +519,7 @@ fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun, in_th
                 if effect.values.len() <= MOST_NUMBERS_OF_A_FOREIGN_EFFECT
                     && numbers_are_finite
                     && effect.images.len() == effects_that_run.imported_images_of(&effect.key)
+                    && effect.masks.len() == effects_that_run.masks_of(&effect.key)
                     && (in_the_frame || !effects_that_run.reads_the_backdrop(&effect.key)) =>
             {
                 calls.push(number);
@@ -522,6 +557,11 @@ fn effects_pass_of(
                 converts_itself: kind.converts_itself_for_a_call(call_itself),
                 reads_the_backdrop: kind == KindOfEffect::Shader
                     && effects_that_run.reads_the_backdrop(&call_itself.key),
+                masks: if kind == KindOfEffect::Shader {
+                    effects_that_run.masks_of(&call_itself.key)
+                } else {
+                    0
+                },
             }
         })
         .collect();

@@ -1,0 +1,19 @@
+Picture engine benchmark
+  adapter: AMD Radeon(TM) Graphics (Vulkan)
+  frames: 1920 by 1080 pixels, 60 timed of each scene, one at a time, each all the way before the next
+  sending one video picture of that size to the card, once: 11.2 ms
+
+  scene                                                        passes   frames/s   mean ms   best ms  worst ms   waiting (ms)
+  a black frame (the output and the read-back)                      2      407.4      2.45      1.65      2.85           2.37
+  one picture of video                                              2      304.2      3.29      2.71      3.79           3.20
+  four pictures                                                     2      247.9      4.03      3.74      4.56           3.92
+  four pictures, a colour matrix                                    3      208.7      4.79      4.50      5.52           4.68
+  four pictures, one blur (two passes)                              4      101.7      9.83      9.07     10.72           9.68
+  four pictures, the lookup stand-in                                3      139.8      7.15      6.70      7.68           7.03
+  four pictures, a shader that reads no mask                        3      204.2      4.90      4.26      5.83           4.75
+  four pictures, the same shader reading a mask (a group drawn off the frame)      5      161.6      6.19      5.67      7.91           6.04
+  the whole stack: two blurs, a matrix, a lookup                    8       49.7     20.11     19.37     22.13          19.89
+  the whole stack, with new pictures of video in every frame        8       44.0     22.72     22.14     23.97          22.10
+
+  the whole stack, with new pictures of video in every frame: 44.0 frames to the second; the gate is 60 at 720p on the integrated graphics: not at that size, so not the gate
+

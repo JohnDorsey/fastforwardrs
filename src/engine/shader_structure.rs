@@ -77,6 +77,24 @@ pub enum SizeExpression {
 }
 
 impl SizeExpression {
+    /// The places, among the numbers of a call, of the numbers that the expression is made from (those it reads by name), each as many times as it is read.
+    pub fn places_of_the_numbers_it_reads(&self) -> Vec<usize> {
+        match self {
+            Self::Number(_) | Self::Width | Self::Height => Vec::new(),
+            Self::Value(place) => vec![*place],
+            Self::Negate(inner) => inner.places_of_the_numbers_it_reads(),
+            Self::Binary(_, left, right) => {
+                let mut places = left.places_of_the_numbers_it_reads();
+                places.extend(right.places_of_the_numbers_it_reads());
+                places
+            }
+            Self::Function(_, arguments) => arguments
+                .iter()
+                .flat_map(Self::places_of_the_numbers_it_reads)
+                .collect(),
+        }
+    }
+
     /// What the expression comes to for a picture `picture_size` (width, height) and a call with these `numbers`. A number that the call does not have is zero; the result can be
     /// anything that a `f64` can be (not a number, too: see [`size_from`]).
     pub fn evaluate(&self, picture_size: (u32, u32), numbers: &[f32]) -> f64 {
@@ -159,6 +177,9 @@ pub enum ImageSlot {
     /// What is behind the layer (phase 6.6): the picture that the layers behind it make, as it is when the effect runs, which a transition reads as `startImage` (and reads the layer's own
     /// picture, [`Self::Picture`], as `endImage`). Only a layer of the frame itself has anything behind it that is opaque, and a shader that reads this is not run on any other.
     Backdrop,
+    /// The mask with this number (`docs/shader-masks-design.md`): a picture that the engine draws from a group of layers, which the shader reads to give a float input a value at each
+    /// pixel. The call says which groups they are (`EffectCall::masks`).
+    Mask(usize),
 }
 
 /// A picture that a shader draws into in one pass and reads in the next.
@@ -227,6 +248,8 @@ pub enum ImageSource {
     FromTheFrameBefore,
     /// The picture that the layers behind the layer make, which the step before the call made into codes (see [`EffectStep::Backdrop`](super::EffectStep)): the same in every pass of the call.
     Backdrop,
+    /// The mask with this number (see [`ImageSlot::Mask`]).
+    Mask(usize),
 }
 
 impl ShaderStructure {
@@ -289,6 +312,19 @@ impl ShaderStructure {
                 }
             }
         }
+        let mut mask_seen = [false; MOST_IMAGES_OF_A_SHADER];
+        for image in &self.images {
+            if let ImageSlot::Mask(number) = image {
+                if *number >= MOST_IMAGES_OF_A_SHADER {
+                    return Err(format!(
+                        "a picture of the shader is mask {number}, which there cannot be"
+                    ));
+                }
+                if std::mem::replace(&mut mask_seen[*number], true) {
+                    return Err(format!("mask {number} is two of the pictures of the shader"));
+                }
+            }
+        }
         let mut drawn_into = vec![false; self.buffers.len()];
         for (number, pass) in self.passes.iter().enumerate() {
             let Some(target) = pass.target else { continue };
@@ -309,6 +345,18 @@ impl ShaderStructure {
             );
         }
         Ok(())
+    }
+
+    /// How many masks the shader reads: the number after the largest of them.
+    pub fn masks(&self) -> usize {
+        self.images
+            .iter()
+            .filter_map(|image| match image {
+                ImageSlot::Mask(number) => Some(number + 1),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     /// How many images the shader brings with it, which a call has to name the pictures of: the number after the largest of them.
@@ -372,6 +420,7 @@ impl ShaderStructure {
                 ImageSlot::Picture => ImageSource::Picture,
                 ImageSlot::Backdrop => ImageSource::Backdrop,
                 ImageSlot::Imported(number) => ImageSource::Imported(*number),
+                ImageSlot::Mask(number) => ImageSource::Mask(*number),
                 ImageSlot::Buffer(buffer) => self
                     .passes
                     .iter()
