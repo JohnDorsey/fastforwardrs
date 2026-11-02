@@ -313,28 +313,37 @@ fn imported_pictures_of(effect: &LayerEffect) -> Vec<ImportedPicture> {
         .collect()
 }
 
-/// The key that the engine has the shader of `effect` under, and the tracks of the masks it reads in the order it numbers them: for a shader whose numbers are all on their sliders, its own
-/// key and none; for one that has a number read from a mask, the key of the shader that does that (made, and given to the engine, if it was not). `None` if that shader cannot be made.
-fn shader_and_masks_of(effect: &LayerEffect) -> Option<(String, Vec<TrackId>)> {
+/// The key that the engine has the shader of `effect` under, the tracks of the masks it reads in the order it numbers them, and the numbers of the graphs that map its numbers (after the numbers
+/// of all its inputs, in the order of the numbers): for a shader whose numbers are all on their sliders, its own key and none; for one that has a number read from a mask, the key of the
+/// shader that does that (made, and given to the engine, if it was not). `None` if that shader cannot be made.
+fn shader_and_masks_of(effect: &LayerEffect) -> Option<(String, Vec<TrackId>, Vec<f32>)> {
     if effect.driven.is_empty() {
-        return Some((effect.kind.key().to_owned(), Vec::new()));
+        return Some((effect.kind.key().to_owned(), Vec::new(), Vec::new()));
     }
     let tracks = effect.driven.tracks();
-    let inputs: Vec<crate::isf::DrivenInput> = effect
-        .driven
-        .iter()
-        .filter_map(|(slot, driven)| {
-            Some(crate::isf::DrivenInput {
-                name: effect.kind.parameters().get(slot)?.id.to_string(),
-                mask: tracks
-                    .iter()
-                    .position(|track| driven.source.tracks().any(|source| source == *track))?,
-                channel: driven.channel,
-            })
-        })
-        .collect();
+    let mut inputs: Vec<crate::isf::DrivenInput> = Vec::new();
+    let mut graph_numbers: Vec<f32> = Vec::new();
+    for (slot, driven) in effect.driven.iter() {
+        let Some(parameter) = effect.kind.parameters().get(slot) else {
+            continue;
+        };
+        let Some(mask) = tracks
+            .iter()
+            .position(|track| driven.source.tracks().any(|source| source == *track))
+        else {
+            continue;
+        };
+        inputs.push(crate::isf::DrivenInput {
+            name: parameter.id.to_string(),
+            mask,
+            channel: driven.channel,
+            mapping: driven.map.mapping(),
+        });
+        // (Only for an input that is in the shader: the numbers are read in the order of its inputs.)
+        graph_numbers.extend(driven.map.numbers_of_the_call().into_iter().flatten());
+    }
     let key = crate::isf::driven_variant_of(effect.kind.descriptor(), &inputs)?;
-    Some((key, tracks))
+    Some((key, tracks, graph_numbers))
 }
 
 /// What `effects` do to a picture at `timeline_frame`, one after another in the order they are applied in. An effect that does nothing at the frame is left out, and neighbouring
@@ -368,9 +377,11 @@ pub fn operations_of_effects(
                 }
             }
             numbers.extend(crate::isf::numbers_of_the_values(&values));
-            let Some((key, masks)) = shader_and_masks_of(effect) else {
+            let Some((key, masks, graph_numbers)) = shader_and_masks_of(effect) else {
                 continue;
             };
+            // (The points of the graphs that map the numbers read from masks: after the numbers of all the inputs.)
+            numbers.extend(graph_numbers);
             PictureOperation::Shader {
                 key,
                 masks,

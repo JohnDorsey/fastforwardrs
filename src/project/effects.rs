@@ -42,7 +42,10 @@ pub use descriptor::{
     MOST_IMAGES_A_SHADER_BRINGS, MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER, MOST_VALUES_OF_AN_EFFECT,
     ParameterControl, ParameterDescriptor, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueScale,
 };
-pub use driven::{DrivenValue, DrivenValues, MaskChannel, MaskSource};
+pub use driven::{
+    DrivenValue, DrivenValues, Graph, LEAST_DISTANCE_BETWEEN_PLACES, MOST_POINTS_OF_A_GRAPH, MaskChannel, MaskMap,
+    MaskSource, NUMBERS_OF_A_GRAPH,
+};
 pub use installed::{
     EffectPreset, InstalledPlugin, PluginAddress, installed_plugin_for, installed_plugins, installed_shaders,
     set_installed_plugins, set_installed_shaders,
@@ -193,6 +196,35 @@ impl Effect {
             );
         }
         None
+    }
+
+    /// Why the value in place `slot` cannot be mapped by a graph, if it cannot: the points of a graph are [`NUMBERS_OF_A_GRAPH`] numbers of the call, after the numbers of all the inputs, and a call has
+    /// only so many numbers (counting the graphs of the other values of the effect that have one).
+    pub fn why_the_value_cannot_have_a_graph(&self, slot: usize) -> Option<&'static str> {
+        let other_graphs = self
+            .driven
+            .iter()
+            .filter(|(other, one)| *other != slot && matches!(one.map, MaskMap::Graph(_)))
+            .count();
+        (self.numbers_of_a_call_with_graphs(other_graphs + 1) > crate::isf::MOST_NUMBERS_OF_A_CALL)
+            .then_some("the shader has so many numbers that there is no room for the points of a graph among them")
+    }
+
+    /// Whether the graphs that the values of the effect have fit among the numbers of a call.
+    pub fn has_room_for_its_graphs(&self) -> bool {
+        let graphs = self
+            .driven
+            .iter()
+            .filter(|(_, one)| matches!(one.map, MaskMap::Graph(_)))
+            .count();
+        self.numbers_of_a_call_with_graphs(graphs) <= crate::isf::MOST_NUMBERS_OF_A_CALL
+    }
+
+    /// How many numbers a call of the effect has if `graphs` of its values are mapped by a graph: the four of the shader's own, those of the values, and the points of the graphs.
+    fn numbers_of_a_call_with_graphs(&self, graphs: usize) -> usize {
+        crate::isf::NUMBERS_BEFORE_THE_INPUTS
+            + crate::isf::numbers_of_the_values(&self.values).len()
+            + graphs * NUMBERS_OF_A_GRAPH
     }
 
     /// The effect with the value in place `slot` read as `driven` says, or from its slider again (`None`). `None` if the value cannot be read from a mask (see

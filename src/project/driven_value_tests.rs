@@ -516,3 +516,55 @@ fn a_number_that_a_buffer_is_sized_from_cannot_be_read_from_a_mask_and_another_o
     assert_eq!(driven_of(&project, owner, instance, cells), None);
     assert!(driven_of(&project, owner, instance, gain).is_some());
 }
+
+// --- a graph needs room among the numbers of the call
+
+/// A shader with `count` numbers that have a range, called `p0`, `p1`, ...
+fn a_shader_with_this_many_numbers(count: usize) -> EffectKind {
+    let floats: Vec<String> = (0..count)
+        .map(|number| {
+            format!("{{ \"NAME\": \"p{number}\", \"TYPE\": \"float\", \"MIN\": 0.0, \"MAX\": 1.0, \"DEFAULT\": 0.5 }}")
+        })
+        .collect();
+    let text = format!(
+        "/*{{ \"INPUTS\": [ {{ \"NAME\": \"inputImage\", \"TYPE\": \"image\" }}, {} ] }}*/\nvoid main() {{ gl_FragColor = IMG_THIS_PIXEL(inputImage) * p0; }}\n",
+        floats.join(", ")
+    );
+    let file = crate::isf::read(&text).unwrap();
+    EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "many.fs", &text)).unwrap()
+}
+
+fn a_graph() -> MaskMap {
+    MaskMap::Graph(Graph::from_points(&[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)]).unwrap())
+}
+
+#[test]
+fn a_graph_has_room_among_the_numbers_of_a_shader_that_is_not_full_and_not_among_those_of_one_that_nearly_is() {
+    let (mut project, [_, middle, _], [clip, ..]) = three_tracks();
+    let owner = Member::Clip(clip);
+    // (The shader's own four, 30 numbers and two graphs of sixteen are 66: two graphs do not fit in a call of 64, and one does.)
+    let kind = a_shader_with_this_many_numbers(30);
+    let instance = project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
+    let with_a_graph = DrivenValue::from_a_track(middle, MaskChannel::Red, 0.5).with_the_map(a_graph());
+
+    let first = project.set_driven_value(owner, instance, 3, Some(with_a_graph));
+    let second = project.set_driven_value(owner, instance, 4, Some(with_a_graph));
+    let straight_instead = project.set_driven_value(owner, instance, 4, from(middle, MaskChannel::Red, 0.5));
+
+    assert_eq!(first, Ok(()));
+    assert!(
+        matches!(second, Err(EditError::ValueCannotBeDriven { reason }) if reason.contains("no room")),
+        "{second:?}"
+    );
+    assert_eq!(straight_instead, Ok(()), "a straight map takes no room");
+    // And one that has fifty-eight numbers has no room for even one.
+    let kind = a_shader_with_this_many_numbers(58);
+    let full = project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
+    let refused = project.set_driven_value(owner, full, 0, Some(with_a_graph));
+    assert!(
+        matches!(refused, Err(EditError::ValueCannotBeDriven { reason }) if reason.contains("no room")),
+        "{refused:?}"
+    );
+    let allowed = project.set_driven_value(owner, full, 0, from(middle, MaskChannel::Red, 0.5));
+    assert_eq!(allowed, Ok(()));
+}

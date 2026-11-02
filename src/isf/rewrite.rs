@@ -64,6 +64,27 @@ impl MaskChannel {
     }
 }
 
+/// How many points a graph has at most (see [`Mapping::Graph`]).
+pub const MOST_POINTS_OF_A_GRAPH: usize = 8;
+
+/// How many numbers of a call a graph takes: the places of its points, then their heights.
+pub const NUMBERS_OF_A_GRAPH: usize = 2 * MOST_POINTS_OF_A_GRAPH;
+
+/// How many numbers a call can have, the four of the shader's own among them: the uniform block, less the vec4 that has the size of the picture.
+pub const MOST_NUMBERS_OF_A_CALL: usize = 4 * (VEC4S_OF_THE_UNIFORM_BLOCK - 1);
+
+/// How the unit of the channel of a mask (0 where the channel is nothing, 1 where it is all) becomes the place of the value in the range of the input (0 is the least of it, 1 the most).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Mapping {
+    /// The place is the unit. (Needs nothing in the call.)
+    Straight,
+    /// The place is the height of a **graph of line segments** at the unit. The graph is **data**, not text of the shader: its [`MOST_POINTS_OF_A_GRAPH`] points are [`NUMBERS_OF_A_GRAPH`]
+    /// numbers of the call, **after the numbers of all the inputs** and, when there are several graphs, one after another in the order of the inputs of the file: first the places of the
+    /// points (0 to 1, going up, the first 0 and the last 1), then their heights (0 to 1). A graph with fewer points repeats its last point to fill the rest, so that dragging a point
+    /// compiles nothing.
+    Graph,
+}
+
 /// A float input of a shader whose value is read, at each pixel, from a **mask**: a picture that the engine draws and the shader is given as one more image. (The slider's own number is
 /// what the input is **where the mask has nothing**; see `rewrite_with_driven_inputs`.)
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -73,6 +94,7 @@ pub struct DrivenInput {
     /// Which mask: the masks of a shader are numbered from 0, and inputs may share one.
     pub mask: usize,
     pub channel: MaskChannel,
+    pub mapping: Mapping,
 }
 
 /// A GLSL number for `value` (always with a point or an exponent, so that it is a float).
@@ -509,7 +531,37 @@ struct InputReadFromAMask<'file> {
     maximum: f32,
     /// Which of the numbers of a call is the input's own: the value it has where the mask has nothing.
     own_number: usize,
+    /// Which of the numbers of a call the points of its graph begin at, if it has one.
+    graph_at: Option<usize>,
     read_from: &'file DrivenInput,
+}
+
+/// The GLSL function `_isf_graph_NAME(t)`: the height, 0 to 1, of the graph at `t`, 0 to 1, whose points are the numbers of the call that begin at `first_number` (the places of the points,
+/// then their heights). One segment for each pair of points, each used for the places between its points; a pair that is at one place has no places between and is left alone.
+fn function_of_a_graph(name: &str, first_number: usize) -> String {
+    let place = |point: usize| number_expression(first_number + point);
+    let height = |point: usize| number_expression(first_number + MOST_POINTS_OF_A_GRAPH + point);
+    let mut text = format!(
+        "float _isf_graph_{name}(float t) {{
+    float height = {};
+",
+        height(0)
+    );
+    for point in 0..MOST_POINTS_OF_A_GRAPH - 1 {
+        let (from, to) = (place(point), place(point + 1));
+        text.push_str(&format!(
+            "    if (t >= {from} && t <= {to} && {to} > {from}) {{ height = mix({}, {}, (t - {from}) / ({to} - {from})); }}
+",
+            height(point),
+            height(point + 1),
+        ));
+    }
+    text.push_str(
+        "    return height;
+}
+",
+    );
+    text
 }
 
 /// The globals that the inputs read from masks are, and the function that fills them in: each mask is read once (at the pixel being made), and each input is worked out from that one
@@ -518,6 +570,9 @@ fn function_that_sets_up_the_driven_inputs(inputs: &[InputReadFromAMask<'_>], ma
     let mut text = String::new();
     for input in inputs {
         text.push_str(&format!("float _isf_driven_{};\n", input.name));
+        if let Some(first_number) = input.graph_at {
+            text.push_str(&function_of_a_graph(input.name, first_number));
+        }
     }
     text.push_str("void _isf_set_up_driven() {\n");
     for mask in 0..masks {
@@ -531,8 +586,13 @@ fn function_that_sets_up_the_driven_inputs(inputs: &[InputReadFromAMask<'_>], ma
             .read_from
             .channel
             .expression_for(&format!("_isf_mask_{mask}_here"));
+        // (Where the place in the range is the unit, or the height of the graph at the unit.)
+        let place = match input.graph_at {
+            Some(_) => format!("_isf_graph_{name}(_isf_unit_of_the_channel_{name})"),
+            None => format!("_isf_unit_of_the_channel_{name}"),
+        };
         text.push_str(&format!(
-            "    float _isf_unit_of_the_channel_{name} = (_isf_mask_{mask}_cover > 0.0) ? clamp({channel} / _isf_mask_{mask}_cover, 0.0, 1.0) : 0.0;\n    _isf_driven_{name} = mix({own}, {minimum} + {range} * _isf_unit_of_the_channel_{name}, _isf_mask_{mask}_cover);\n",
+            "    float _isf_unit_of_the_channel_{name} = (_isf_mask_{mask}_cover > 0.0) ? clamp({channel} / _isf_mask_{mask}_cover, 0.0, 1.0) : 0.0;\n    _isf_driven_{name} = mix({own}, {minimum} + {range} * {place}, _isf_mask_{mask}_cover);\n",
             own = number_expression(input.own_number),
             minimum = glsl_float(input.minimum),
             range = glsl_float(input.maximum - input.minimum),
@@ -665,6 +725,7 @@ pub fn rewrite_with_driven_inputs(file: &IsfFile, driven: &[DrivenInput]) -> Res
                         minimum: *minimum,
                         maximum: *maximum,
                         own_number: number,
+                        graph_at: None,
                         read_from,
                     });
                     Some(format!("_isf_driven_{}", input.name))
@@ -690,6 +751,26 @@ pub fn rewrite_with_driven_inputs(file: &IsfFile, driven: &[DrivenInput]) -> Res
             prelude.push_str(&format!("#define {} ({expression})\n", input.name));
         }
         number += input.kind.numbers();
+    }
+    // (The points of the graphs come after the numbers of all the inputs, one graph after another in the order of the file.)
+    for input in &mut inputs_read_from_masks {
+        if input.read_from.mapping == Mapping::Graph {
+            input.graph_at = Some(number);
+            number += NUMBERS_OF_A_GRAPH;
+        }
+    }
+    if number > MOST_NUMBERS_OF_A_CALL {
+        let name = inputs_read_from_masks
+            .iter()
+            .find(|input| {
+                input
+                    .graph_at
+                    .is_some_and(|at| at + NUMBERS_OF_A_GRAPH > MOST_NUMBERS_OF_A_CALL)
+            })
+            .map_or("", |input| input.name);
+        return Err(IsfProblem::nowhere_in_particular(format!(
+            "there is no room for the graph of the input {name} among the numbers of the shader: a graph takes {NUMBERS_OF_A_GRAPH} numbers of the {MOST_NUMBERS_OF_A_CALL} that a shader can have"
+        )));
     }
     for (place, name) in image_names.iter().enumerate() {
         names_of_the_shader.insert(name.as_str());

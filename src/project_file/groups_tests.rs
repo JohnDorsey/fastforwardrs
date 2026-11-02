@@ -235,8 +235,8 @@ fn a_project_with_no_groups_has_no_groups_and_no_badges_in_its_file_and_the_badg
     assert!(!text.contains("groups"), "{text}");
     assert!(!text.contains("badges"), "{text}");
     assert!(text.contains(&version_line(FILE_FORMAT_VERSION)));
-    // (Rewritten on purpose when values could be read from masks: 24, the version that has `driven` in an effect; when tracks got an eye: 23, the version that has `hidden` in the document of a track; in phase 13.5: 22, the version that has the switch of a synthesizer that passes notes on; in phase 13.3: 21, the version that has the MIDI clip; 20 in phase 12.1, the version that has the sharing of a track, the tail policies and the length of an effect's tail; it was 19 in phase 10.4, the version that has the state of an effect's plugin; 18 for a text made of an effect (phase 9.4), 17 for the images of a shader, 16 for the shader of an effect, 15 for the adjustment clip, 14 for the plugin libraries, and 13 for the shown-ness of the effects.)
-    assert_eq!(FILE_FORMAT_VERSION, 24);
+    // (Rewritten on purpose when a graph could map the value of a mask: 25, the version that has `graph` in a `driven` number; when values could be read from masks: 24, the version that has `driven` in an effect; when tracks got an eye: 23, the version that has `hidden` in the document of a track; in phase 13.5: 22, the version that has the switch of a synthesizer that passes notes on; in phase 13.3: 21, the version that has the MIDI clip; 20 in phase 12.1, the version that has the sharing of a track, the tail policies and the length of an effect's tail; it was 19 in phase 10.4, the version that has the state of an effect's plugin; 18 for a text made of an effect (phase 9.4), 17 for the images of a shader, 16 for the shader of an effect, 15 for the adjustment clip, 14 for the plugin libraries, and 13 for the shown-ness of the effects.)
+    assert_eq!(FILE_FORMAT_VERSION, 25);
 }
 
 // --- the trip through the file ---

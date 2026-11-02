@@ -1592,3 +1592,66 @@ fn a_clip_with_a_state_and_a_transition_after_it_is_the_same_picture_in_the_fram
         }
     });
 }
+
+#[test]
+fn the_engine_draws_the_number_that_a_graph_makes_of_the_picture_of_a_hidden_track_in_the_frame_of_the_export() {
+    use crate::engine::FrameRenderer;
+    use crate::project::{DrivenValue, Graph, MaskChannel, MaskMap, Member};
+    let mut project = video_with_a_shader_that_reads_a_hidden_picture_file();
+    let (in_front, host_clip) = (
+        project.tracks()[0].id(),
+        project.tracks()[1].placement_at_index(0).unwrap().id,
+    );
+    let instance = project
+        .chain_of_the_member(Member::Clip(host_clip))
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap()
+        .instance();
+    // The map is a graph that turns the number upside down: a red of 200 of 255 is a level of 55.
+    let upside_down = Graph::from_points(&[(0.0, 1.0), (1.0, 0.0)]).unwrap();
+    project
+        .set_driven_value(
+            Member::Clip(host_clip),
+            instance,
+            0,
+            Some(DrivenValue::from_a_track(in_front, MaskChannel::Red, 0.0).with_the_map(MaskMap::Graph(upside_down))),
+        )
+        .unwrap();
+    let plan = plan_of(&project);
+    let images = HashMap::from([(
+        SourceMediaIdentifier::new(2),
+        RgbaPicture {
+            width_in_pixels: 2,
+            height_in_pixels: 2,
+            rgba_pixels: [200, 10, 10, 255].repeat(4),
+        },
+    )]);
+    let mut describer = describer_of(&plan, &script_of_pictures(255), images, Box::new(NoFontsYet));
+    let (described, sent) = describe(&mut describer, 10);
+    assert!(
+        described.description.layers[0].effects[0].key.contains(":graph"),
+        "{}",
+        described.description.layers[0].effects[0].key
+    );
+    assert_eq!(
+        described.description.layers[0].effects[0].values.len(),
+        4 + 1 + crate::project::NUMBERS_OF_A_GRAPH,
+        "the shader's own four, the number, and the points of the graph"
+    );
+
+    crate::engine::testing::with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        let (finished, statistics) =
+            rendered_on(&mut renderer, &mut std::collections::HashSet::new(), &described, &sent);
+
+        assert_eq!(statistics.effects_not_run, 0);
+        let [red, green, blue, _] = finished.pixel(160, 90);
+        assert!(
+            red.abs_diff(55) <= 1 && green.abs_diff(55) <= 1 && blue.abs_diff(55) <= 1,
+            "the grey of the red of the picture file turned upside down by the graph, 55: {:?}",
+            finished.pixel(160, 90)
+        );
+    });
+}

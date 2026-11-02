@@ -6,7 +6,10 @@
 
 use crate::project::tracks::TrackId;
 
+mod graph;
+
 pub use crate::isf::MaskChannel;
+pub use graph::{Graph, LEAST_DISTANCE_BETWEEN_PLACES, MOST_POINTS_OF_A_GRAPH, NUMBERS_OF_A_GRAPH};
 
 /// What a mask is made of: where the picture that a value is read from comes from.
 ///
@@ -26,6 +29,42 @@ impl MaskSource {
     }
 }
 
+/// How the value of the mask's channel becomes the place of the value in the range of the value that is driven.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum MaskMap {
+    /// The place is the value of the channel: nothing of it is the least of the range and all of it is the most.
+    #[default]
+    Straight,
+    /// The place is the height of a graph of line segments at the value of the channel.
+    Graph(Graph),
+}
+
+impl MaskMap {
+    /// How the shader that reads the value is made: with a graph (whose numbers the call carries) or without.
+    pub fn mapping(self) -> crate::isf::Mapping {
+        match self {
+            Self::Straight => crate::isf::Mapping::Straight,
+            Self::Graph(_) => crate::isf::Mapping::Graph,
+        }
+    }
+
+    /// The numbers of a call that the map is, if it is a graph.
+    pub fn numbers_of_the_call(self) -> Option<[f32; NUMBERS_OF_A_GRAPH]> {
+        match self {
+            Self::Straight => None,
+            Self::Graph(graph) => Some(graph.numbers()),
+        }
+    }
+
+    /// The graph the map is, or the straight line, which is what it is until a graph is drawn.
+    pub fn graph_or_straight(self) -> Graph {
+        match self {
+            Self::Straight => Graph::straight(),
+            Self::Graph(graph) => graph,
+        }
+    }
+}
+
 /// A value of an effect that is read from a mask.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DrivenValue {
@@ -35,6 +74,8 @@ pub struct DrivenValue {
     /// What the value is **where the mask has nothing** (a gap in the track, or the part of the picture its clips do not cover), and, mixed in by how much the mask covers, where it
     /// covers some. A number of the value's own range, set by a slider made for it in the settings of the mask.
     pub value_where_nothing: f32,
+    /// How the channel's value becomes the place in the range: straight, or by a graph the person drew.
+    pub map: MaskMap,
 }
 
 impl DrivenValue {
@@ -44,7 +85,14 @@ impl DrivenValue {
             source: MaskSource::Track(track),
             channel,
             value_where_nothing,
+            map: MaskMap::Straight,
         }
+    }
+
+    /// The same value, mapped as `map` says.
+    #[must_use]
+    pub fn with_the_map(self, map: MaskMap) -> Self {
+        Self { map, ..self }
     }
 
     /// Whether the number is one that can be kept (it is a number).

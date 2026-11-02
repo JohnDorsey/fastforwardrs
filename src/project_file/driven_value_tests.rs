@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use super::tests::{edited_project, link_to_missing_video, saved, version_line};
 use super::*;
-use crate::project::{DrivenValue, DrivenValues, EffectKind, MaskChannel, MaskSource, Member};
+use crate::project::{DrivenValue, DrivenValues, EffectKind, MaskChannel, Member};
 
 /// A shader with two numbers that have a range, `amount` (0 to 1) and `strength` (2 to 6), and a colour called `tint`.
 const TINT: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"amount\", \"TYPE\": \"float\", \"DEFAULT\": 0.25 }, { \"NAME\": \"strength\", \"TYPE\": \"float\", \"MIN\": 2.0, \"MAX\": 6.0, \"DEFAULT\": 3.0 }, { \"NAME\": \"tint\", \"TYPE\": \"color\", \"DEFAULT\": [1.0, 0.0, 0.0, 1.0] } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }\n";
@@ -88,11 +88,7 @@ fn the_numbers_read_from_masks_come_back_as_they_were_and_are_saved_again_as_the
         effect.driven_values(),
         &DrivenValues::from_places(vec![(
             0,
-            DrivenValue {
-                source: MaskSource::Track(loaded.tracks()[0].id()),
-                channel: MaskChannel::Brightness,
-                value_where_nothing: 0.25,
-            }
+            DrivenValue::from_a_track(loaded.tracks()[0].id(), MaskChannel::Brightness, 0.25)
         )])
         .unwrap()
     );
@@ -224,4 +220,152 @@ fn a_kind_of_source_this_version_does_not_know_a_channel_it_does_not_know_and_a_
         let text = text_with_the_driven_document_changed(|driven| change(driven));
         assert!(project_from_json_text(&text).is_err(), "{what}");
     }
+}
+
+// ---- version 25: the graph that maps the mask's value (docs/shader-masks-design.md, 8)
+
+use crate::project::{Graph, MaskMap};
+
+/// The project of `project_with_a_value_read_from_the_front_track`, with a triangle for the map of the number.
+fn project_with_a_graph() -> (Project, Graph) {
+    let (mut project, front, back) = project_with_a_value_read_from_the_front_track();
+    let triangle = Graph::from_points(&[(0.0, 0.0), (0.5, 1.0), (1.0, 0.25)]).unwrap();
+    let clip = project.track(back).unwrap().placement_at_index(0).unwrap().id;
+    let instance = project
+        .chain_of_the_member(Member::Clip(clip))
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap()
+        .instance();
+    project
+        .set_driven_value(
+            Member::Clip(clip),
+            instance,
+            0,
+            Some(
+                DrivenValue::from_a_track(front, MaskChannel::Brightness, 0.25).with_the_map(MaskMap::Graph(triangle)),
+            ),
+        )
+        .unwrap();
+    (project, triangle)
+}
+
+#[test]
+fn a_graph_is_written_as_its_points_and_a_straight_map_writes_none() {
+    let (project, ..) = project_with_a_value_read_from_the_front_track();
+    let straight = as_json(&saved(&project));
+    assert!(
+        the_effect_of_the_back_tracks_first_clip(&straight)["driven"]["amount"]
+            .get("graph")
+            .is_none()
+    );
+
+    let (project, _) = project_with_a_graph();
+    let with_a_graph = as_json(&saved(&project));
+
+    assert_eq!(
+        the_effect_of_the_back_tracks_first_clip(&with_a_graph)["driven"]["amount"]["graph"],
+        json!([[0.0, 0.0], [0.5, 1.0], [1.0, 0.25]])
+    );
+}
+
+#[test]
+fn a_graph_is_read_back_as_it_was_and_nothing_is_lost() {
+    let (project, triangle) = project_with_a_graph();
+    let text = saved(&project);
+
+    let loaded = project_from_json_text(&text).unwrap();
+
+    let effect = loaded.tracks()[1].entries()[0].effects().iter().next().unwrap().clone();
+    let driven = effect.driven_values().iter().next().unwrap().1;
+    assert_eq!(driven.map, MaskMap::Graph(triangle));
+    assert_eq!(saved(&loaded), text);
+}
+
+#[test]
+fn a_file_of_version_24_has_no_graph_and_every_number_is_mapped_straight() {
+    let (project, ..) = project_with_a_value_read_from_the_front_track();
+    let text = saved(&project);
+    const { assert!(FILE_FORMAT_VERSION >= 25, "the graph came with format 25") };
+    let twenty_four = text.replace(&version_line(FILE_FORMAT_VERSION), &version_line(24));
+
+    let loaded = project_from_json_text(&twenty_four).unwrap();
+
+    let effect = loaded.tracks()[1].entries()[0].effects().iter().next().unwrap().clone();
+    assert_eq!(effect.driven_values().iter().next().unwrap().1.map, MaskMap::Straight);
+    assert_eq!(saved(&loaded), text);
+}
+
+#[test]
+fn a_graph_that_is_not_one_is_refused_with_the_reason() {
+    let bad: [(&str, Value); 5] = [
+        ("one point", json!([[0.0, 0.5]])),
+        ("it does not end at the place 1", json!([[0.0, 0.0], [0.9, 1.0]])),
+        (
+            "the places do not go up",
+            json!([[0.0, 0.0], [0.6, 1.0], [0.4, 0.0], [1.0, 1.0]]),
+        ),
+        ("a height above 1", json!([[0.0, 0.0], [1.0, 2.0]])),
+        (
+            "nine points",
+            json!([
+                [0.0, 0.0],
+                [0.1, 0.0],
+                [0.2, 0.0],
+                [0.3, 0.0],
+                [0.4, 0.0],
+                [0.5, 0.0],
+                [0.6, 0.0],
+                [0.7, 0.0],
+                [1.0, 0.0]
+            ]),
+        ),
+    ];
+    for (why, graph) in bad {
+        let (project, _) = project_with_a_graph();
+        let mut document = as_json(&saved(&project));
+        document["tracks"][1]["clips"][0]["effects"][0]["driven"]["amount"]["graph"] = graph;
+
+        let reason = project_from_json_text(&document.to_string()).unwrap_err().to_string();
+
+        assert!(reason.contains("amount") && reason.contains("graph"), "{why}: {reason}");
+    }
+}
+
+#[test]
+fn a_graph_that_has_no_room_among_the_numbers_of_the_shader_is_refused() {
+    // A shader with 58 numbers has 4 + 58 = 62 of the 64 a call can have: the 16 of a graph do not fit.
+    let floats: Vec<String> = (0..58)
+        .map(|number| {
+            format!("{{ \"NAME\": \"p{number}\", \"TYPE\": \"float\", \"MIN\": 0.0, \"MAX\": 1.0, \"DEFAULT\": 0.5 }}")
+        })
+        .collect();
+    let text = format!(
+        "/*{{ \"INPUTS\": [ {{ \"NAME\": \"inputImage\", \"TYPE\": \"image\" }}, {} ] }}*/\nvoid main() {{ gl_FragColor = IMG_THIS_PIXEL(inputImage) * p0; }}\n",
+        floats.join(", ")
+    );
+    let file = crate::isf::read(&text).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "many.fs", &text)).unwrap();
+    let mut project = edited_project(link_to_missing_video());
+    let back = project.tracks()[0].id();
+    let front = project.add_track_in_front();
+    let clip = project.track(back).unwrap().placement_at_index(0).unwrap().id;
+    let instance = project
+        .add_effect(crate::project::AnimationTarget::Clip(clip), kind)
+        .unwrap();
+    project
+        .set_driven_value(
+            Member::Clip(clip),
+            instance,
+            0,
+            Some(DrivenValue::from_a_track(front, MaskChannel::Red, 0.5)),
+        )
+        .unwrap();
+    let mut document = as_json(&saved(&project));
+    document["tracks"][1]["clips"][0]["effects"][0]["driven"]["p0"]["graph"] = json!([[0.0, 0.0], [1.0, 1.0]]);
+
+    let reason = project_from_json_text(&document.to_string()).unwrap_err().to_string();
+
+    assert!(reason.contains("no room"), "{reason}");
 }

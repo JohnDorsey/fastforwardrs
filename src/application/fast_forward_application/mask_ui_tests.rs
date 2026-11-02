@@ -12,15 +12,16 @@ use super::preview_layer_tests::select;
 use super::test_window::{Window, project_with_a_video_and_a_sound};
 use super::undo_tests::undo;
 use crate::application::commands::Command;
+use crate::application::mask_graph::{self, place_on_the_screen};
 use crate::application::mask_settings_window::{
-    CHANNEL_LABEL, NO_TRACK_CHOSEN_LABEL, TRACK_LABEL, USE_THE_SLIDER_AGAIN_LABEL, VALUE_WHERE_NOTHING_LABEL,
-    WhichValue, name_of_a_channel,
+    CHANNEL_LABEL, NO_TRACK_CHOSEN_LABEL, STRAIGHT_LINE_AGAIN_LABEL, TRACK_LABEL, USE_THE_SLIDER_AGAIN_LABEL,
+    VALUE_WHERE_NOTHING_LABEL, WhichValue, name_of_a_channel,
 };
 use crate::application::properties_panel::{
     KeyframeButton, keyframe_button_label, label_of_the_thumbnail, mask_button_label,
 };
 use crate::project::{
-    AnimationTarget, ClipId, DrivenValue, EffectInstanceId, EffectKind, MaskChannel, MaskSource, Member, TrackId,
+    AnimationTarget, ClipId, DrivenValue, EffectInstanceId, EffectKind, MaskChannel, MaskMap, Member, TrackId,
 };
 
 /// A shader with a number that has a range (called *how much*), a colour and a switch.
@@ -225,11 +226,7 @@ fn the_buttons_of_the_channels_in_the_window_change_what_the_number_is_read_as_a
         window.click(button);
         assert_eq!(
             driven_now(&window, clip),
-            Some(DrivenValue {
-                source: MaskSource::Track(the_other),
-                channel,
-                value_where_nothing: 0.25
-            })
+            Some(DrivenValue::from_a_track(the_other, channel, 0.25))
         );
     }
     let button = window.rectangle_of(USE_THE_SLIDER_AGAIN_LABEL).center();
@@ -300,12 +297,220 @@ fn choosing_a_track_in_the_window_reads_the_number_from_it_as_brightness_and_whe
 
     assert_eq!(
         driven_now(&window, clip),
-        Some(DrivenValue {
-            source: MaskSource::Track(the_other),
-            channel: MaskChannel::Brightness,
-            value_where_nothing: 0.5
-        }),
+        Some(DrivenValue::from_a_track(the_other, MaskChannel::Brightness, 0.5)),
         "brightness, and the 0.5 that the slider said"
+    );
+}
+
+// ---- the graph that maps the value of the mask (docs/shader-masks-design.md, 8)
+
+/// The square of the graph in the window.
+fn the_square_of_the_graph(window: &Window) -> egui::Rect {
+    window.rectangle_of(mask_graph::LABEL)
+}
+
+/// Where on the screen the point `(place, height)` of a graph is.
+fn where_on_the_screen(window: &Window, point: (f32, f32)) -> egui::Pos2 {
+    place_on_the_screen(the_square_of_the_graph(window), point)
+}
+
+fn the_map_now(window: &Window, clip: ClipId) -> MaskMap {
+    driven_now(window, clip).expect("the number is read from a mask").map
+}
+
+/// A window with the number read from the other track and the window of the mask open.
+fn window_with_the_window_of_the_mask_open() -> (Window, ClipId) {
+    let (mut window, clip, the_other) = window_with_the_shader_on_the_video();
+    read_from(&mut window, clip, the_other, MaskChannel::Red, 0.25);
+    window.do_this(Command::ShowTheMaskSettings(which(clip)));
+    window.settle();
+    (window, clip)
+}
+
+#[test]
+fn the_window_shows_the_graph_which_is_the_straight_line_until_a_point_is_added() {
+    let (window, clip) = window_with_the_window_of_the_mask_open();
+
+    assert!(is_shown(&window, mask_graph::LABEL));
+    assert_eq!(the_map_now(&window, clip), MaskMap::Straight);
+    assert!(
+        is_shown(&window, STRAIGHT_LINE_AGAIN_LABEL),
+        "the button is there, and dimmed while the map is straight"
+    );
+}
+
+#[test]
+fn a_click_on_the_line_adds_a_point_there_and_the_map_is_a_graph() {
+    let (mut window, clip) = window_with_the_window_of_the_mask_open();
+
+    let on_the_line = where_on_the_screen(&window, (0.5, 0.5));
+    window.click(on_the_line);
+
+    let MaskMap::Graph(graph) = the_map_now(&window, clip) else {
+        panic!("a point was added: {:?}", the_map_now(&window, clip));
+    };
+    assert_eq!(graph.points().len(), 3);
+    let (place, height) = graph.points()[1];
+    assert!(
+        (place - 0.5).abs() < 0.02 && (height - 0.5).abs() < 0.02,
+        "the new point is on the line, at the place clicked: {:?}",
+        graph.points()
+    );
+}
+
+#[test]
+fn a_click_off_the_line_adds_nothing() {
+    let (mut window, clip) = window_with_the_window_of_the_mask_open();
+
+    let off_the_line = where_on_the_screen(&window, (0.5, 0.9));
+    window.click(off_the_line);
+
+    assert_eq!(the_map_now(&window, clip), MaskMap::Straight);
+}
+
+#[test]
+fn dragging_a_point_moves_it() {
+    let (mut window, clip) = window_with_the_window_of_the_mask_open();
+    let on_the_line = where_on_the_screen(&window, (0.5, 0.5));
+    window.click(on_the_line);
+
+    let point = where_on_the_screen(&window, (0.5, 0.5));
+    let higher = where_on_the_screen(&window, (0.5, 0.9));
+    window.drag(point, higher, egui::PointerButton::Primary);
+
+    let MaskMap::Graph(graph) = the_map_now(&window, clip) else {
+        panic!("still a graph");
+    };
+    let (place, height) = graph.points()[1];
+    assert!(
+        (place - 0.5).abs() < 0.03 && (height - 0.9).abs() < 0.03,
+        "the point went up: {:?}",
+        graph.points()
+    );
+}
+
+#[test]
+fn pressing_on_the_line_and_dragging_adds_a_point_and_carries_it() {
+    let (mut window, clip) = window_with_the_window_of_the_mask_open();
+
+    let on_the_line = where_on_the_screen(&window, (0.3, 0.3));
+    let somewhere_else = where_on_the_screen(&window, (0.3, 0.8));
+    window.drag(on_the_line, somewhere_else, egui::PointerButton::Primary);
+
+    let MaskMap::Graph(graph) = the_map_now(&window, clip) else {
+        panic!("a point was added and moved");
+    };
+    assert_eq!(graph.points().len(), 3, "{:?}", graph.points());
+    let (place, height) = graph.points()[1];
+    assert!(
+        (place - 0.3).abs() < 0.03 && (height - 0.8).abs() < 0.03,
+        "{:?}",
+        graph.points()
+    );
+}
+
+#[test]
+fn an_end_of_the_graph_moves_up_and_down_only() {
+    let (mut window, clip) = window_with_the_window_of_the_mask_open();
+
+    let top_right = where_on_the_screen(&window, (1.0, 1.0));
+    let lower_and_to_the_left = where_on_the_screen(&window, (0.4, 0.3));
+    window.drag(top_right, lower_and_to_the_left, egui::PointerButton::Primary);
+
+    let MaskMap::Graph(graph) = the_map_now(&window, clip) else {
+        panic!("the end moved");
+    };
+    assert_eq!(graph.points().len(), 2);
+    let (place, height) = graph.points()[1];
+    assert_eq!(place, 1.0, "the end stays at the place 1");
+    assert!((height - 0.3).abs() < 0.03, "{height}");
+}
+
+#[test]
+fn a_right_click_on_a_point_takes_it_away_and_a_graph_that_is_the_straight_line_again_is_a_straight_map() {
+    let (mut window, clip) = window_with_the_window_of_the_mask_open();
+    let on_the_line = where_on_the_screen(&window, (0.5, 0.5));
+    window.click(on_the_line);
+    assert!(matches!(the_map_now(&window, clip), MaskMap::Graph(_)));
+
+    let point = where_on_the_screen(&window, (0.5, 0.5));
+    window.right_click(point);
+
+    assert_eq!(the_map_now(&window, clip), MaskMap::Straight);
+}
+
+#[test]
+fn the_button_of_the_straight_line_puts_the_map_back_and_keeps_the_track_and_the_channel() {
+    let (mut window, clip) = window_with_the_window_of_the_mask_open();
+    let point = where_on_the_screen(&window, (0.5, 0.5));
+    let higher = where_on_the_screen(&window, (0.5, 0.9));
+    window.drag(point, higher, egui::PointerButton::Primary);
+    let before = driven_now(&window, clip).unwrap();
+    assert!(matches!(before.map, MaskMap::Graph(_)));
+    window.settle();
+
+    let button = window.rectangle_of(STRAIGHT_LINE_AGAIN_LABEL).center();
+    window.click(button);
+
+    let after = driven_now(&window, clip).unwrap();
+    assert_eq!(after.map, MaskMap::Straight);
+    assert_eq!(
+        (after.source, after.channel, after.value_where_nothing),
+        (before.source, before.channel, before.value_where_nothing)
+    );
+}
+
+#[test]
+fn changing_the_channel_keeps_the_graph() {
+    let (mut window, clip) = window_with_the_window_of_the_mask_open();
+    let on_the_line = where_on_the_screen(&window, (0.5, 0.5));
+    window.click(on_the_line);
+    let MaskMap::Graph(graph) = the_map_now(&window, clip) else {
+        panic!("a point was added");
+    };
+
+    let button = window.rectangle_of(name_of_a_channel(MaskChannel::Blue)).center();
+    window.click(button);
+
+    let now = driven_now(&window, clip).unwrap();
+    assert_eq!(now.channel, MaskChannel::Blue);
+    assert_eq!(now.map, MaskMap::Graph(graph));
+}
+
+#[test]
+fn a_graph_is_a_step_of_the_history_and_undoing_it_takes_the_graph_away() {
+    let (mut window, clip) = window_with_the_window_of_the_mask_open();
+    let on_the_line = where_on_the_screen(&window, (0.5, 0.5));
+    window.click(on_the_line);
+    assert!(matches!(the_map_now(&window, clip), MaskMap::Graph(_)));
+
+    undo(&mut window);
+
+    // (The test window joins the edits of one number whenever they are made, so this goes back past the choice of the track too; a person's edits a second apart are steps of their own.)
+    assert!(
+        !matches!(
+            driven_now(&window, clip).map(|driven| driven.map),
+            Some(MaskMap::Graph(_))
+        ),
+        "{:?}",
+        driven_now(&window, clip)
+    );
+}
+
+#[test]
+fn while_no_track_is_chosen_the_graph_is_shown_and_cannot_be_changed() {
+    let (mut window, clip, _) = window_with_the_shader_on_the_video();
+    window.do_this(Command::ShowTheMaskSettings(which(clip)));
+    window.settle();
+    assert!(is_shown(&window, mask_graph::LABEL));
+
+    let on_the_line = where_on_the_screen(&window, (0.5, 0.5));
+    window.click(on_the_line);
+
+    assert_eq!(
+        driven_now(&window, clip),
+        None,
+        "nothing is read from a mask by touching the graph"
     );
 }
 
@@ -342,4 +547,24 @@ fn write_pictures_of_the_mask_button_the_thumbnail_and_the_window() {
     // The window closed, the thumbnail alone.
     window.application_mut().interface.mask_settings_window_open_for = None;
     save(&mut window, "mask_4_the_thumbnail_alone");
+
+    // A graph drawn in the window: a point added on the line and dragged up, and another added and dragged down; the thumbnail's bar follows the graph.
+    window.do_this(Command::ShowTheMaskSettings(which(clip)));
+    window.settle();
+    let on_the_line = where_on_the_screen(&window, (0.3, 0.3));
+    window.drag(
+        on_the_line,
+        where_on_the_screen(&window, (0.3, 0.8)),
+        egui::PointerButton::Primary,
+    );
+    // (Where the line is now at the place 0.7, which is not where it was.)
+    let line_height = the_map_now(&window, clip).graph_or_straight().height_at(0.7);
+    let on_the_line = where_on_the_screen(&window, (0.7, line_height));
+    window.drag(
+        on_the_line,
+        where_on_the_screen(&window, (0.7, 0.2)),
+        egui::PointerButton::Primary,
+    );
+    window.move_pointer_to(egui::pos2(5.0, 5.0));
+    save(&mut window, "mask_5_a_graph_drawn_in_the_window");
 }

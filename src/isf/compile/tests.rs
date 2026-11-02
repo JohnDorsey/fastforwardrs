@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::engine::{DEFAULT_MOST_PASSES_OF_A_LOOP, ImageSlot, guard_wgsl};
-use crate::isf::{IsfInputKind, MaskChannel, read};
+use crate::isf::{IsfInputKind, Mapping, MaskChannel, read};
 
 const COLOR_CONTROLS: &str = include_str!("../fixtures/color_controls.fs");
 const PLASMA: &str = include_str!("../fixtures/plasma.fs");
@@ -200,6 +200,7 @@ fn driven_radius(mask: usize, channel: MaskChannel) -> DrivenInput {
         name: "radius".to_owned(),
         mask,
         channel,
+        mapping: Mapping::Straight,
     }
 }
 
@@ -229,6 +230,56 @@ fn a_shader_with_an_input_read_from_a_mask_compiles_and_the_engine_accepts_it_as
     assert_eq!(structure.images, [ImageSlot::Picture, ImageSlot::Mask(0)]);
     assert_eq!(structure.masks(), 1);
     assert_eq!(structure.check(), Ok(()));
+}
+
+#[test]
+fn an_input_mapped_by_a_graph_compiles_with_the_same_structure_as_one_mapped_straight_and_the_graph_is_read_from_the_numbers()
+ {
+    let file = read(A_FILTER_THAT_USES_ITS_INPUT_IN_A_LOOP).unwrap();
+    let straight = compile_with_driven_inputs(&file, &[driven_radius(0, MaskChannel::Red)]).unwrap();
+    let graph = compile_with_driven_inputs(
+        &file,
+        &[DrivenInput {
+            mapping: Mapping::Graph,
+            ..driven_radius(0, MaskChannel::Red)
+        }],
+    )
+    .unwrap_or_else(|problems| panic!("{problems:?}"));
+
+    // (A graph is numbers of the call and not another picture or another pass: what the engine is told of the shader is the same.)
+    assert_eq!(graph.structure, straight.structure);
+    assert_eq!(graph.image_names, straight.image_names);
+    assert_ne!(graph.wgsl, straight.wgsl);
+    let guarded = guard_wgsl(&graph.wgsl, DEFAULT_MOST_PASSES_OF_A_LOOP).unwrap_or_else(|problem| {
+        panic!(
+            "the engine's guard refuses it: {problem:?}
+{}",
+            graph.wgsl
+        )
+    });
+    assert!(guarded.has_entry_point(ENTRY_POINT, naga::ShaderStage::Fragment));
+    let the_graph = function_of_the_module(&graph.wgsl, "_isf_graph_radius");
+    assert!(the_graph.contains("mix("), "{the_graph}");
+}
+
+#[test]
+fn the_variant_of_a_shader_that_maps_an_input_by_a_graph_is_another_variant_than_the_one_that_maps_it_straight() {
+    let straight = driven_radius(0, MaskChannel::Red);
+    let graph = DrivenInput {
+        mapping: Mapping::Graph,
+        ..straight.clone()
+    };
+
+    let (straight_key, graph_key) = (
+        crate::isf::driven_variant_key("fast:radius", std::slice::from_ref(&straight)),
+        crate::isf::driven_variant_key("fast:radius", std::slice::from_ref(&graph)),
+    );
+
+    assert_eq!(
+        straight_key, "fast:radius+masks[radius=0:Red]",
+        "the key of a straight map is what it was"
+    );
+    assert_eq!(graph_key, "fast:radius+masks[radius=0:Red:graph]");
 }
 
 #[test]
@@ -326,6 +377,7 @@ fn every_float_input_of_the_corpus_can_be_read_from_a_mask() {
             name: name.to_owned(),
             mask: number % 3,
             channel: MaskChannel::ALL[number % MaskChannel::ALL.len()],
+            mapping: Mapping::Straight,
         };
         let mut together: Vec<DrivenInput> = Vec::new();
         for (number, input) in drivable.iter().enumerate() {
@@ -383,6 +435,7 @@ fn what_is_wrong_with_the_driven_inputs_is_a_problem_of_the_compile() {
             name: "nothing".to_owned(),
             mask: 0,
             channel: MaskChannel::Red,
+            mapping: Mapping::Straight,
         }],
     )
     .unwrap_err();

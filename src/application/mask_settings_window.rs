@@ -10,13 +10,18 @@
 use egui::{Align2, ComboBox, Context, Grid, Id, Slider, SliderClamping, Window, vec2};
 
 use super::commands::Command;
-use crate::project::{DrivenValue, EffectInstanceId, MaskChannel, MaskSource, Member, Project, PropertyValue, TrackId};
+use super::mask_graph;
+use crate::project::{
+    DrivenValue, EffectInstanceId, Graph, MaskChannel, MaskMap, MaskSource, Member, Project, PropertyValue, TrackId,
+};
 
 /// What the lines of the window are called.
 pub const TRACK_LABEL: &str = "Track";
 pub const CHANNEL_LABEL: &str = "Channel";
 pub const VALUE_WHERE_NOTHING_LABEL: &str = "Where the track has nothing";
 pub const USE_THE_SLIDER_AGAIN_LABEL: &str = "Use the slider again";
+pub const GRAPH_LABEL: &str = "Graph";
+pub const STRAIGHT_LINE_AGAIN_LABEL: &str = "Straight line again";
 
 /// What the box of the track says while no track is chosen.
 pub const NO_TRACK_CHOSEN_LABEL: &str = "Choose a track";
@@ -134,6 +139,7 @@ pub fn show(context: &Context, open_for: &mut Option<WhichValue>, project: &Proj
                                         channel: driven.map_or(MaskChannel::Brightness, |driven| driven.channel),
                                         value_where_nothing: driven
                                             .map_or(slider_now, |driven| driven.value_where_nothing),
+                                        map: driven.map_or(MaskMap::Straight, |driven| driven.map),
                                     }));
                                 }
                             }
@@ -154,6 +160,37 @@ pub fn show(context: &Context, open_for: &mut Option<WhichValue>, project: &Proj
                             {
                                 commands.push(set(DrivenValue { channel, ..driven }));
                             }
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label(GRAPH_LABEL);
+                    ui.vertical(|ui| {
+                        let no_room = effect.why_the_value_cannot_have_a_graph(which.slot);
+                        let graph = driven.map_or_else(Graph::straight, |driven| driven.map.graph_or_straight());
+                        if let Some(edited) = mask_graph::show(ui, graph, driven.is_some() && no_room.is_none())
+                            && let Some(driven) = driven
+                        {
+                            commands.push(set(DrivenValue {
+                                map: mask_graph::map_of(edited),
+                                ..driven
+                            }));
+                        }
+                        if let Some(reason) = no_room
+                            && driven.is_some()
+                        {
+                            ui.label(egui::RichText::new(reason).small());
+                        }
+                        let has_a_graph = driven.is_some_and(|driven| driven.map != MaskMap::Straight);
+                        if ui
+                            .add_enabled(has_a_graph, egui::Button::new(STRAIGHT_LINE_AGAIN_LABEL))
+                            .clicked()
+                            && let Some(driven) = driven
+                        {
+                            commands.push(set(DrivenValue {
+                                map: MaskMap::Straight,
+                                ..driven
+                            }));
                         }
                     });
                     ui.end_row();

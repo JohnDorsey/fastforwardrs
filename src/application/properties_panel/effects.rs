@@ -550,7 +550,7 @@ fn control_for(
                 let name = project
                     .track(track)
                     .map_or_else(|| "a track".to_owned(), |found| found.title().to_owned());
-                return mask_thumbnail::show(ui, &parameter.name, &name, driven.channel)
+                return mask_thumbnail::show(ui, &parameter.name, &name, driven.channel, driven.map)
                     .clicked()
                     .then_some(Change::ShowTheMaskSettings);
             }

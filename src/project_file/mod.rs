@@ -146,7 +146,11 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 /// `{ "source": { "track": n }, "channel": "red" | "green" | "blue" | "brightness", "where_nothing": x }`, where `n` is the place of the track in the file's list of tracks, from 0, and `x` is
 /// what the number is where the mask has nothing (left out when no number of the effect is read from a mask; the sliders and their keyframes are kept as they were). A file where a number is
 /// read from a track that is not there, or where tracks are made from each other, is refused. A file of version 23 has none: every number is read from its slider.
-pub const FILE_FORMAT_VERSION: u32 = 24;
+///
+/// **Version 25 added `graph` to a `driven` number**: the graph of line segments that maps the value of the mask's channel to the place in the number's range, as a list of points, each
+/// `[place, height]`, from 2 to 8 of them, the first at the place 0 and the last at the place 1, the places going up and every number in 0 to 1 (left out for the straight line, which is
+/// what a number is until a graph is drawn). A file where the graph is not one is refused with the reason. A file of version 24 has none: every number is mapped straight.
+pub const FILE_FORMAT_VERSION: u32 = 25;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;

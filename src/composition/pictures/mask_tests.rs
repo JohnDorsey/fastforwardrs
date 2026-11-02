@@ -8,7 +8,7 @@
 use super::tests::{frame, long_video, plan, text};
 use super::*;
 use crate::composition::test_projects::project_of;
-use crate::project::{ClipMove, DrivenValue, MaskChannel, Member};
+use crate::project::{ClipMove, DrivenValue, Graph, MaskChannel, MaskMap, Member, NUMBERS_OF_A_GRAPH};
 
 /// A shader with two numbers that have a range: `amount` (0 to 1, 0.25 to begin with) and `strength` (2 to 6, 3 to begin with).
 const TINT: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"amount\", \"TYPE\": \"float\", \"DEFAULT\": 0.25 }, { \"NAME\": \"strength\", \"TYPE\": \"float\", \"MIN\": 2.0, \"MAX\": 6.0, \"DEFAULT\": 3.0 } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }\n";
@@ -351,6 +351,103 @@ fn an_effect_with_a_number_read_from_a_mask_is_the_operation_of_a_shader_of_its_
     // The same at another frame.
     let (again, _, _) = the_shader_operation(&plan.sections[0], 80);
     assert_eq!(again, key);
+}
+
+/// Reads the number in place `slot` of the shader on `clip` from `source`, mapped by the graph of `points`.
+fn read_through_a_graph(
+    project: &mut Project,
+    clip: ClipId,
+    slot: usize,
+    source: TrackId,
+    channel: MaskChannel,
+    nothing: f32,
+    points: &[(f32, f32)],
+) {
+    read_from(project, clip, slot, source, channel, nothing);
+    let instance = project
+        .chain_of_the_member(Member::Clip(clip))
+        .unwrap()
+        .iter()
+        .find(|effect| effect.kind() == the_shader())
+        .unwrap()
+        .instance();
+    let graph = Graph::from_points(points).expect("a graph");
+    project
+        .set_driven_value(
+            Member::Clip(clip),
+            instance,
+            slot,
+            Some(DrivenValue::from_a_track(source, channel, nothing).with_the_map(MaskMap::Graph(graph))),
+        )
+        .unwrap();
+}
+
+#[test]
+fn a_number_mapped_by_a_graph_is_the_operation_of_a_shader_of_its_own_that_carries_the_points_after_the_numbers() {
+    let mut project = project_of(vec![vec![(0, long_video(0, 100, 1))], vec![(0, long_video(0, 100, 1))]]);
+    let (mask_track, host_clip) = (project.tracks()[0].id(), first_clip_of(&project, 1));
+    project.set_track_hidden(mask_track, true).unwrap();
+    read_from(&mut project, host_clip, 0, mask_track, MaskChannel::Green, 0.75);
+    let (straight_key, straight_numbers, _) = the_shader_operation(&super::tests::plan(&project).sections[0], 10);
+    assert_eq!(straight_numbers.len(), 4 + 2, "a straight map adds no number");
+
+    let triangle = [(0.0, 0.0), (0.5, 1.0), (1.0, 0.25)];
+    read_through_a_graph(
+        &mut project,
+        host_clip,
+        0,
+        mask_track,
+        MaskChannel::Green,
+        0.75,
+        &triangle,
+    );
+    let plan = plan(&project);
+
+    let (key, numbers, masks) = the_shader_operation(&plan.sections[0], 10);
+    assert_ne!(
+        key, straight_key,
+        "a shader that maps by a graph is another shader to the engine"
+    );
+    assert!(key.contains(":graph"), "{key}");
+    assert_eq!(masks, [mask_track]);
+    assert_eq!(
+        numbers[4..6],
+        [0.75, 3.0],
+        "the numbers of the sliders, and 0.75 where the mask has nothing"
+    );
+    assert_eq!(numbers.len(), 4 + 2 + NUMBERS_OF_A_GRAPH);
+    assert_eq!(
+        numbers[6..],
+        Graph::from_points(&triangle).unwrap().numbers(),
+        "the points come after the numbers of all the inputs"
+    );
+    // The same at another frame: the graph does not change with time.
+    let (again, later_numbers, _) = the_shader_operation(&plan.sections[0], 80);
+    assert_eq!((again, later_numbers[6..].to_vec()), (key, numbers[6..].to_vec()));
+}
+
+#[test]
+fn the_points_of_two_graphs_come_one_after_the_other_in_the_order_of_the_numbers_of_the_effect() {
+    let mut project = project_of(vec![vec![(0, long_video(0, 100, 1))], vec![(0, long_video(0, 100, 1))]]);
+    let (mask_track, host_clip) = (project.tracks()[0].id(), first_clip_of(&project, 1));
+    project.set_track_hidden(mask_track, true).unwrap();
+    let up = [(0.0, 0.0), (1.0, 1.0)];
+    let down = [(0.0, 1.0), (0.4, 0.5), (1.0, 0.0)];
+    // (The second number first: the order of the numbers is what counts.)
+    read_through_a_graph(&mut project, host_clip, 1, mask_track, MaskChannel::Red, 4.0, &down);
+    read_through_a_graph(&mut project, host_clip, 0, mask_track, MaskChannel::Blue, 0.5, &up);
+
+    let (_, numbers, _) = the_shader_operation(&plan(&project).sections[0], 10);
+
+    assert_eq!(numbers.len(), 4 + 2 + 2 * NUMBERS_OF_A_GRAPH);
+    assert_eq!(
+        numbers[6..6 + NUMBERS_OF_A_GRAPH],
+        Graph::from_points(&up).unwrap().numbers()
+    );
+    assert_eq!(
+        numbers[6 + NUMBERS_OF_A_GRAPH..],
+        Graph::from_points(&down).unwrap().numbers()
+    );
 }
 
 #[test]

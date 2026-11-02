@@ -39,6 +39,11 @@ impl Project {
             if let Some(reason) = effect.why_a_value_cannot_be_driven(slot) {
                 return Err(EditError::ValueCannotBeDriven { reason });
             }
+            if matches!(driven.map, super::MaskMap::Graph(_))
+                && let Some(reason) = effect.why_the_value_cannot_have_a_graph(slot)
+            {
+                return Err(EditError::ValueCannotBeDriven { reason });
+            }
             for source in driven.source.tracks() {
                 if self.track(source).is_none() {
                     return Err(EditError::UnknownTrack { track: source });

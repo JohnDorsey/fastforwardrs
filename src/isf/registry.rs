@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use super::compile::{CompiledShader, compile_in_a_worker, compile_in_a_worker_with_driven_inputs};
 use super::descriptor::key_is_of_the_source;
 use super::reader::{IsfFile, IsfProblem, Shape, read};
-use super::rewrite::DrivenInput;
+use super::rewrite::{DrivenInput, Mapping};
 use crate::engine::ShaderStructure;
 use crate::project::{EffectDescriptor, ShaderLanguage, ShaderSource};
 
@@ -153,7 +153,10 @@ pub fn compiled_shader_of(descriptor: &EffectDescriptor) -> Option<Made> {
 pub fn driven_variant_key(base_key: &str, driven: &[DrivenInput]) -> String {
     let parts: Vec<String> = driven
         .iter()
-        .map(|one| format!("{}={}:{:?}", one.name, one.mask, one.channel))
+        .map(|one| match one.mapping {
+            Mapping::Straight => format!("{}={}:{:?}", one.name, one.mask, one.channel),
+            Mapping::Graph => format!("{}={}:{:?}:graph", one.name, one.mask, one.channel),
+        })
         .collect();
     format!("{base_key}+masks[{}]", parts.join(","))
 }

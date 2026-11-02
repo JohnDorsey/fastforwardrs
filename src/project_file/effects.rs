@@ -25,9 +25,10 @@ use super::{legacy_effects, value_document_of, value_from_document};
 use crate::project::tracks::TrackId;
 use crate::project::{
     ChainEntry, ChoiceOption, DrivenValue, DrivenValues, Effect, EffectDescriptor, EffectDomain, EffectInstanceId,
-    EffectKind, Effects, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS,
-    MaskChannel, MaskSource, ParameterControl, ParameterDescriptor, Project, ShaderImage, ShaderLanguage, ShaderSource,
-    TailLength, UnknownFields, ValueKind, ValueScale,
+    EffectKind, Effects, Graph, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING,
+    MOST_IMAGES_A_SHADER_BRINGS, MOST_POINTS_OF_A_GRAPH, MaskChannel, MaskMap, MaskSource, ParameterControl,
+    ParameterDescriptor, Project, ShaderImage, ShaderLanguage, ShaderSource, TailLength, UnknownFields, ValueKind,
+    ValueScale,
 };
 
 /// What a type of effect is, as a file says it: a snapshot of its descriptor.
@@ -186,6 +187,10 @@ pub(super) struct DrivenDocument {
     pub channel: MaskChannelDocument,
     /// What the value is where the mask has nothing (see [`DrivenValue::value_where_nothing`]).
     pub where_nothing: f32,
+    /// The graph that maps the mask's value to the place in the range (format 25 and after): its points, each `[place, height]`, from the place 0 to the place 1, the places going up and every number
+    /// in 0 to 1. Left out for the straight line, which is what a value is until a graph is drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph: Option<Vec<[f32; 2]>>,
 }
 
 /// What a mask is made of, as a file says it.
@@ -526,18 +531,37 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
             ));
         }
         let MaskSourceDocument::Track(track) = one.source;
+        let map = match one.graph {
+            None => MaskMap::Straight,
+            Some(points) => {
+                let points: Vec<(f32, f32)> = points.iter().map(|point| (point[0], point[1])).collect();
+                MaskMap::Graph(Graph::from_points(&points).ok_or_else(|| {
+                    format!(
+                        "the graph of the value \"{id}\" of the {kind} effect is not a graph: it has from {} to {} points, the first at the place 0 and the last at the place 1, the places going up, and every number in 0 to 1",
+                        2, MOST_POINTS_OF_A_GRAPH
+                    )
+                })?)
+            }
+        };
         driven.push((
             u8::try_from(slot).map_err(|_| format!("the {kind} effect has too many values"))?,
             DrivenValue {
                 source: MaskSource::Track(TrackId::new(track)),
                 channel: one.channel.into(),
                 value_where_nothing: one.where_nothing,
+                map,
             },
         ));
     }
     let driven = DrivenValues::from_places(driven)
         .ok_or_else(|| format!("a value of the {kind} effect that is read from a mask has a number that is not one"))?;
-    Ok(effect.with_driven_values(driven))
+    let effect = effect.with_driven_values(driven);
+    if !effect.has_room_for_its_graphs() {
+        return Err(format!(
+            "the graphs of the values of the {kind} effect have no room among the numbers of the shader"
+        ));
+    }
+    Ok(effect)
 }
 
 /// The effects that the documents describe, in their order, each named as the document names it: a file of version 10 names none, and
@@ -629,6 +653,12 @@ pub(super) fn effect_documents_of(effects: &Effects, project: &Project) -> Vec<E
                                 source: MaskSourceDocument::Track(u32::try_from(place).ok()?),
                                 channel: one.channel.into(),
                                 where_nothing: one.value_where_nothing,
+                                graph: match one.map {
+                                    MaskMap::Straight => None,
+                                    MaskMap::Graph(graph) => {
+                                        Some(graph.points().iter().map(|(place, height)| [*place, *height]).collect())
+                                    }
+                                },
                             },
                         ))
                     })

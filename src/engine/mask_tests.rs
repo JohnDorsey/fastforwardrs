@@ -22,7 +22,7 @@ use super::{
     WorkingSpace, guard_wgsl,
 };
 use crate::colour_space::StandardPrimaries;
-use crate::isf::{DrivenInput, MaskChannel, compile_with_driven_inputs, read};
+use crate::isf::{DrivenInput, MOST_POINTS_OF_A_GRAPH, Mapping, MaskChannel, compile_with_driven_inputs, read};
 
 const A_LONG_TIME: Duration = Duration::from_secs(60);
 
@@ -45,6 +45,7 @@ pub(super) fn driven(name: &str, mask: usize, channel: MaskChannel) -> DrivenInp
         name: name.to_owned(),
         mask,
         channel,
+        mapping: Mapping::Straight,
     }
 }
 
@@ -838,4 +839,101 @@ fn a_transition_on_a_layer_of_a_mask_is_done_over_what_is_behind_it_in_the_mask_
             }
         },
     );
+}
+
+// ---- a graph as the map from the mask's value to the input's (docs/shader-masks-design.md, 3)
+
+/// The numbers of a call that a graph of these points (at most eight) is: the places of the points, then their heights, the last point repeated to fill what is left.
+fn numbers_of_a_graph(points: &[(f32, f32)]) -> Vec<f32> {
+    let last = *points.last().unwrap();
+    let filled: Vec<(f32, f32)> = points
+        .iter()
+        .copied()
+        .chain(std::iter::repeat(last))
+        .take(MOST_POINTS_OF_A_GRAPH)
+        .collect();
+    filled
+        .iter()
+        .map(|point| point.0)
+        .chain(filled.iter().map(|point| point.1))
+        .collect()
+}
+
+#[test]
+fn an_input_mapped_by_a_graph_is_the_height_of_the_graph_at_the_channel_of_the_mask_spread_over_the_range() {
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        installed_with_masks(
+            &mut renderer,
+            "test:level",
+            SHOW_THE_LEVEL,
+            &[DrivenInput {
+                mapping: Mapping::Graph,
+                ..driven("level", 0, MaskChannel::Red)
+            }],
+        );
+        let triangle = vec![(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)];
+        let step = vec![(0.0, 0.0), (0.4, 0.0), (0.6, 1.0), (1.0, 1.0)];
+        // (The red of the mask, of 255, and the level the shader shows, of 255, which is the height of the graph at the red.)
+        for (name, graph, red, wanted) in [
+            (
+                "a straight graph is straight",
+                vec![(0.0, 0.0), (1.0, 1.0)],
+                100_u8,
+                100_i32,
+            ),
+            ("upside down", vec![(0.0, 1.0), (1.0, 0.0)], 200, 55),
+            ("the triangle, on the way up", triangle.clone(), 64, 128),
+            ("the triangle, at the top", triangle.clone(), 128, 254),
+            ("the triangle, on the way down", triangle.clone(), 191, 128),
+            ("the step, before it", step.clone(), 90, 0),
+            ("the step, in it", step.clone(), 128, 128),
+            ("the step, after it", step.clone(), 170, 255),
+            ("at the end of the graph", step, 255, 255),
+        ] {
+            let mut inputs = vec![0.0];
+            inputs.extend(numbers_of_a_graph(&graph));
+            let (frame, statistics) = shown(
+                &mut renderer,
+                "test:level",
+                &inputs,
+                vec![mask_of(vec![all_of_it([red, 0, 0, 255])])],
+            );
+            assert_eq!(statistics.effects_not_run, 0, "{name}");
+            let pixel = frame.pixel(4, 4);
+            assert!(
+                is_near(pixel, [wanted as u8; 3], 2),
+                "{name}: red {red} gives {pixel:?}, wanted {wanted}"
+            );
+        }
+    });
+}
+
+#[test]
+fn where_the_mask_has_nothing_an_input_mapped_by_a_graph_is_still_the_number_of_the_call() {
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        installed_with_masks(
+            &mut renderer,
+            "test:level",
+            SHOW_THE_LEVEL,
+            &[DrivenInput {
+                mapping: Mapping::Graph,
+                ..driven("level", 0, MaskChannel::Red)
+            }],
+        );
+        // The graph is upside down, the mask is a red of 200 over the left half, and the call says 0.25 (64) where there is nothing.
+        let mut inputs = vec![0.25];
+        inputs.extend(numbers_of_a_graph(&[(0.0, 1.0), (1.0, 0.0)]));
+
+        let (frame, _) = shown(
+            &mut renderer,
+            "test:level",
+            &inputs,
+            vec![mask_of(vec![the_left_half_of_it([200, 0, 0, 255])])],
+        );
+
+        assert!(is_near(frame.pixel(1, 4), [55; 3], 2), "{:?}", frame.pixel(1, 4));
+        assert!(is_near(frame.pixel(6, 4), [64; 3], 2), "{:?}", frame.pixel(6, 4));
+    });
 }

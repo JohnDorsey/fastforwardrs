@@ -32,8 +32,8 @@ pub use reader::{
     IsfFile, IsfImportedImage, IsfInput, IsfInputKind, IsfPass, IsfProblem, MOST_NUMBERS_OF_THE_INPUTS, Shape, read,
 };
 pub use rewrite::{
-    DrivenInput, MASK_IMAGE_PREFIX, MOST_NESTING, MaskChannel, NUMBERS_BEFORE_THE_INPUTS, VEC4S_OF_THE_UNIFORM_BLOCK,
-    image_name_of_the_mask,
+    DrivenInput, MASK_IMAGE_PREFIX, MOST_NESTING, MOST_NUMBERS_OF_A_CALL, MOST_POINTS_OF_A_GRAPH, Mapping, MaskChannel,
+    NUMBERS_BEFORE_THE_INPUTS, NUMBERS_OF_A_GRAPH, VEC4S_OF_THE_UNIFORM_BLOCK, image_name_of_the_mask,
 };
 pub use size_expression::{LONGEST_EXPRESSION, MOST_NESTING_OF_AN_EXPRESSION, read_size_expression};
 pub use structure::structure_of;

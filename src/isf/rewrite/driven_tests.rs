@@ -34,6 +34,15 @@ fn driven(name: &str, mask: usize, channel: MaskChannel) -> DrivenInput {
         name: name.to_owned(),
         mask,
         channel,
+        mapping: Mapping::Straight,
+    }
+}
+
+/// The same, mapped by a graph whose points are numbers of the call.
+fn driven_through_a_graph(name: &str, mask: usize, channel: MaskChannel) -> DrivenInput {
+    DrivenInput {
+        mapping: Mapping::Graph,
+        ..driven(name, mask, channel)
     }
 }
 
@@ -337,4 +346,94 @@ fn an_input_that_sets_the_size_of_a_buffer_cannot_be_driven_because_the_size_is_
     assert!(problem.message.contains("size"), "{}", problem.message);
     // The other float of the same shader can be.
     assert!(rewrite_with_driven_inputs(&file, &[driven("gain", 0, MaskChannel::Red)]).is_ok());
+}
+
+// ---- a graph as the map from the mask's value to the input's (docs/shader-masks-design.md, 3)
+
+#[test]
+fn an_input_mapped_by_a_graph_takes_numbers_after_those_of_the_inputs_for_its_points_and_reads_them_with_a_function() {
+    // The inputs take the numbers 4 (radius) and 5 (amount); the graph of radius takes the next sixteen: the places of its eight points (6 to 13), then their heights (14 to 21).
+    let file = filter_with_two_floats(A_LOOP_THAT_USES_THE_INPUTS_MANY_TIMES);
+    let rewritten = rewrite_with_driven_inputs(
+        &file,
+        &[
+            driven_through_a_graph("radius", 0, MaskChannel::Red),
+            driven("amount", 0, MaskChannel::Green),
+        ],
+    )
+    .unwrap();
+
+    let function = function_beginning_with(&rewritten.glsl, "float _isf_graph_radius(float t)");
+    for (what, read) in [
+        ("the place of the first point is number 6", "_isf_u[1].z"),
+        ("the place of the last point is number 13", "_isf_u[3].y"),
+        ("the height of the first point is number 14", "_isf_u[3].z"),
+        ("the height of the last point is number 21", "_isf_u[5].y"),
+    ] {
+        assert!(function.contains(read), "{what}: {function}");
+    }
+    assert!(
+        !function.contains("_isf_u[1].y") && !function.contains("_isf_u[5].z"),
+        "and nothing before number 6 (the input amount, 5) or after number 21 is read: {function}"
+    );
+    assert_eq!(
+        function.matches("mix(").count(),
+        MOST_POINTS_OF_A_GRAPH - 1,
+        "a segment for each pair of points"
+    );
+    let set_up = function_beginning_with(&rewritten.glsl, "void _isf_set_up_driven()");
+    assert!(
+        set_up.contains("_isf_graph_radius(_isf_unit_of_the_channel_radius)"),
+        "{set_up}"
+    );
+    assert!(
+        !set_up.contains("_isf_graph_amount"),
+        "the other input is mapped straight: {set_up}"
+    );
+}
+
+#[test]
+fn the_graphs_of_several_inputs_take_their_numbers_one_after_the_other_in_the_order_of_the_inputs_of_the_file() {
+    let file = filter_with_two_floats(A_LOOP_THAT_USES_THE_INPUTS_MANY_TIMES);
+    let rewritten = rewrite_with_driven_inputs(
+        &file,
+        &[
+            // (Given in the other order: the order of the file is what counts.)
+            driven_through_a_graph("amount", 0, MaskChannel::Green),
+            driven_through_a_graph("radius", 0, MaskChannel::Red),
+        ],
+    )
+    .unwrap();
+
+    let radius = function_beginning_with(&rewritten.glsl, "float _isf_graph_radius(float t)");
+    let amount = function_beginning_with(&rewritten.glsl, "float _isf_graph_amount(float t)");
+    // Radius: numbers 6 to 21. Amount: numbers 22 to 37, which begin at the vec4 5 (22 = 5 * 4 + 2).
+    assert!(
+        radius.contains("_isf_u[1].z") && radius.contains("_isf_u[5].y"),
+        "{radius}"
+    );
+    assert!(
+        amount.contains("_isf_u[5].z") && amount.contains("_isf_u[9].y"),
+        "{amount}"
+    );
+}
+
+#[test]
+fn a_graph_that_has_no_room_among_the_numbers_of_the_call_is_refused_and_a_straight_map_never_is() {
+    // Fifty-six numbers of inputs and the four of the shader fill 60 of the 64; the sixteen of a graph do not fit, and the number of a straight map does.
+    let floats: Vec<String> = (0..56)
+        .map(|number| {
+            format!("{{ \"NAME\": \"p{number}\", \"TYPE\": \"float\", \"MIN\": 0.0, \"MAX\": 1.0, \"DEFAULT\": 0.5 }}")
+        })
+        .collect();
+    let file = filter(
+        &floats.join(","),
+        "void main() { gl_FragColor = IMG_THIS_PIXEL(inputImage) * p0; }",
+    );
+
+    assert!(rewrite_with_driven_inputs(&file, &[driven("p3", 0, MaskChannel::Red)]).is_ok());
+    let problem = rewrite_with_driven_inputs(&file, &[driven_through_a_graph("p3", 0, MaskChannel::Red)])
+        .expect_err("the graph has no room");
+    assert!(problem.message.contains("room"), "{}", problem.message);
+    assert!(problem.message.contains("p3"), "{}", problem.message);
 }
