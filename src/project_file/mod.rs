@@ -141,7 +141,12 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 ///
 /// **Version 23 added `hidden` to a track**: `true` for a track whose eye is closed, so that none of its pictures are in the picture of the project (left out when the track is seen, which is how a track is
 /// made). Its sound is as it was. A file of version 22 has none: all its tracks are seen.
-pub const FILE_FORMAT_VERSION: u32 = 23;
+///
+/// **Version 24 added `driven` to an effect** (`docs/shader-masks-design.md`): the numbers of a shader that are read from a mask instead of from their sliders, by the id of each, as
+/// `{ "source": { "track": n }, "channel": "red" | "green" | "blue" | "brightness", "where_nothing": x }`, where `n` is the place of the track in the file's list of tracks, from 0, and `x` is
+/// what the number is where the mask has nothing (left out when no number of the effect is read from a mask; the sliders and their keyframes are kept as they were). A file where a number is
+/// read from a track that is not there, or where tracks are made from each other, is refused. A file of version 23 has none: every number is read from its slider.
+pub const FILE_FORMAT_VERSION: u32 = 24;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -1288,7 +1293,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                 height_in_points: track.height().points(),
                 animation: AnimationDocument::default(),
                 drawer: racks_of(AnimationTarget::Track(track.id()), track.drawer())?,
-                effects: effect_documents_of(track.effects()),
+                effects: effect_documents_of(track.effects(), project),
                 sharing: SharingDocument {
                     picture: track.sharing().picture,
                     sound: track.sharing().sound,
@@ -1312,7 +1317,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                             entry.gap_before_frames(),
                             entry.clip(),
                             racks_of(AnimationTarget::Clip(entry.id()), entry.drawer())?,
-                            effect_documents_of(entry.effects()),
+                            effect_documents_of(entry.effects(), project),
                             groups::badge_documents_of(entry.effects(), &group_numbers).map_err(invalid_project)?,
                         ))
                     })
@@ -1496,6 +1501,8 @@ mod audio_effects_tests;
 mod built_in_effects_tests;
 #[cfg(test)]
 mod colour_tests;
+#[cfg(test)]
+mod driven_value_tests;
 #[cfg(test)]
 mod effects_tests;
 #[cfg(test)]

@@ -507,6 +507,7 @@ fn an_effect_that_what_it_is_on_cannot_have_is_refused_whichever_effect_it_is() 
             passes_notes_on: false,
             enabled: true,
             state: None,
+            driven: std::collections::BTreeMap::new(),
             unknown: std::collections::BTreeMap::new(),
         }]
     };

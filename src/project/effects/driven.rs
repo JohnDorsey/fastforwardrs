@@ -1,0 +1,136 @@
+// SPDX-FileCopyrightText: 2026 John Dorsey
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! A value of an effect that is read from a **mask** instead of from its slider (`docs/shader-masks-design.md`): what the mask is made of, which channel of its colour gives the
+//! value, and the number the value is where the mask has nothing. The slider of the value is kept (with its keyframes) and is not used while the value is driven.
+
+use crate::project::tracks::TrackId;
+
+pub use crate::isf::MaskChannel;
+
+/// What a mask is made of: where the picture that a value is read from comes from.
+///
+/// **Only a track for now**: the picture of the track is what its clips make, with the effects of the clips and of the track, whether or not the track's eye is open. (A contiguous group
+/// of clips, a group of tracks and a layer that is not on a track are to come, as other kinds of source.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MaskSource {
+    Track(TrackId),
+}
+
+impl MaskSource {
+    /// The tracks whose clips the source's picture is made of.
+    pub fn tracks(self) -> impl Iterator<Item = TrackId> {
+        match self {
+            Self::Track(track) => std::iter::once(track),
+        }
+    }
+}
+
+/// A value of an effect that is read from a mask.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DrivenValue {
+    pub source: MaskSource,
+    /// Which part of the colour of the mask is the value (spread over the range of the value: nothing of the colour is 0 of the range and all of it is the whole).
+    pub channel: MaskChannel,
+    /// What the value is **where the mask has nothing** (a gap in the track, or the part of the picture its clips do not cover), and, mixed in by how much the mask covers, where it
+    /// covers some. A number of the value's own range, set by a slider made for it in the settings of the mask.
+    pub value_where_nothing: f32,
+}
+
+impl DrivenValue {
+    /// A value read from the track `track`, as the channel `channel` says, and `value_where_nothing` where the track has nothing.
+    pub fn from_a_track(track: TrackId, channel: MaskChannel, value_where_nothing: f32) -> Self {
+        Self {
+            source: MaskSource::Track(track),
+            channel,
+            value_where_nothing,
+        }
+    }
+
+    /// Whether the number is one that can be kept (it is a number).
+    pub fn is_well_formed(&self) -> bool {
+        self.value_where_nothing.is_finite()
+    }
+}
+
+/// The values of an effect that are read from masks, by the place of each among the effect's values, in the order of the places. At most one for a value.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DrivenValues {
+    values: Vec<(u8, DrivenValue)>,
+}
+
+impl DrivenValues {
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// The values `values` give, if no place is there twice and every number is one.
+    pub fn from_places(mut values: Vec<(u8, DrivenValue)>) -> Option<Self> {
+        values.sort_by_key(|(place, _)| *place);
+        let twice = values.windows(2).any(|pair| pair[0].0 == pair[1].0);
+        (!twice && values.iter().all(|(_, driven)| driven.is_well_formed())).then_some(Self { values })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// The driven values and the place of each, in the order of the places.
+    pub fn iter(&self) -> impl Iterator<Item = (usize, &DrivenValue)> {
+        self.values.iter().map(|(place, driven)| (usize::from(*place), driven))
+    }
+
+    /// What the value in place `place` is read from, if it is read from a mask.
+    pub fn of(&self, place: usize) -> Option<&DrivenValue> {
+        self.values
+            .iter()
+            .find(|(found, _)| usize::from(*found) == place)
+            .map(|(_, driven)| driven)
+    }
+
+    /// The same, with the value in place `place` read as `driven` says (or from its slider again, for `None`). `None` if `driven` is a number that is not one.
+    #[must_use]
+    pub fn with(&self, place: u8, driven: Option<DrivenValue>) -> Option<Self> {
+        if driven.as_ref().is_some_and(|driven| !driven.is_well_formed()) {
+            return None;
+        }
+        let mut values: Vec<(u8, DrivenValue)> = self
+            .values
+            .iter()
+            .copied()
+            .filter(|(found, _)| *found != place)
+            .collect();
+        values.extend(driven.map(|driven| (place, driven)));
+        values.sort_by_key(|(found, _)| *found);
+        Some(Self { values })
+    }
+
+    /// The tracks that any of the values is read from, each once, in the order they are first met in.
+    pub fn tracks(&self) -> Vec<TrackId> {
+        let mut tracks: Vec<TrackId> = Vec::new();
+        for (_, driven) in &self.values {
+            for track in driven.source.tracks() {
+                if !tracks.contains(&track) {
+                    tracks.push(track);
+                }
+            }
+        }
+        tracks
+    }
+
+    /// The same, without any value that is read from the track `track` (what happens to a value whose track is gone, if the project is to have no such value).
+    #[must_use]
+    pub fn without_the_track(&self, track: TrackId) -> Self {
+        Self {
+            values: self
+                .values
+                .iter()
+                .copied()
+                .filter(|(_, driven)| !driven.source.tracks().any(|found| found == track))
+                .collect(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

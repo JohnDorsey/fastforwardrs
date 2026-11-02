@@ -15,6 +15,7 @@
 mod animating;
 mod animation;
 mod crates;
+mod driven_values;
 mod duplicating;
 mod effect_editing;
 mod effects;
@@ -53,13 +54,13 @@ pub use animation::{
 };
 pub use duplicating::{ClipSide, TrackSide};
 pub use effects::{
-    Badge, ChainEntry, ChainItem, ChainItemKey, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId,
-    EffectKind, EffectPreset, Effects, EffectsIter, HUE_SHIFT_KEY, ImportedPicture, InstalledPlugin, LutOperation,
-    LutSpace, MOST_BYTES_OF_A_SHADER, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING,
-    MOST_IMAGES_A_SHADER_BRINGS, MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER, MOST_VALUES_OF_AN_EFFECT,
-    ParameterControl, ParameterDescriptor, PictureOperation, PluginAddress, ShaderImage, ShaderLanguage, ShaderSource,
-    UnknownFields, ValueScale, installed_plugin_for, installed_plugins, installed_shaders, set_installed_plugins,
-    set_installed_shaders,
+    Badge, ChainEntry, ChainItem, ChainItemKey, ChoiceOption, DrivenValue, DrivenValues, Effect, EffectDescriptor,
+    EffectDomain, EffectInstanceId, EffectKind, EffectPreset, Effects, EffectsIter, HUE_SHIFT_KEY, ImportedPicture,
+    InstalledPlugin, LutOperation, LutSpace, MOST_BYTES_OF_A_SHADER, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER,
+    MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS, MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER,
+    MOST_VALUES_OF_AN_EFFECT, MaskChannel, MaskSource, ParameterControl, ParameterDescriptor, PictureOperation,
+    PluginAddress, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueScale, installed_plugin_for,
+    installed_plugins, installed_shaders, set_installed_plugins, set_installed_shaders,
 };
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};
@@ -160,6 +161,10 @@ pub enum InconsistentProject {
     RacksAreWrong { problems: String },
     #[error("the groups do not agree with what is in the project: {problem}")]
     GroupsAreWrong { problem: GroupProblem },
+    #[error("a value of an effect is read from {track}, which the project does not have")]
+    ValueReadFromAnUnknownTrack { track: TrackId },
+    #[error("the picture of {track} is made from itself: it is read by a mask that is made from it")]
+    TracksAreMadeFromEachOther { track: TrackId },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -211,6 +216,10 @@ pub struct RelinkOutcome {
 pub enum EditError {
     #[error("the project has no {track}")]
     UnknownTrack { track: TrackId },
+    #[error("this value cannot be read from a mask: {reason}")]
+    ValueCannotBeDriven { reason: &'static str },
+    #[error("{track} is made from the picture that this effect is done to, so it cannot be the mask of this effect")]
+    MaskWouldReadItself { track: TrackId },
     #[error("{track} is the only track, and a project always has a track")]
     CannotDeleteTheOnlyTrack { track: TrackId },
     #[error("{property:?} is not a property of a track")]
@@ -402,6 +411,9 @@ impl Project {
         }
         if let Some(problem) = project.first_problem_with_the_groups() {
             return Err(InconsistentProject::GroupsAreWrong { problem });
+        }
+        if let Some(problem) = project.first_problem_with_the_masks() {
+            return Err(problem);
         }
         Ok(project)
     }
@@ -613,6 +625,8 @@ impl Project {
             self.take_out_of_the_groups(Member::Clip(clip));
         }
         self.take_out_of_the_groups(Member::Track(track));
+        // (Nothing is left that is read from a track that is not there: each such value is read from its slider again.)
+        self.let_go_of_the_masks_made_of(track);
         Ok(())
     }
 
@@ -1229,6 +1243,8 @@ mod adjustment_clip_tests;
 mod animating_tests;
 #[cfg(test)]
 mod crates_tests;
+#[cfg(test)]
+mod driven_value_tests;
 #[cfg(test)]
 mod duplicating_tests;
 #[cfg(test)]

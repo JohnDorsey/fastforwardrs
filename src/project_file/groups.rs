@@ -210,7 +210,7 @@ pub(super) fn group_documents_of(
                     .iter()
                     .map(|member| positions.member_document_of(*member, numbers))
                     .collect::<Result<Vec<_>, _>>()?,
-                effects: effect_documents_of(group.effects()),
+                effects: effect_documents_of(group.effects(), project),
                 badges: badge_documents_of(group.effects(), numbers)?,
                 tail: GroupTailDocument {
                     edge: group.tail_policy().edge,

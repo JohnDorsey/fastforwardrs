@@ -22,11 +22,12 @@ use serde_json::Value;
 
 use super::document::KeyframeValueDocument;
 use super::{legacy_effects, value_document_of, value_from_document};
+use crate::project::tracks::TrackId;
 use crate::project::{
-    ChainEntry, ChoiceOption, Effect, EffectDescriptor, EffectDomain, EffectInstanceId, EffectKind, Effects,
-    MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS, ParameterControl,
-    ParameterDescriptor, Project, ShaderImage, ShaderLanguage, ShaderSource, TailLength, UnknownFields, ValueKind,
-    ValueScale,
+    ChainEntry, ChoiceOption, DrivenValue, DrivenValues, Effect, EffectDescriptor, EffectDomain, EffectInstanceId,
+    EffectKind, Effects, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS,
+    MaskChannel, MaskSource, ParameterControl, ParameterDescriptor, Project, ShaderImage, ShaderLanguage, ShaderSource,
+    TailLength, UnknownFields, ValueKind, ValueScale,
 };
 
 /// What a type of effect is, as a file says it: a snapshot of its descriptor.
@@ -168,9 +169,63 @@ pub(super) struct EffectDocument {
     /// For a synthesizer (format 22 and after): `true` when it passes the notes that reach it on to the next synthesizer (phase 13, piece 13.5). Left out when it does not, which is how it is put on.
     #[serde(default, skip_serializing_if = "is_false")]
     pub passes_notes_on: bool,
+    /// The values of the effect that are read from a mask instead of from their sliders (format 24 and after), by the id of each value (docs/shader-masks-design.md). Left out when none is.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub driven: BTreeMap<String, DrivenDocument>,
     /// What this version of the program does not know of the effect, which is kept as it was.
     #[serde(flatten)]
     pub unknown: BTreeMap<String, Value>,
+}
+
+/// A value of an effect that is read from a mask, as a file says it: `{ "source": { "track": n }, "channel": "red", "where_nothing": 0.5 }`. The `n` of a track is its place in the file's
+/// list of tracks, from 0, as the tracks are named in groups. **A kind of source that this version does not know is refused** (it is a file of a newer version, or a mistake).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DrivenDocument {
+    pub source: MaskSourceDocument,
+    pub channel: MaskChannelDocument,
+    /// What the value is where the mask has nothing (see [`DrivenValue::value_where_nothing`]).
+    pub where_nothing: f32,
+}
+
+/// What a mask is made of, as a file says it.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum MaskSourceDocument {
+    /// A track, by its place in the file's list of tracks.
+    Track(u32),
+}
+
+/// Which part of the colour of a mask is the value, as a file says it.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum MaskChannelDocument {
+    Red,
+    Green,
+    Blue,
+    Brightness,
+}
+
+impl From<MaskChannel> for MaskChannelDocument {
+    fn from(channel: MaskChannel) -> Self {
+        match channel {
+            MaskChannel::Red => Self::Red,
+            MaskChannel::Green => Self::Green,
+            MaskChannel::Blue => Self::Blue,
+            MaskChannel::Brightness => Self::Brightness,
+        }
+    }
+}
+
+impl From<MaskChannelDocument> for MaskChannel {
+    fn from(channel: MaskChannelDocument) -> Self {
+        match channel {
+            MaskChannelDocument::Red => Self::Red,
+            MaskChannelDocument::Green => Self::Green,
+            MaskChannelDocument::Blue => Self::Blue,
+            MaskChannelDocument::Brightness => Self::Brightness,
+        }
+    }
 }
 
 /// The values of an effect: by the id of each, or (in the files that were written before the effects were open) a list, one for each of
@@ -450,7 +505,7 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
                 .map_err(|reason| format!("the state of the {kind} effect: {reason}"))
         })
         .transpose()?;
-    Effect::with_values(kind, values)
+    let effect = Effect::with_values(kind, values)
         .map(|effect| {
             effect
                 .with_unknown_fields(UnknownFields::new(document.unknown))
@@ -459,7 +514,30 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
                 .with_passes_notes_on(document.passes_notes_on)
                 .with_state(state)
         })
-        .ok_or_else(|| format!("the values of the {kind} effect are not the kind it has"))
+        .ok_or_else(|| format!("the values of the {kind} effect are not the kind it has"))?;
+    let mut driven: Vec<(u8, DrivenValue)> = Vec::with_capacity(document.driven.len());
+    for (id, one) in document.driven {
+        let slot = kind
+            .slot_of_the_value_with_id(&id)
+            .ok_or_else(|| format!("the {kind} effect has no value with the id \"{id}\", to read from a mask"))?;
+        if let Some(reason) = effect.why_a_value_cannot_be_driven(slot) {
+            return Err(format!(
+                "the value \"{id}\" of the {kind} effect cannot be read from a mask: {reason}"
+            ));
+        }
+        let MaskSourceDocument::Track(track) = one.source;
+        driven.push((
+            u8::try_from(slot).map_err(|_| format!("the {kind} effect has too many values"))?,
+            DrivenValue {
+                source: MaskSource::Track(TrackId::new(track)),
+                channel: one.channel.into(),
+                value_where_nothing: one.where_nothing,
+            },
+        ));
+    }
+    let driven = DrivenValues::from_places(driven)
+        .ok_or_else(|| format!("a value of the {kind} effect that is read from a mask has a number that is not one"))?;
+    Ok(effect.with_driven_values(driven))
 }
 
 /// The effects that the documents describe, in their order, each named as the document names it: a file of version 10 names none, and
@@ -515,8 +593,9 @@ pub(super) fn chain_of_the_effects_from_documents(
 
 // --- writing ---
 
-/// The documents of the effects `effects`, in their order, with the values left out of each that has the values it begins with.
-pub(super) fn effect_documents_of(effects: &Effects) -> Vec<EffectDocument> {
+/// The documents of the effects `effects`, in their order, with the values left out of each that has the values it begins with. `project` is the project they are in: a value that is read
+/// from a track names the track by its place in the project's list of tracks, which is the number the track has in the file.
+pub(super) fn effect_documents_of(effects: &Effects, project: &Project) -> Vec<EffectDocument> {
     effects
         .iter()
         .map(|effect| {
@@ -537,6 +616,23 @@ pub(super) fn effect_documents_of(effects: &Effects) -> Vec<EffectDocument> {
                 state: effect.state().map(|bytes| crate::base64::encode(bytes)),
                 tail: effect.tail_length(),
                 passes_notes_on: effect.passes_notes_on(),
+                driven: effect
+                    .driven_values()
+                    .iter()
+                    .filter_map(|(slot, one)| {
+                        let id = kind.parameters().get(slot)?.id.to_string();
+                        let MaskSource::Track(track) = one.source;
+                        let place = project.track_position(track)?;
+                        Some((
+                            id,
+                            DrivenDocument {
+                                source: MaskSourceDocument::Track(u32::try_from(place).ok()?),
+                                channel: one.channel.into(),
+                                where_nothing: one.value_where_nothing,
+                            },
+                        ))
+                    })
+                    .collect(),
                 unknown: effect.unknown_fields().fields().clone(),
             }
         })

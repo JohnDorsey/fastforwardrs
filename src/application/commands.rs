@@ -8,8 +8,8 @@
 use super::history::EditKey;
 use super::selection::{SelectionChange, SelectionItem};
 use crate::project::{
-    AnimationTarget, ChainItemKey, ClipGroupBeforeTheDrag, ClipId, ClipMove, ClipSide, ClipTailPolicy, EffectDomain,
-    EffectInstanceId, EffectKind, FrameRate, Gain, GroupColour, GroupId, GroupKind, GroupTailPolicy,
+    AnimationTarget, ChainItemKey, ClipGroupBeforeTheDrag, ClipId, ClipMove, ClipSide, ClipTailPolicy, DrivenValue,
+    EffectDomain, EffectInstanceId, EffectKind, FrameRate, Gain, GroupColour, GroupId, GroupKind, GroupTailPolicy,
     InputColourOverride, KeyframeId, KeyframeMove, Member, Placement, ProjectSettings, PropertyId, PropertyValue,
     RackDestination, RackId, Settings, SourceMediaIdentifier, SpeedFactor, SpeedIndicatorLayout, TailLength,
     TextObject, TimeDirection, TimelineFrameIndex, TrackHeight, TrackId, TrackSharing, TrackSide,
@@ -257,6 +257,15 @@ pub enum Command {
         owner: Member,
         instance: EffectInstanceId,
         enabled: bool,
+    },
+    /// Read the value in place `slot` of the effect named `instance` in the chain of `owner` from a mask (a track), as `driven` says, or from its slider again (`None`) (from the button
+    /// next to the keyframe buttons of the value, and from the settings window of the mask): see `docs/shader-masks-design.md`. The slider and its keyframes are kept. Refused, with the
+    /// reason, if the value cannot be (it is not a number with a range of a shader) or the track is made from the picture the effect is done to.
+    SetDrivenValue {
+        owner: Member,
+        instance: EffectInstanceId,
+        slot: usize,
+        driven: Option<DrivenValue>,
     },
     /// Say how much of a track one instance of its effects of `domain` covers (from the menu of the box of the track; phase 12): see [`TrackSharing`]. Refused, with the reason, if
     /// a rule of groups would be broken (a group with effects that takes only some of the clips of a track that is never divided).
@@ -535,6 +544,7 @@ impl Command {
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectEnabled { .. }
+            | Self::SetDrivenValue { .. }
             | Self::SetTrackSharing { .. }
             | Self::SetClipTailPolicy { .. }
             | Self::SetGroupTailPolicy { .. }
@@ -679,6 +689,7 @@ impl Command {
             | Self::AddEffect { .. }
             | Self::RemoveEffect { .. }
             | Self::SetEffectEnabled { .. }
+            | Self::SetDrivenValue { .. }
             | Self::SetTrackSharing { .. }
             | Self::SetClipTailPolicy { .. }
             | Self::SetGroupTailPolicy { .. }

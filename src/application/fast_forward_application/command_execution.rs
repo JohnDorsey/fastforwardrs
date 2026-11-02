@@ -258,6 +258,16 @@ impl FastForwardApplication {
             } => {
                 let _ = self.document.project.set_effect_enabled(owner, instance, enabled);
             }
+            Command::SetDrivenValue {
+                owner,
+                instance,
+                slot,
+                driven,
+            } => {
+                if let Err(error) = self.document.project.set_driven_value(owner, instance, slot, driven) {
+                    self.show_message("The value cannot be read from a mask", error.to_string());
+                }
+            }
             Command::SetTrackSharing { track, domain, sharing } => {
                 if let Err(error) = self.document.project.set_track_sharing(track, domain, sharing) {
                     self.say_why_a_group_edit_was_refused("The sharing of the effects cannot be changed", &error);

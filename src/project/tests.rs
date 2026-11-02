@@ -58,7 +58,7 @@ pub(super) fn picture_source(identifier: u32, width: u32, height: u32) -> Source
     )
 }
 
-fn video_clip(identifier: u32, first: u64, end: u64) -> Clip {
+pub(super) fn video_clip(identifier: u32, first: u64, end: u64) -> Clip {
     Clip::Video(
         MediaClip::new(
             SourceMediaIdentifier::new(identifier),
@@ -82,7 +82,7 @@ fn audio_clip(identifier: u32, first: u64, end: u64) -> Clip {
     )
 }
 
-fn track_with(id: u32, clips: Vec<(u64, Clip)>) -> Track {
+pub(super) fn track_with(id: u32, clips: Vec<(u64, Clip)>) -> Track {
     Track::new(TrackId::new(id), format!("track {id}")).with_clips(clips)
 }
 
@@ -1657,7 +1657,7 @@ fn a_clip_is_found_on_the_track_that_has_it_and_a_clip_that_no_track_has_is_not_
 
 /// A project with these tracks, the one in front first, each a list of the clips on it with the empty frames
 /// before each. The files are a video of 1000 frames (file number 1) and a sound of 100 seconds (number 2).
-fn project_of_tracks(tracks: Vec<Vec<(u64, Clip)>>) -> Project {
+pub(super) fn project_of_tracks(tracks: Vec<Vec<(u64, Clip)>>) -> Project {
     let tracks = tracks
         .into_iter()
         .enumerate()

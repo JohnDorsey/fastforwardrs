@@ -28,9 +28,11 @@ use std::sync::Arc;
 use super::animation::{PropertyId, PropertyValue};
 use super::groups::GroupId;
 use super::tails::TailLength;
+use super::tracks::TrackId;
 
 mod built_in;
 mod descriptor;
+mod driven;
 mod installed;
 mod kind;
 
@@ -40,6 +42,7 @@ pub use descriptor::{
     MOST_IMAGES_A_SHADER_BRINGS, MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER, MOST_VALUES_OF_AN_EFFECT,
     ParameterControl, ParameterDescriptor, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueScale,
 };
+pub use driven::{DrivenValue, DrivenValues, MaskChannel, MaskSource};
 pub use installed::{
     EffectPreset, InstalledPlugin, PluginAddress, installed_plugin_for, installed_plugins, installed_shaders,
     set_installed_plugins, set_installed_shaders,
@@ -85,6 +88,8 @@ pub struct Effect {
     /// Whether the effect is done. An effect that is **switched off** (bypassed) stays in its chain with its values and keyframes and is not applied, not exported and not
     /// missed if it is one that the program does not have. It is on when it is put on.
     enabled: bool,
+    /// The values that are read from a mask instead of from their sliders (`docs/shader-masks-design.md`); none when it is put on. Only a number of a shader can be one.
+    driven: DrivenValues,
     /// What a plugin keeps that is not one of its values, saved by the plugin itself (its `clap.state`), if its window made it say so (phase 10). It is bytes that only the plugin
     /// can read; the program keeps them as they are and gives them back to the plugin, in the sound and in the window.
     state: Option<Arc<[u8]>>,
@@ -115,6 +120,7 @@ impl Effect {
             values: kind.default_values(),
             unknown_fields: UnknownFields::none(),
             enabled: true,
+            driven: DrivenValues::none(),
             state: None,
             state_fingerprint: fingerprint_of_a_state(None),
             tail_length: TailLength::default(),
@@ -135,6 +141,7 @@ impl Effect {
             values,
             unknown_fields: UnknownFields::none(),
             enabled: true,
+            driven: DrivenValues::none(),
             state: None,
             state_fingerprint: fingerprint_of_a_state(None),
             tail_length: TailLength::default(),
@@ -152,6 +159,43 @@ impl Effect {
     /// Whether the effect is switched on (see [`Self::with_enabled`]).
     pub fn is_enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// The values of the effect that are read from masks, and from what (see [`DrivenValues`]).
+    pub fn driven_values(&self) -> &DrivenValues {
+        &self.driven
+    }
+
+    /// The same effect, with the values `driven` read from masks. The caller has seen to it that each is a number of a shader (see [`Self::with_driven_value`], which does).
+    #[must_use]
+    pub fn with_driven_values(mut self, driven: DrivenValues) -> Self {
+        self.driven = driven;
+        self
+    }
+
+    /// Why the value in place `slot` cannot be read from a mask, if it cannot: it is not a number with a range of a shader.
+    pub fn why_a_value_cannot_be_driven(&self, slot: usize) -> Option<&'static str> {
+        if self.kind.shader_source().is_none() {
+            return Some("only the numbers of a shader can be read from a mask");
+        }
+        let Some(parameter) = self.kind.parameters().get(slot) else {
+            return Some("the effect has no such value");
+        };
+        if parameter.value_kind() != crate::project::ValueKind::Number || parameter.range.is_none() {
+            return Some("only a number with a range can be read from a mask");
+        }
+        None
+    }
+
+    /// The effect with the value in place `slot` read as `driven` says, or from its slider again (`None`). `None` if the value cannot be read from a mask (see
+    /// [`Self::why_a_value_cannot_be_driven`]), or the number given for where the mask has nothing is not a number.
+    #[must_use]
+    pub fn with_driven_value(&self, slot: usize, driven: Option<DrivenValue>) -> Option<Self> {
+        if driven.is_some() && self.why_a_value_cannot_be_driven(slot).is_some() {
+            return None;
+        }
+        let driven_values = self.driven.with(u8::try_from(slot).ok()?, driven)?;
+        Some(self.clone().with_driven_values(driven_values))
     }
 
     /// The same effect, with `tail_length` for how long it goes on after its input ends (see [`Self::tail_length`]).
@@ -275,6 +319,7 @@ impl Effect {
                 values,
                 unknown_fields: self.unknown_fields.clone(),
                 enabled: self.enabled,
+                driven: self.driven.clone(),
                 state: self.state.clone(),
                 state_fingerprint: self.state_fingerprint,
                 tail_length: self.tail_length,
@@ -516,6 +561,40 @@ impl Effects {
             }
         }
         false
+    }
+
+    /// Reads the value in place `slot` of the effect that is named `instance` from a mask, or from its slider again (`None`). `false` if there is no such effect, or if its value cannot be
+    /// read from a mask (see [`Effect::with_driven_value`]); nothing is changed then.
+    pub fn set_driven_value(&mut self, instance: EffectInstanceId, slot: usize, driven: Option<DrivenValue>) -> bool {
+        for link in &mut self.links {
+            if let Link::Effect(effect) = link
+                && effect.instance() == instance
+            {
+                return match effect.with_driven_value(slot, driven) {
+                    Some(changed) => {
+                        *effect = changed;
+                        true
+                    }
+                    None => false,
+                };
+            }
+        }
+        false
+    }
+
+    /// Takes every value that is read from the track `track` off its mask, and gives the number of effects that had such a value (what happens to the effects when the track is gone).
+    pub fn let_go_of_the_track(&mut self, track: TrackId) -> usize {
+        let mut changed = 0;
+        for link in &mut self.links {
+            if let Link::Effect(effect) = link {
+                let without = effect.driven.without_the_track(track);
+                if without != effect.driven {
+                    effect.driven = without;
+                    changed += 1;
+                }
+            }
+        }
+        changed
     }
 
     /// Gives the effect that is named `instance` the state its plugin saved (or takes it away: `None`). `false` if there is no such effect.
