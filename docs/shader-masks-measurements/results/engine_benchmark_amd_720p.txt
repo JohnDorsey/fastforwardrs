@@ -1,0 +1,34 @@
+Picture engine benchmark
+  adapter: AMD Radeon(TM) Graphics (Vulkan)
+  frames: 1280 by 720 pixels, 120 timed of each scene, one at a time, each all the way before the next
+  sending one video picture of that size to the card, once: 13.9 ms
+
+  scene                                                        passes   frames/s   mean ms   best ms  worst ms   waiting (ms)
+  a black frame (the output and the read-back)                      2     1073.7      0.93      0.83      1.14           0.85
+  one picture of video                                              2      732.2      1.37      1.26      1.63           1.27
+  four pictures                                                     2      565.0      1.77      1.70      2.03           1.67
+  four pictures, a colour matrix                                    3      439.4      2.28      2.08      2.97           2.16
+  four pictures, one blur (two passes)                              4      236.4      4.23      4.06      4.50           4.10
+  four pictures, the lookup stand-in                                3      317.3      3.15      3.03      3.41           3.04
+  the whole stack: two blurs, a matrix, a lookup                    8      118.4      8.45      8.22      9.10           8.27
+  the whole stack, with new pictures of video in every frame        8      104.7      9.55      9.36     10.37           9.12
+
+  the whole stack, with new pictures of video in every frame: 104.7 frames to the second; the gate is 60 at 720p on the integrated graphics: MADE
+
+Picture engine benchmark
+  adapter: AMD Radeon(TM) Graphics (Vulkan)
+  frames: 1280 by 720 pixels, 120 timed of each scene, 2 on their way at once (the time is between two that are finished)
+  sending one video picture of that size to the card, once: 2.8 ms
+
+  scene                                                        passes   frames/s   mean ms   best ms  worst ms   waiting (ms)
+  a black frame (the output and the read-back)                      2      911.0      1.10      0.58      1.43           0.86
+  one picture of video                                              2      643.6      1.55      0.73      2.34           1.32
+  four pictures                                                     2      518.1      1.93      0.67      2.21           1.70
+  four pictures, a colour matrix                                    3      435.8      2.29      0.66      2.66           2.05
+  four pictures, one blur (two passes)                              4      219.1      4.56      0.57      5.88           4.28
+  four pictures, the lookup stand-in                                3      303.8      3.29      0.56      3.70           3.02
+  the whole stack: two blurs, a matrix, a lookup                    8      117.0      8.54      0.70      9.39           8.23
+  the whole stack, with new pictures of video in every frame        8      103.8      9.63      0.67     10.85           9.06
+
+  the whole stack, with new pictures of video in every frame: 103.8 frames to the second; the gate is 60 at 720p on the integrated graphics: MADE
+

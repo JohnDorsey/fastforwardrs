@@ -1,0 +1,37 @@
+adapter: NVIDIA GeForce RTX 3090 (Vulkan, DiscreteGpu), frames of 1920 by 1080
+the mask is flat (128 of 255 everywhere), and the uniform says the same
+
+Part 1: milliseconds for one full-screen pass of a shader with a loop of K rounds (median of 7 batches)
+  u = the input from the uniforms, e = the mask read at every use, o = the mask read once per pixel, v = the mask read at a place that changes in every round
+     K    draws         u         e         o         v   u again        e/u      o/u      v/u     u2/u
+    K=8 u: mean byte 127.48, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=8 e: mean byte 127.48, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=8 o: mean byte 127.48, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=8 v: mean byte 127.46, greatest difference from u 51, bytes that differ by more than 1: 7366200
+    K=8 u: mean byte 127.48, greatest difference from u 0, bytes that differ by more than 1: 0
+     8     2048    0.0377    0.0424    0.0425    0.0643    0.0373       1.12     1.13     1.70     0.99
+    K=32 u: mean byte 127.47, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=32 e: mean byte 127.47, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=32 o: mean byte 127.47, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=32 v: mean byte 127.46, greatest difference from u 34, bytes that differ by more than 1: 6246305
+    K=32 u: mean byte 127.47, greatest difference from u 0, bytes that differ by more than 1: 0
+    32      512    0.1253    0.1287    0.1287    0.2376    0.1215       1.03     1.03     1.90     0.97
+    K=128 u: mean byte 127.46, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=128 e: mean byte 127.46, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=128 o: mean byte 127.46, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=128 v: mean byte 127.45, greatest difference from u 33, bytes that differ by more than 1: 6597431
+    K=128 u: mean byte 127.46, greatest difference from u 0, bytes that differ by more than 1: 0
+   128      128    0.4955    0.4966    0.4945    0.9377    0.4761       1.00     1.00     1.89     0.96
+    K=b32 u: mean byte 54.77, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=b32 e: mean byte 54.77, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=b32 o: mean byte 54.77, greatest difference from u 0, bytes that differ by more than 1: 0
+    K=b32 v: mean byte 147.65, greatest difference from u 179, bytes that differ by more than 1: 8294400
+    K=b32 u: mean byte 54.77, greatest difference from u 0, bytes that differ by more than 1: 0
+   b32      256    0.1819    0.1695    0.1702    0.2396    0.1818       0.93     0.94     1.32     1.00
+
+Part 2: sending one picture of video to the card
+  planes of 8 bits (what the decoder gives): 2.97 MB; the same as RGBA: 7.91 MB
+  planes: 0.27 ms each when sent one at a time and waited for, 0.16 ms each in a run of 60
+    RGBA: 0.60 ms each when sent one at a time and waited for, 0.39 ms each in a run of 60
+  drawing the planes into a texture as colours: 0.017 ms for each pass (4096 passes in a batch)
+  the memory of one more texture of this size: 7.9 MB as 8 bits of each colour, 15.8 MB as half floats

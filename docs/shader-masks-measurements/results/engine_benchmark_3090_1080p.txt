@@ -1,0 +1,17 @@
+Picture engine benchmark
+  adapter: NVIDIA GeForce RTX 3090 (Vulkan)
+  frames: 1920 by 1080 pixels, 60 timed of each scene, one at a time, each all the way before the next
+  sending one video picture of that size to the card, once: 1.7 ms
+
+  scene                                                        passes   frames/s   mean ms   best ms  worst ms   waiting (ms)
+  a black frame (the output and the read-back)                      2      597.6      1.67      1.48      3.08           1.57
+  one picture of video                                              2      630.9      1.59      1.47      1.90           1.50
+  four pictures                                                     2      636.0      1.57      1.49      1.82           1.49
+  four pictures, a colour matrix                                    3      605.7      1.65      1.52      2.00           1.55
+  four pictures, one blur (two passes)                              4      493.2      2.03      1.88      2.54           1.92
+  four pictures, the lookup stand-in                                3      574.6      1.74      1.40      2.62           1.64
+  the whole stack: two blurs, a matrix, a lookup                    8      477.5      2.09      1.93      2.71           1.94
+  the whole stack, with new pictures of video in every frame        8      397.3      2.52      2.31      2.99           1.95
+
+  the whole stack, with new pictures of video in every frame: 397.3 frames to the second; the gate is 60 at 720p on the integrated graphics: not at that size, so not the gate
+

@@ -1,0 +1,80 @@
+--- a/src/isf/rewrite.rs
++++ b/src/isf/rewrite.rs
+@@ -25,6 +25,10 @@
+ 
+ use super::reader::{IsfFile, IsfInputKind, IsfProblem};
+ 
++/// PROOF OF CONCEPT ONLY: the float inputs that are read from a picture (comma separated) and whether the read is made once per pixel (`true`) or at every use (`false`).
++pub static POC_DRIVEN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
++pub static POC_ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++
+ /// How many `vec4` the uniform block has: 17, which is 68 numbers: the 64 of a call and the engine's four.
+ pub const VEC4S_OF_THE_UNIFORM_BLOCK: usize = 17;
+ 
+@@ -486,6 +490,18 @@
+         }
+     }
+ 
++    let driven: Vec<String> = POC_DRIVEN
++        .lock()
++        .unwrap()
++        .split(',')
++        .filter(|name| !name.is_empty())
++        .map(str::to_string)
++        .collect();
++    let once = POC_ONCE.load(std::sync::atomic::Ordering::SeqCst);
++    let mut driven_once: Vec<(String, f32, f32)> = Vec::new();
++    if !driven.is_empty() && !image_names.iter().any(|name| name == "poc_mask") {
++        image_names.push("poc_mask".to_string());
++    }
+     let mut notes = Vec::new();
+     let mut prelude = String::new();
+     prelude.push_str("#version 450\n");
+@@ -503,6 +519,13 @@
+         names_of_the_shader.insert(input.name.as_str());
+         let n = |offset: usize| number_expression(number + offset);
+         let expression = match &input.kind {
++            IsfInputKind::Float { minimum, maximum, .. } if driven.contains(&input.name) && once => {
++                driven_once.push((input.name.clone(), *minimum, *maximum));
++                Some(format!("_isf_driven_{}", input.name))
++            }
++            IsfInputKind::Float { minimum, maximum, .. } if driven.contains(&input.name) => Some(format!(
++                "mix({minimum:?}, {maximum:?}, _isf_IMG_NORM_PIXEL_poc_mask(isf_FragNormCoord).r)"
++            )),
+             IsfInputKind::Float { .. } => Some(n(0)),
+             IsfInputKind::Long { .. } => Some(format!("int({})", n(0))),
+             IsfInputKind::Bool { .. } | IsfInputKind::Event => Some(format!("({} != 0.0)", n(0))),
+@@ -548,6 +571,18 @@
+             n = name
+         ));
+     }
++    for (name, _, _) in &driven_once {
++        prelude.push_str(&format!("float _isf_driven_{name};\n"));
++    }
++    if !driven_once.is_empty() {
++        prelude.push_str("void _isf_set_up_driven() {\n");
++        for (name, minimum, maximum) in &driven_once {
++            prelude.push_str(&format!(
++                "    _isf_driven_{name} = mix({minimum:?}, {maximum:?}, _isf_IMG_NORM_PIXEL_poc_mask(isf_FragNormCoord).r);\n"
++            ));
++        }
++        prelude.push_str("}\n");
++    }
+     let prelude_lines = prelude.matches('\n').count() as u32;
+ 
+     let (body, count) = rewrite_image_calls(&file.body, &image_names);
+@@ -600,8 +635,13 @@
+         glsl.push_str("}\n");
+     }
+     glsl.push_str(&format!(
+-        "\nlayout(location = 0) out vec4 _isf_out;\nvoid main() {{\n    vec4 real = _isf_real_fragcoord();\n    _isf_fragcoord = vec4(real.x, _isf_u[{last}].y - real.y, real.z, real.w);\n    isf_FragNormCoord = vec2(real.x / _isf_u[{last}].x, 1.0 - real.y / _isf_u[{last}].y);\n    _isf_color = vec4(0.0);\n{set_up_call}    _isf_user_main();\n    _isf_out = _isf_color;\n}}\n",
++        "\nlayout(location = 0) out vec4 _isf_out;\nvoid main() {{\n    vec4 real = _isf_real_fragcoord();\n    _isf_fragcoord = vec4(real.x, _isf_u[{last}].y - real.y, real.z, real.w);\n    isf_FragNormCoord = vec2(real.x / _isf_u[{last}].x, 1.0 - real.y / _isf_u[{last}].y);\n    _isf_color = vec4(0.0);\n{driven_call}{set_up_call}    _isf_user_main();\n    _isf_out = _isf_color;\n}}\n",
+         last = VEC4S_OF_THE_UNIFORM_BLOCK - 1,
++        driven_call = if driven_once.is_empty() {
++            ""
++        } else {
++            "    _isf_set_up_driven();\n"
++        },
+         set_up_call = if set_up.is_empty() { "" } else { "    _isf_set_up_globals();\n" }
+     ));
+     Ok(Rewritten {

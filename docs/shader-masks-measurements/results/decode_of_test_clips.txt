@@ -1,0 +1,8 @@
+Software decode of H.264 (libx264, veryfast, crf 20, yuv420p, one picture in 30 a key frame), 2026-11-01, on the maintainer's computer (a Ryzen 5 7600X, 12 threads), ffmpeg 9.0.2 (gyan.dev full build),
+`ffmpeg -benchmark -i clip -f null -` (the `rtime` of the line `bench: utime`), the best of three runs, divided by the frames of the clip. The clips are ffmpeg's `testsrc2`: a synthetic picture,
+easier than a camera's, whose bit rate is about 2.6 Mbit/s at 1080p and 7.4 Mbit/s at 4K (real footage is often 10 to 100 Mbit/s and takes longer: not measured here).
+
+1920x1080 decode, plain: best of 3 = 0.483 ms per frame (300 frames)
+1920x1080 decode, scaled to the 720p preview (-vf scale=1280:720): best of 3 = 0.66 ms per frame (300 frames)
+3840x2160 decode, plain: best of 3 = 2.367 ms per frame (120 frames)
+3840x2160 decode, scaled to the 720p preview (-vf scale=1280:720): best of 3 = 3.1 ms per frame (120 frames)
