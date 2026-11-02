@@ -107,6 +107,8 @@ mod lead_up_flow;
 mod lead_up_flow_tests;
 mod losing_keyframes;
 #[cfg(test)]
+mod mask_ui_tests;
+#[cfg(test)]
 mod midi_clip_tests;
 mod midi_import_flow;
 #[cfg(test)]
@@ -224,6 +226,7 @@ use super::commands::Command;
 use super::dialogs::Dialog;
 use super::file_chooser::{NativeFileChooser, RefusingFileChooser};
 use super::keyboard::{self, KeyboardState};
+use super::mask_settings_window;
 use super::mouse_buttons;
 use super::opening::OpeningOutcome;
 use super::preview_panel::EnginePreview;
@@ -830,6 +833,12 @@ impl FastForwardApplication {
                     .get(&source)
                     .and_then(|state| state.video_format.known.as_ref())
             },
+            &mut commands,
+        );
+        mask_settings_window::show(
+            &context,
+            &mut self.interface.mask_settings_window_open_for,
+            &self.document.project,
             &mut commands,
         );
         let agreed_to = self.show_dialogs(&context);

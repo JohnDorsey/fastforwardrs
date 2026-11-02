@@ -172,6 +172,39 @@ fn make_variant(key: &str, source: &ShaderSource, driven: &[DrivenInput]) -> Res
     Ok(())
 }
 
+/// The inputs that set the size of a buffer of each shader (see `structure::inputs_that_set_a_size`), by the key of its effect: worked out once.
+static SIZE_SETTERS: Mutex<Option<HashMap<String, Vec<String>>>> = Mutex::new(None);
+
+/// The names of the inputs of the shader of `descriptor` that a size of one of its buffers is made from. A size is worked out once for the whole picture, so such an input cannot be read
+/// from a mask (`docs/shader-masks-design.md`). Nothing for an effect that is no ISF shader, or whose text cannot be read.
+pub fn inputs_that_set_the_size_of_a_buffer(descriptor: &EffectDescriptor) -> Vec<String> {
+    let Some(source) = descriptor
+        .shader
+        .as_ref()
+        .filter(|source| source.language == ShaderLanguage::Isf)
+    else {
+        return Vec::new();
+    };
+    let key = descriptor.key.to_string();
+    if let Some(found) = SIZE_SETTERS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .and_then(|found| found.get(&key))
+    {
+        return found.clone();
+    }
+    let found = read(&source.text)
+        .map(|file| super::structure::inputs_that_set_a_size(&file))
+        .unwrap_or_default();
+    SIZE_SETTERS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_with(HashMap::new)
+        .insert(key, found.clone());
+    found
+}
+
 /// What was made of each shader that reads masks, by its key: whether it could be made.
 static COMPILED_VARIANTS: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
 

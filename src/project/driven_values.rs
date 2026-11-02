@@ -43,7 +43,7 @@ impl Project {
                 if self.track(source).is_none() {
                     return Err(EditError::UnknownTrack { track: source });
                 }
-                if self.a_mask_of_this_track_would_read_a_picture_made_from_it(owner, source) {
+                if self.a_mask_made_of_this_track_would_loop(owner, source) {
                     return Err(EditError::MaskWouldReadItself { track: source });
                 }
             }
@@ -179,7 +179,7 @@ impl Project {
 
     /// Whether a mask made of `source`, read by an effect of `owner`, would be made from the picture that the effect is done to: `source` is, or is made from by way of the masks of
     /// its own effects (as far as they go), a track that the effect is done to.
-    fn a_mask_of_this_track_would_read_a_picture_made_from_it(&self, owner: Member, source: TrackId) -> bool {
+    pub fn a_mask_made_of_this_track_would_loop(&self, owner: Member, source: TrackId) -> bool {
         let hosts = self.tracks_whose_pictures_the_effects_of_are_done_to(owner);
         let mut seen: HashSet<TrackId> = HashSet::new();
         let mut to_look_at = vec![source];

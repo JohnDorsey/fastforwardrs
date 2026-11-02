@@ -11,6 +11,7 @@
 use egui::{Color32, CursorIcon, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2};
 
 use crate::application::commands::Command;
+use crate::application::mask_settings_window::WhichValue;
 use crate::application::theme;
 use crate::project::{AnimationTarget, Project, PropertyId, TimelineFrameIndex};
 
@@ -26,6 +27,22 @@ const GAP_BEFORE_THE_BUTTONS: f32 = 8.0;
 /// How much room at the right of a control is kept for its buttons, whether they are shown or not (so that nothing moves when they
 /// come), in points.
 pub(super) const ROOM_FOR_THE_BUTTONS: f32 = 3.0 * BUTTON_SIZE + 2.0 * GAP_BETWEEN_BUTTONS + GAP_BEFORE_THE_BUTTONS;
+
+/// How much more room a row keeps at its right end for the mask button, which is next to the three buttons of keyframes (on the rows of the numbers of a shader only), in points.
+pub(super) const ROOM_FOR_THE_MASK_BUTTON: f32 = BUTTON_SIZE + GAP_BETWEEN_BUTTONS;
+
+/// The mask button of a number of a shader (`docs/shader-masks-design.md`): it opens the window that says what the number is read from.
+#[derive(Clone, Copy)]
+pub(super) struct MaskButton {
+    pub which: WhichValue,
+    /// Why the number cannot be read from a mask, if it cannot (the button is dimmed, and says why).
+    pub cannot_because: Option<&'static str>,
+}
+
+/// What the mask button is called to a screen reader and the tests: `name` is what the number is called, in lower case.
+pub fn mask_button_label(name: &str) -> String {
+    format!("Read {name} from a mask")
+}
 
 /// How the faces of the stopwatch and the arrows are drawn: how far the stopwatch's face is from its middle, and how wide and tall
 /// an arrow is, in points.
@@ -157,6 +174,62 @@ pub(super) fn show(ui: &mut Ui, row: Rect, here: &KeyframesHere, name: &str, sho
             response.on_hover_text("Move the playhead onto the clip to make a keyframe.");
         }
     }
+}
+
+/// Makes the mask button of `mask` in the room next to the three buttons of keyframes at the right end of `row`, and draws it if `shown` (the pointer is over the row). Clicking it asks for
+/// the window of the mask. `name` is what the number is called, in lower case.
+pub(super) fn show_the_mask_button(
+    ui: &mut Ui,
+    row: Rect,
+    mask: MaskButton,
+    name: &str,
+    shown: bool,
+    commands: &mut Vec<Command>,
+) {
+    let [before, ..] = rectangles_of_the_buttons(row);
+    let rectangle = Rect::from_min_size(
+        pos2(before.left() - GAP_BETWEEN_BUTTONS - BUTTON_SIZE, before.top()),
+        vec2(BUTTON_SIZE, BUTTON_SIZE),
+    );
+    let can_be_used = mask.cannot_because.is_none() && ui.is_enabled();
+    let label = mask_button_label(name);
+    let id = ui
+        .id()
+        .with(("mask button", mask.which.owner, mask.which.instance, mask.which.slot));
+    let response = ui.interact(rectangle, id, if can_be_used { Sense::CLICK } else { Sense::hover() });
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, can_be_used, label.clone()));
+    if shown || response.hovered() {
+        if can_be_used && response.hovered() {
+            ui.painter()
+                .rect_filled(rectangle, 4.0, theme::KEYFRAME_BUTTON_HOVERED_BACKGROUND);
+        }
+        draw_a_mask(ui.painter(), rectangle.center(), theme::KEYFRAME_BUTTON_INACTIVE);
+    }
+    if can_be_used {
+        let response = response
+            .on_hover_cursor(CursorIcon::PointingHand)
+            .on_hover_text("Read this number from the picture of a track, pixel by pixel");
+        if response.clicked() {
+            commands.push(Command::ShowTheMaskSettings(mask.which));
+        }
+    } else if let Some(why) = mask.cannot_because {
+        response.on_hover_text(why);
+    }
+}
+
+/// A mask at `middle`: a round face with its left half filled in.
+fn draw_a_mask(painter: &Painter, middle: Pos2, colour: Color32) {
+    painter.circle_stroke(middle, STOPWATCH_RADIUS, Stroke::new(1.5, colour));
+    let half: Vec<Pos2> = (0..=12)
+        .map(|step| {
+            let angle = std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * step as f32 / 12.0;
+            pos2(
+                middle.x + STOPWATCH_RADIUS * angle.cos(),
+                middle.y - STOPWATCH_RADIUS * angle.sin(),
+            )
+        })
+        .collect();
+    painter.add(Shape::convex_polygon(half, colour, Stroke::NONE));
 }
 
 /// What `button` does, for what is shown when the pointer rests on it.

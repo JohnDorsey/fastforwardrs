@@ -13,7 +13,7 @@
 use egui::{Rect, Ui, pos2};
 
 use super::PropertiesContent;
-use super::keyframe_buttons::{self, KeyframesHere, ROOM_FOR_THE_BUTTONS};
+use super::keyframe_buttons::{self, KeyframesHere, MaskButton, ROOM_FOR_THE_BUTTONS, ROOM_FOR_THE_MASK_BUTTON};
 use crate::application::commands::Command;
 use crate::application::naming::name_of_a_property_of;
 use crate::project::{AnimationTarget, PropertyId, PropertyValue};
@@ -86,6 +86,19 @@ pub(super) fn row<R>(
     commands: &mut Vec<Command>,
     add_control: impl FnOnce(&mut Ui, &mut Vec<Command>) -> R,
 ) -> R {
+    row_with_a_mask_button(ui, content, animatable, None, commands, add_control)
+}
+
+/// [`row`], and for the row of a number of a shader, `mask`, the button next to the buttons of keyframes that opens the window of what the number is read from (the row keeps room for
+/// it).
+pub(super) fn row_with_a_mask_button<R>(
+    ui: &mut Ui,
+    content: &PropertiesContent<'_>,
+    animatable: Animatable,
+    mask: Option<MaskButton>,
+    commands: &mut Vec<Command>,
+    add_control: impl FnOnce(&mut Ui, &mut Vec<Command>) -> R,
+) -> R {
     let Animatable { target, property } = animatable;
     let here = KeyframesHere::of(content.project, target, property, content.current_frame);
     let can_be_changed_here = here.can_make_one_here || !content.project.is_animated(target, property);
@@ -94,7 +107,8 @@ pub(super) fn row<R>(
     let row_width = ui.available_width();
     let control = ui.horizontal(|ui| {
         ui.scope(|ui| {
-            ui.set_max_width((row_width - ROOM_FOR_THE_BUTTONS).max(NARROWEST_CONTROL));
+            let room = ROOM_FOR_THE_BUTTONS + if mask.is_some() { ROOM_FOR_THE_MASK_BUTTON } else { 0.0 };
+            ui.set_max_width((row_width - room).max(NARROWEST_CONTROL));
             ui.add_enabled_ui(can_be_changed_here, |ui| add_control(ui, commands))
                 .inner
         })
@@ -108,5 +122,8 @@ pub(super) fn row<R>(
     let is_hovered = ui.rect_contains_pointer(row);
     let name = name_of_a_property_of(content.project, target, property);
     keyframe_buttons::show(ui, row, &here, &name, is_hovered, commands);
+    if let Some(mask) = mask {
+        keyframe_buttons::show_the_mask_button(ui, row, mask, &name, is_hovered, commands);
+    }
     control.inner
 }

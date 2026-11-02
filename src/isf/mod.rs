@@ -24,8 +24,8 @@ pub use descriptor::{
     key_of_a_source_with_images, numbers_of_the_values,
 };
 pub use registry::{
-    compiled_shader_of, depends_on_earlier_frames, driven_variant_key, driven_variant_of, is_usable, shape_of,
-    why_not_usable,
+    compiled_shader_of, depends_on_earlier_frames, driven_variant_key, driven_variant_of,
+    inputs_that_set_the_size_of_a_buffer, is_usable, shape_of, why_not_usable,
 };
 
 pub use reader::{

@@ -16,10 +16,13 @@ use egui::{ComboBox, DragValue, RichText, Slider, SliderClamping, TextEdit, Ui};
 use super::PropertiesContent;
 use super::animatable::{self, Animatable};
 use super::controls::labelled_row;
+use super::keyframe_buttons::MaskButton;
+use super::mask_thumbnail;
 use crate::application::commands::Command;
+use crate::application::mask_settings_window::WhichValue;
 use crate::project::{
-    AnimationTarget, Effect, EffectKind, FontSize, GroupId, Member, ParameterControl, Project, PropertyId,
-    PropertyValue, Resource, ValueScale,
+    AnimationTarget, DrivenValue, Effect, EffectKind, FontSize, GroupId, MaskSource, Member, ParameterControl, Project,
+    PropertyId, PropertyValue, Resource, ValueKind, ValueScale,
 };
 
 /// How many lines of words show without scrolling in a box of lines.
@@ -256,6 +259,8 @@ enum Change {
     Value(PropertyValue),
     /// A file is to be chosen for the value (a table).
     ChooseAFile,
+    /// The window of what the number is read from is wanted (the thumbnail that is in the place of the slider of a number that is read from a mask was clicked).
+    ShowTheMaskSettings,
 }
 
 /// The member of the project that the clip or the track `target` is, for the commands that are about the effects of a thing of any kind.
@@ -268,10 +273,15 @@ fn member_of(target: AnimationTarget) -> Member {
 
 /// The command that a change of the value `property` of an effect of `owner` is.
 fn command_for(owner: Member, property: PropertyId, change: Change) -> Option<Command> {
-    let PropertyId::EffectValue { instance, .. } = property else {
+    let PropertyId::EffectValue { instance, slot, .. } = property else {
         return None;
     };
     Some(match (owner, change) {
+        (owner, Change::ShowTheMaskSettings) => Command::ShowTheMaskSettings(WhichValue {
+            owner,
+            instance,
+            slot: usize::from(slot),
+        }),
         (Member::Clip(clip), Change::Value(value)) => Command::SetEffectValue {
             target: AnimationTarget::Clip(clip),
             property,
@@ -321,20 +331,45 @@ pub(super) fn show_the_control_of(
     else {
         return;
     };
-    if !has_the_buttons_of_keyframes(kind, property, &shown) {
+    let effect_and_place = effect_and_place_of(content.project, target, property);
+    let driven = effect_and_place.and_then(|(effect, slot)| effect.driven_values().of(slot).copied());
+    // A number that is read from a mask has the thumbnail of the mask in the place of its slider, and no buttons of keyframes: its slider and keyframes are kept, and not used.
+    if driven.is_some() || !has_the_buttons_of_keyframes(kind, property, &shown) {
         if let Some(change) = labelled_row(ui, |ui| {
-            control_for(ui, content.project, content.font_families, kind, property, &shown)
+            control_for(
+                ui,
+                content.project,
+                content.font_families,
+                kind,
+                property,
+                &shown,
+                driven.as_ref(),
+            )
         }) && let Some(command) = command_for(member_of(target), property, change)
         {
             commands.push(command);
         }
         return;
     }
-    let changed = animatable::row(ui, content, Animatable { target, property }, commands, |ui, _| {
-        labelled_row(ui, |ui| {
-            control_for(ui, content.project, content.font_families, kind, property, &shown)
-        })
+    // The number of a shader that has a range can be read from a mask: the button for it is next to the buttons of keyframes.
+    let mask = effect_and_place.and_then(|(effect, slot)| {
+        let parameter = kind.parameters().get(slot)?;
+        (kind.shader_source().is_some() && parameter.value_kind() == ValueKind::Number && parameter.range.is_some())
+            .then(|| MaskButton {
+                which: WhichValue {
+                    owner: member_of(target),
+                    instance: effect.instance(),
+                    slot,
+                },
+                cannot_because: effect.why_a_value_cannot_be_driven(slot),
+            })
     });
+    let changed =
+        animatable::row_with_a_mask_button(ui, content, Animatable { target, property }, mask, commands, |ui, _| {
+            labelled_row(ui, |ui| {
+                control_for(ui, content.project, content.font_families, kind, property, &shown, None)
+            })
+        });
     if let Some(Change::Value(value)) = changed {
         commands.push(Command::SetEffectValue {
             target,
@@ -342,6 +377,18 @@ pub(super) fn show_the_control_of(
             value,
         });
     }
+}
+
+/// The effect of the clip or the track `target` that the value `property` is of, and the place of the value among the effect's values.
+fn effect_and_place_of(project: &Project, target: AnimationTarget, property: PropertyId) -> Option<(&Effect, usize)> {
+    let PropertyId::EffectValue { instance, slot, .. } = property else {
+        return None;
+    };
+    let effect = project
+        .effects_of(target)?
+        .iter()
+        .find(|effect| effect.instance() == instance)?;
+    Some((effect, usize::from(slot)))
 }
 
 /// Shows the row of the control of the value of the effect `effect` of the group `group` that `property` is, which has no buttons of
@@ -357,8 +404,9 @@ pub(super) fn show_the_control_of_a_group_effect(
     let Some(shown) = effect.value_of(property) else {
         return;
     };
-    if let Some(change) = labelled_row(ui, |ui| control_for(ui, project, None, effect.kind(), property, shown))
-        && let Some(command) = command_for(Member::Group(group), property, change)
+    if let Some(change) = labelled_row(ui, |ui| {
+        control_for(ui, project, None, effect.kind(), property, shown, None)
+    }) && let Some(command) = command_for(Member::Group(group), property, change)
     {
         commands.push(command);
     }
@@ -377,6 +425,7 @@ fn control_for(
     kind: EffectKind,
     property: PropertyId,
     shown: &PropertyValue,
+    driven: Option<&DrivenValue>,
 ) -> Option<Change> {
     let PropertyId::EffectValue { slot, .. } = property else {
         return None;
@@ -495,6 +544,16 @@ fn control_for(
         (_, PropertyValue::Number(number)) => {
             let mut number = *number;
             let label = ui.label(&*parameter.label);
+            // (Read from a mask: the thumbnail of the mask is in the place of the slider, and a click on it asks for the window of the mask.)
+            if let Some(driven) = driven {
+                let MaskSource::Track(track) = driven.source;
+                let name = project
+                    .track(track)
+                    .map_or_else(|| "a track".to_owned(), |found| found.title().to_owned());
+                return mask_thumbnail::show(ui, &parameter.name, &name, driven.channel)
+                    .clicked()
+                    .then_some(Change::ShowTheMaskSettings);
+            }
             // (The range is what the slider shows: the value can be typed to go further, as a turn of the colours is typed to go round more than
             // once, which is how many times they go round between two keyframes.)
             let changed = match parameter.range {

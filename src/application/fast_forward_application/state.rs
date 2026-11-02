@@ -184,6 +184,8 @@ pub(super) struct Interface {
     pub(super) plugin_manager_bundle_kind: crate::application::plugin_manager_bundles::BundleKind,
     /// The source file whose colours the window of its colour space is open for, if there is one.
     pub(super) colours_of_a_file_window_open_for: Option<SourceMediaIdentifier>,
+    /// The number of a shader whose window of what it is read from is open, if there is one.
+    pub(super) mask_settings_window_open_for: Option<crate::application::mask_settings_window::WhichValue>,
     pub(super) dialog: Option<Dialog>,
     /// Whether the "source files not found" warning is showing.
     pub(super) missing_sources_warning_open: bool,
@@ -222,6 +224,7 @@ impl Interface {
             plugin_manager_tab: crate::application::plugin_manager_window::PluginManagerTab::default(),
             plugin_manager_bundle_kind: crate::application::plugin_manager_bundles::BundleKind::default(),
             colours_of_a_file_window_open_for: None,
+            mask_settings_window_open_for: None,
             dialog: startup_dialog,
             missing_sources_warning_open: false,
             told_that_a_table_was_linked_for_plain_json: false,

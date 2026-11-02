@@ -6,6 +6,7 @@
 //! code ever has to change the project while it is still being drawn from.
 
 use super::history::EditKey;
+use super::mask_settings_window::WhichValue;
 use super::selection::{SelectionChange, SelectionItem};
 use crate::project::{
     AnimationTarget, ChainItemKey, ClipGroupBeforeTheDrag, ClipId, ClipMove, ClipSide, ClipTailPolicy, DrivenValue,
@@ -474,6 +475,9 @@ pub enum Command {
     /// Move or resize the fast-forward symbol.
     SetSpeedIndicatorLayout(SpeedIndicatorLayout),
 
+    /// Open the window that says what a number of a shader is read from (from the mask button next to the keyframe buttons of the number, and from the thumbnail that is in the place of its
+    /// slider while it is read from a mask): see `docs/shader-masks-design.md`.
+    ShowTheMaskSettings(WhichValue),
     /// Open the window that says what the colours of a source file are and lets the user say them differently (from the menu of a clip made from the file).
     ShowTheColoursOfAFile(SourceMediaIdentifier),
     /// Say what the colours of a source file are, instead of what it says (every part automatic, to say nothing): the pictures that are made of it are made again.
@@ -614,6 +618,7 @@ impl Command {
             | Self::TakeTablesOutOfTheProjectFile(_)
             | Self::AddEffectFromFile { .. }
             | Self::ChooseTableFile { .. }
+            | Self::ShowTheMaskSettings(_)
             | Self::ShowTheColoursOfAFile(_) => false,
         }
     }
@@ -723,6 +728,7 @@ impl Command {
             | Self::SetSpeedIndicatorLayout(_)
             | Self::AddEffectFromFile { .. }
             | Self::ChooseTableFile { .. }
+            | Self::ShowTheMaskSettings(_)
             | Self::ShowTheColoursOfAFile(_)
             | Self::SetTheColoursOfAFile { .. } => None,
         }
@@ -781,6 +787,13 @@ impl Command {
             }
             Self::SetSpeedIndicatorLayout(_) => Some(EditKey::about(&"where the fast-forward symbol is")),
             Self::SetTheColoursOfAFile { source, .. } => Some(EditKey::about(&("the colours of the file", source))),
+            // (The choices about one number, such as the drag of the slider that says what it is where the track has nothing, are one step of the history.)
+            Self::SetDrivenValue {
+                owner,
+                instance,
+                slot,
+                driven: Some(_),
+            } => Some(EditKey::about(&("what a number is read from", owner, instance, slot))),
             _ => None,
         }
     }

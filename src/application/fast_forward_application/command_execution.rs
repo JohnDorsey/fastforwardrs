@@ -450,6 +450,7 @@ impl FastForwardApplication {
 
             Command::SetSpeedIndicatorLayout(layout) => self.document.project.set_speed_indicator_layout(layout),
 
+            Command::ShowTheMaskSettings(which) => self.interface.mask_settings_window_open_for = Some(which),
             Command::ShowTheColoursOfAFile(source) => self.interface.colours_of_a_file_window_open_for = Some(source),
             Command::SetTheColoursOfAFile { source, colour } => {
                 self.document.project.set_source_colour(source, colour);

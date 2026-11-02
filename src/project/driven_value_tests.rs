@@ -484,3 +484,35 @@ fn tracks_that_read_each_other_are_refused_when_a_project_is_made_from_parts() {
         InconsistentProject::TracksAreMadeFromEachOther { .. }
     ));
 }
+
+// --- a number that sets the size of a buffer
+
+/// A shader that makes a buffer a part of the picture's size, by `cells`, and has another number (`gain`) that sets no size.
+const MAKES_A_BUFFER_FROM_A_NUMBER: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"cells\", \"TYPE\": \"float\", \"MIN\": 1.0, \"MAX\": 64.0, \"DEFAULT\": 8.0 }, { \"NAME\": \"gain\", \"TYPE\": \"float\", \"DEFAULT\": 1.0 } ], \"PASSES\": [ { \"TARGET\": \"small\", \"WIDTH\": \"$WIDTH / cells\", \"HEIGHT\": \"$HEIGHT / cells\" }, {} ] }*/\nvoid main() { gl_FragColor = IMG_NORM_PIXEL(small, isf_FragNormCoord) * gain; }\n";
+
+#[test]
+fn a_number_that_a_buffer_is_sized_from_cannot_be_read_from_a_mask_and_another_of_the_same_shader_can() {
+    let (mut project, [_, middle, _], [clip, ..]) = three_tracks();
+    let file = crate::isf::read(MAKES_A_BUFFER_FROM_A_NUMBER).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(
+        &file,
+        "cells.fs",
+        MAKES_A_BUFFER_FROM_A_NUMBER,
+    ))
+    .unwrap();
+    let instance = project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
+    let owner = Member::Clip(clip);
+    let cells = 0;
+    let gain = 1;
+
+    let refused = project.set_driven_value(owner, instance, cells, from(middle, MaskChannel::Red, 8.0));
+    let allowed = project.set_driven_value(owner, instance, gain, from(middle, MaskChannel::Red, 1.0));
+
+    assert!(
+        matches!(refused, Err(EditError::ValueCannotBeDriven { reason }) if reason.contains("size of a buffer")),
+        "{refused:?}"
+    );
+    assert_eq!(allowed, Ok(()));
+    assert_eq!(driven_of(&project, owner, instance, cells), None);
+    assert!(driven_of(&project, owner, instance, gain).is_some());
+}

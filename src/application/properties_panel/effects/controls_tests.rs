@@ -21,9 +21,10 @@ fn the_row_of_the_text_effect(
     let asked = std::cell::RefCell::new(None);
     let property = PropertyId::effect_value(EffectKind::TEXT, EffectInstanceId::FIRST, slot);
     let mut harness = egui_kittest::Harness::new_ui(|ui| {
-        match control_for(ui, &project, fonts, EffectKind::TEXT, property, &shown) {
+        match control_for(ui, &project, fonts, EffectKind::TEXT, property, &shown, None) {
             Some(Change::Value(value)) => *asked.borrow_mut() = Some(value),
             Some(Change::ChooseAFile) => panic!("a file is not chosen for a text"),
+            Some(Change::ShowTheMaskSettings) => panic!("a text is not read from a mask"),
             None => {}
         }
     });

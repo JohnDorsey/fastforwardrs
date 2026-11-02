@@ -32,6 +32,7 @@ mod group_properties;
 mod keyframe_buttons;
 mod keyframe_properties;
 mod kind_box;
+mod mask_thumbnail;
 mod placement_controls;
 mod rack_properties;
 mod selection_list;
@@ -47,7 +48,9 @@ pub use effects::{
     take_all_tables_out_label,
 };
 #[cfg(test)]
-pub use keyframe_buttons::{KeyframeButton, keyframe_button_label};
+pub use keyframe_buttons::{KeyframeButton, keyframe_button_label, mask_button_label};
+#[cfg(test)]
+pub use mask_thumbnail::label_of_the_thumbnail;
 
 use std::collections::HashMap;
 

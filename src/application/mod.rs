@@ -24,6 +24,7 @@ mod group_messages;
 mod history;
 mod keyboard;
 mod keyframe_moving;
+mod mask_settings_window;
 mod menu_bar;
 mod mouse_buttons;
 mod naming;

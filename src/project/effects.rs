@@ -184,6 +184,14 @@ impl Effect {
         if parameter.value_kind() != crate::project::ValueKind::Number || parameter.range.is_none() {
             return Some("only a number with a range can be read from a mask");
         }
+        if crate::isf::inputs_that_set_the_size_of_a_buffer(self.kind.descriptor())
+            .iter()
+            .any(|name| name.as_str() == &*parameter.id)
+        {
+            return Some(
+                "the shader makes the size of a buffer from this number, which is worked out once for the whole picture, so it cannot vary across it",
+            );
+        }
         None
     }
 
