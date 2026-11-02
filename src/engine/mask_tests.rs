@@ -11,11 +11,15 @@ use super::effect_tests::{frame_of, whole_frame};
 use super::foreign_effect_tests::call;
 use super::linear_light_tests::{colour_of, picture_for, the_whole_frame, upload};
 use super::oracle_tests::TestPicture;
+use super::persistent_buffer_tests::{
+    ADD_A_TENTH_OF_RED, THE_PICTURE_AND_A_BUFFER, installed_as, near, one_buffer_that_lasts, stateful, tenths,
+};
 use super::testing::with_software_graphics;
+use super::transition_tests::{RED, SIZE, each_working_space_with, flat_picture, frame_in, installed_wipe, wipe};
 use super::{
     CORNERS_OF_THE_WHOLE_PICTURE, DEFAULT_MOST_PASSES_OF_A_LOOP, EffectCall, FrameDescription, FrameRenderer,
-    FrameStatistics, GroupDescription, LayerDescription, LayerSource, RenderedFrame, ShaderStructure, WorkingSpace,
-    guard_wgsl,
+    FrameStatistics, GroupDescription, LayerDescription, LayerSource, PictureId, RenderedFrame, ShaderStructure,
+    WorkingSpace, guard_wgsl,
 };
 use crate::colour_space::StandardPrimaries;
 use crate::isf::{DrivenInput, MaskChannel, compile_with_driven_inputs, read};
@@ -25,7 +29,7 @@ const A_LONG_TIME: Duration = Duration::from_secs(60);
 const LINEAR_REC709: WorkingSpace = WorkingSpace::Linear(StandardPrimaries::Rec709);
 
 /// A filter that shows the number `level` (0 to 1, 0.5 to begin with) as a grey, and ignores its picture.
-const SHOW_THE_LEVEL: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"level\", \"TYPE\": \"float\", \"MIN\": 0.0, \"MAX\": 1.0, \"DEFAULT\": 0.5 } ] }*/\nvoid main() { gl_FragColor = vec4(vec3(level), 1.0); }\n";
+pub(super) const SHOW_THE_LEVEL: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"level\", \"TYPE\": \"float\", \"MIN\": 0.0, \"MAX\": 1.0, \"DEFAULT\": 0.5 } ] }*/\nvoid main() { gl_FragColor = vec4(vec3(level), 1.0); }\n";
 
 /// A filter that shows `amount` (2 to 6) over 8 as a grey.
 const SHOW_THE_AMOUNT: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"amount\", \"TYPE\": \"float\", \"MIN\": 2.0, \"MAX\": 6.0, \"DEFAULT\": 4.0 } ] }*/\nvoid main() { gl_FragColor = vec4(vec3(amount / 8.0), 1.0); }\n";
@@ -36,7 +40,7 @@ const SHOW_TWO_LEVELS: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"T
 /// A filter whose picture is the average of eight reads of its own picture, spaced by `level`, and which shows `level` in the blue: the input is used in a loop.
 const USE_THE_LEVEL_IN_A_LOOP: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"level\", \"TYPE\": \"float\", \"MIN\": 0.0, \"MAX\": 1.0, \"DEFAULT\": 0.5 } ] }*/\nvoid main() {\n\tfloat sum = 0.0;\n\tfor (int i = 0; i < 8; i++) { sum += level; }\n\tgl_FragColor = vec4(vec3(sum / 8.0), 1.0);\n}\n";
 
-fn driven(name: &str, mask: usize, channel: MaskChannel) -> DrivenInput {
+pub(super) fn driven(name: &str, mask: usize, channel: MaskChannel) -> DrivenInput {
     DrivenInput {
         name: name.to_owned(),
         mask,
@@ -45,7 +49,7 @@ fn driven(name: &str, mask: usize, channel: MaskChannel) -> DrivenInput {
 }
 
 /// Compiles `text` with the inputs `driven` read from masks and gives it to the renderer under `key`.
-fn installed_with_masks(
+pub(super) fn installed_with_masks(
     renderer: &mut FrameRenderer,
     key: &str,
     text: &str,
@@ -67,7 +71,7 @@ fn installed_with_masks(
 }
 
 /// A call of `key` whose inputs have these numbers (what a call has for an input that is read from a mask is the value where the mask has nothing) and which has these masks.
-fn reading_masks(key: &str, inputs: &[f32], masks: Vec<GroupDescription>) -> EffectCall {
+pub(super) fn reading_masks(key: &str, inputs: &[f32], masks: Vec<GroupDescription>) -> EffectCall {
     let mut numbers = vec![0.0, 0.0, 0.0, 0.0];
     numbers.extend_from_slice(inputs);
     EffectCall {
@@ -93,7 +97,7 @@ fn the_left_half_of_it(colour: [u8; 4]) -> LayerDescription {
     a_colour_over([(0.0, 0.0), (0.5, 0.0), (0.5, 1.0), (0.0, 1.0)], colour)
 }
 
-fn mask_of(layers: Vec<LayerDescription>) -> GroupDescription {
+pub(super) fn mask_of(layers: Vec<LayerDescription>) -> GroupDescription {
     GroupDescription { layers }
 }
 
@@ -689,4 +693,149 @@ fn what_a_mask_makes_does_not_depend_on_the_mode_the_frame_is_made_in() {
             );
         }
     });
+}
+
+// ---- an effect that keeps a state, done to a picture in the frame and to the same picture in a mask (found by the maintainer's testing, 2026-11-02)
+
+/// The right half of the frame, made of the picture 1, with the effects `effects`.
+fn the_right_half_of_picture_1(effects: Vec<EffectCall>) -> LayerDescription {
+    LayerDescription {
+        source: LayerSource::Picture(PictureId(1)),
+        corners: [(0.5, 0.0), (1.0, 0.0), (1.0, 1.0), (0.5, 1.0)],
+        effects,
+    }
+}
+
+#[test]
+fn an_effect_that_keeps_a_state_goes_on_in_the_frame_as_it_does_in_a_mask_of_the_same_picture() {
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        installed_as(
+            &mut renderer,
+            "test:accumulate",
+            THE_PICTURE_AND_A_BUFFER,
+            ADD_A_TENTH_OF_RED,
+            &one_buffer_that_lasts(),
+        );
+        installed_with_masks(
+            &mut renderer,
+            "test:level",
+            SHOW_THE_LEVEL,
+            &[driven("level", 0, MaskChannel::Red)],
+        );
+        renderer
+            .upload_picture(PictureId(1), &TestPicture::gradient(8, 8).as_picture_data())
+            .unwrap();
+        for frame in 0..5_u64 {
+            let wanted = tenths(frame as i32 + 1);
+            // The clip of the track at the back, over all of the frame, and the clip of the track in front of it over the right half, whose effect reads the picture of the track at the back as a
+            // mask. The effect of the track at the back is called twice, in the frame and in the mask: it is one effect of one clip, so it has one state, at one frame.
+            let at_the_back = whole_frame(1, vec![stateful("test:accumulate", 7, frame)]);
+            let in_the_mask = whole_frame(1, vec![stateful("test:accumulate", 7, frame)]);
+            let in_front = the_right_half_of_picture_1(vec![reading_masks(
+                "test:level",
+                &[0.0],
+                vec![mask_of(vec![in_the_mask])],
+            )]);
+            let (finished, statistics) =
+                super::effect_tests::render(&mut renderer, (8, 8), vec![at_the_back, in_front]);
+
+            assert_eq!(statistics.effects_not_run, 0, "frame {frame}");
+            let seen_at_the_back = i32::from(finished.pixel(1, 4)[0]);
+            assert!(
+                near(seen_at_the_back, wanted),
+                "frame {frame}: the track at the back, where it is seen, is {seen_at_the_back} and not {wanted}: it is not frozen"
+            );
+            let read_from_the_mask = finished.pixel(6, 4);
+            assert!(
+                is_near(read_from_the_mask, [wanted as u8; 3], 2),
+                "frame {frame}: the value the mask gives is {read_from_the_mask:?}, wanted {wanted}: it is the same picture"
+            );
+        }
+        assert_eq!(renderer.effect_states_kept().0, 1, "one effect, one state");
+    });
+}
+
+#[test]
+fn a_second_call_of_a_state_that_would_need_buffers_of_another_size_keeps_nothing_and_reads_nothing() {
+    with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        installed_as(
+            &mut renderer,
+            "test:accumulate",
+            THE_PICTURE_AND_A_BUFFER,
+            ADD_A_TENTH_OF_RED,
+            &one_buffer_that_lasts(),
+        );
+        renderer
+            .upload_picture(PictureId(1), &TestPicture::gradient(8, 8).as_picture_data())
+            .unwrap();
+        // A picture 16 across and 4 down: the buffer that lasts is as big as the picture the effect works on, so this call cannot go on from the state of the other.
+        renderer
+            .upload_picture(PictureId(2), &TestPicture::gradient(16, 4).as_picture_data())
+            .unwrap();
+        for frame in 0..3_u64 {
+            let first = whole_frame(1, vec![stateful("test:accumulate", 7, frame)]);
+            let second = LayerDescription {
+                source: LayerSource::Picture(PictureId(2)),
+                corners: [(0.5, 0.0), (1.0, 0.0), (1.0, 1.0), (0.5, 1.0)],
+                effects: vec![stateful("test:accumulate", 7, frame)],
+            };
+            let (finished, _) = super::effect_tests::render(&mut renderer, (8, 8), vec![first, second]);
+            assert!(
+                near(i32::from(finished.pixel(1, 4)[0]), tenths(frame as i32 + 1)),
+                "frame {frame}: the first goes on: {:?}",
+                finished.pixel(1, 4)
+            );
+            assert!(
+                near(i32::from(finished.pixel(6, 4)[0]), tenths(1)),
+                "frame {frame}: the second starts clear in every frame: {:?}",
+                finished.pixel(6, 4)
+            );
+        }
+    });
+}
+
+// ---- a shader that reads what is behind its layer, in a mask (found by the maintainer's testing, 2026-11-02)
+
+#[test]
+fn a_transition_on_a_layer_of_a_mask_is_done_over_what_is_behind_it_in_the_mask_which_is_nothing() {
+    let red = flat_picture(SIZE, RED);
+    each_working_space_with(
+        |renderer| {
+            installed_wipe(renderer);
+            installed_with_masks(
+                renderer,
+                "test:level",
+                SHOW_THE_LEVEL,
+                &[driven("level", 0, MaskChannel::Red)],
+            );
+        },
+        &[(1, &red)],
+        |working, renderer| {
+            // The picture of the mask is the red picture with a wipe on it, `progress` of the way from what is behind it (nothing, in a mask: the track on its own) to the picture. The
+            // wipe mixes the two, so the mask covers by `progress`, with the red of the picture (200 of 255) where it covers; and the number is that red mixed with the 0 of the call by
+            // how much the mask covers: 200 * progress. (It is 200 everywhere if the wipe is not done, which is what a mask did before 2026-11-02.)
+            for progress in [0.0_f32, 0.5, 1.0] {
+                let host = whole_frame(
+                    1,
+                    vec![reading_masks(
+                        "test:level",
+                        &[0.0],
+                        vec![mask_of(vec![whole_frame(1, vec![wipe(progress)])])],
+                    )],
+                );
+                let (frame, not_run, _) = frame_in(renderer, working, vec![host]);
+                assert_eq!(not_run, 0, "{working:?}, progress {progress}");
+                let wanted = (200.0 * progress).round() as u8;
+                for (across, down) in [(0, 0), (4, 4), (7, 7)] {
+                    let pixel = frame.pixel(across, down);
+                    assert!(
+                        is_near(pixel, [wanted; 3], 3),
+                        "{working:?}, progress {progress} at {across}, {down}: {pixel:?}, wanted {wanted}"
+                    );
+                }
+            }
+        },
+    );
 }

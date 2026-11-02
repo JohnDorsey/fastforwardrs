@@ -206,6 +206,39 @@ fn a_video_that_is_a_mask_keeps_its_one_range_in_every_piece_that_the_host_is_cu
 }
 
 #[test]
+fn a_video_that_is_seen_and_is_a_mask_shows_the_same_frame_of_its_source_in_the_picture_and_in_the_mask_in_every_piece_the_host_is_cut_into()
+ {
+    // The host (a video on the middle track) is cut by a text at frames 50 to 70; the track behind it is a video of 100 frames that is seen, and is the host's mask.
+    let mut project = project_of(vec![
+        vec![(50, text(20))],
+        vec![(0, long_video(10, 110, 1))],
+        vec![(0, long_video(0, 100, 1))],
+    ]);
+    let (mask_track, host_clip) = (project.tracks()[2].id(), first_clip_of(&project, 1));
+    read_from(&mut project, host_clip, 0, mask_track, MaskChannel::Green, 0.0);
+
+    let plan = plan(&project);
+
+    assert_eq!(plan.sections.len(), 3, "cut by the text");
+    for section in &plan.sections {
+        let (_, seen) = section
+            .video_layers()
+            .find(|(layer, _)| layer.track == mask_track)
+            .expect("the track is seen: its video is a layer of the picture");
+        let mask = &section.masks[0].section;
+        let (_, in_the_mask) = mask.video_layers().next().expect("and the mask is made of it");
+        let (first, end) = (section.first_timeline_frame, section.end_timeline_frame);
+        for at in [first, first + (end - first) / 2, end - 1] {
+            assert_eq!(
+                section.source_frame_at(seen, frame(at)),
+                mask.source_frame_at(in_the_mask, frame(at)),
+                "timeline frame {at} of the piece {first}..{end}: one clip, one frame of its source, wherever it is used"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_mask_is_made_of_masks_when_the_effects_of_its_track_read_one() {
     // Three tracks: the front one is the mask of the middle one, which is the mask of the back one (a video).
     let mut project = project_of(vec![

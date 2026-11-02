@@ -54,6 +54,9 @@ pub enum PassPlan {
     /// `layers` are their numbers in the list of every layer (the frame's first): those of a group are numbered after those of the frame. It comes before the layer that is
     /// made of the group has its effects run, and before the layers of the container that it is in are put in their places.
     PlaceGroup { container: usize, layers: Vec<usize> },
+    /// Puts the layers of the group that is container number `container` in their places **over what is in its picture**, back to front, without clearing it first: what comes after a layer of a
+    /// **mask** that read what was behind it (the mask's picture so far), as [`PassPlan::PlaceLayersOver`] does in the frame.
+    PlaceGroupOver { container: usize, layers: Vec<usize> },
     /// Turns the picture that was put together into the 8-bit frame.
     Output,
 }
@@ -82,6 +85,7 @@ impl FramePlan {
                 | PassPlan::PlaceLayers { .. }
                 | PassPlan::PlaceLayersOver { .. }
                 | PassPlan::PlaceGroup { .. }
+                | PassPlan::PlaceGroupOver { .. }
                 | PassPlan::Output => 1,
             })
             .sum()
@@ -465,9 +469,14 @@ pub fn lut_changes_nothing(values: &[f32]) -> bool {
         .is_some_and(|intensity| *intensity < NEAR_ENOUGH_TO_CHANGE_NOTHING)
 }
 
-/// Which effects of `layer` run, and how many cannot. A shader that reads what is behind its layer runs only `in_the_frame` (the layer is one of the frame's own: what is behind it is
-/// opaque, as every frame is put together over opaque black); in a group the picture that the layers are put together in begins clear, and the effect is counted as one that is not run.
-fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun, in_the_frame: bool) -> (Vec<usize>, usize) {
+/// Which effects of `layer` run, and how many cannot. A shader that reads what is behind its layer runs only if `backdrop_can_be_read`: the layer is one of the frame's own (what is behind it
+/// is opaque, as every frame is put together over opaque black) or of a **mask** (what is behind it is the mask's picture so far, which begins clear: the track on its own has nothing behind
+/// it). In a group that is the picture of a layer the picture that the layers are put together in begins clear too, and the effect is counted as one that is not run.
+fn effects_of(
+    layer: &LayerDescription,
+    effects_that_run: &EffectsThatRun,
+    backdrop_can_be_read: bool,
+) -> (Vec<usize>, usize) {
     // (The picture of a group is a picture for the effects to work on; a colour has none.)
     if matches!(layer.source, LayerSource::Solid(_)) {
         return (Vec::new(), layer.effects.len());
@@ -520,7 +529,7 @@ fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun, in_th
                     && numbers_are_finite
                     && effect.images.len() == effects_that_run.imported_images_of(&effect.key)
                     && effect.masks.len() == effects_that_run.masks_of(&effect.key)
-                    && (in_the_frame || !effects_that_run.reads_the_backdrop(&effect.key)) =>
+                    && (backdrop_can_be_read || !effects_that_run.reads_the_backdrop(&effect.key)) =>
             {
                 calls.push(number);
             }
@@ -530,16 +539,16 @@ fn effects_of(layer: &LayerDescription, effects_that_run: &EffectsThatRun, in_th
     (calls, not_run)
 }
 
-/// The pass that runs the effects of the layer `layer`, which is number `number` in the list of every layer and is one of the frame's own if `in_the_frame`, and the steps of it, if
-/// any of its effects runs; and how many of its effects cannot.
+/// The pass that runs the effects of the layer `layer`, which is number `number` in the list of every layer and is in a container whose picture a shader can read as the backdrop if
+/// `backdrop_can_be_read` (see [`effects_of`]), and the steps of it, if any of its effects runs; and how many of its effects cannot.
 fn effects_pass_of(
     number: usize,
     layer: &LayerDescription,
     effects_that_run: &EffectsThatRun,
     working_space_is_light: bool,
-    in_the_frame: bool,
+    backdrop_can_be_read: bool,
 ) -> (Option<(PassPlan, Vec<EffectStep>)>, usize) {
-    let (calls, not_run) = effects_of(layer, effects_that_run, in_the_frame);
+    let (calls, not_run) = effects_of(layer, effects_that_run, backdrop_can_be_read);
     if calls.is_empty() {
         return (None, not_run);
     }
@@ -580,8 +589,11 @@ pub fn plan_frame(description: &FrameDescription, effects_that_run: &EffectsThat
     let mut steps_of_passes: Vec<Vec<EffectStep>> = Vec::new();
     let mut effects_not_run = 0;
     let working_space_is_light = matches!(description.colour.working, WorkingSpace::Linear(_));
+    let masks = flat.containers_that_are_masks();
     for container in (0..flat.containers.len()).rev() {
         let numbers = flat.containers[container].clone();
+        // (What is behind a layer can be read as the backdrop in the frame, and in a mask; in the other groups it cannot: see `effects_of`.)
+        let backdrop_can_be_read = container == 0 || masks.contains(&container);
         // The layers that have an effect that reads what is behind them, with the pass that runs their effects: it is not run with the others but when what is behind each of them has been put
         // together (see below).
         let mut reading_the_backdrop: Vec<(usize, PassPlan, Vec<EffectStep>)> = Vec::new();
@@ -591,7 +603,7 @@ pub fn plan_frame(description: &FrameDescription, effects_that_run: &EffectsThat
                 flat.layers[number].layer,
                 effects_that_run,
                 working_space_is_light,
-                container == 0,
+                backdrop_can_be_read,
             );
             effects_not_run += not_run;
             let Some((pass, steps)) = pass else { continue };
@@ -602,45 +614,56 @@ pub fn plan_frame(description: &FrameDescription, effects_that_run: &EffectsThat
                 steps_of_passes.push(steps);
             }
         }
+        // The pass that puts layers together in the picture of the container, clearing it first (to opaque black in the frame, to nothing in a group), and the one that puts more over what is there.
+        let put = |layers: Vec<usize>| {
+            if container == 0 {
+                PassPlan::PlaceLayers { layers }
+            } else {
+                PassPlan::PlaceGroup { container, layers }
+            }
+        };
+        let put_over = |layers: Vec<usize>| {
+            if container == 0 {
+                PassPlan::PlaceLayersOver { layers }
+            } else {
+                PassPlan::PlaceGroupOver { container, layers }
+            }
+        };
         // (Every pass that does not run effects has an empty list of steps.)
-        if container > 0 {
-            passes.push(PassPlan::PlaceGroup {
-                container,
-                layers: numbers.collect(),
-            });
-            steps_of_passes.push(Vec::new());
-        } else if numbers.is_empty() {
-            passes.push(PassPlan::ClearAccumulation);
-            steps_of_passes.push(Vec::new());
-        } else if reading_the_backdrop.is_empty() {
-            passes.push(PassPlan::PlaceLayers {
-                layers: numbers.collect(),
+        if reading_the_backdrop.is_empty() {
+            passes.push(if container == 0 && numbers.is_empty() {
+                PassPlan::ClearAccumulation
+            } else {
+                put(numbers.collect())
             });
             steps_of_passes.push(Vec::new());
         } else {
             // The layers behind each layer that reads the backdrop are put in their places (the first of them clearing; if there are none, the picture is cleared) before the effects of the layer
-            // run, and the layers from it up to the next one that reads the backdrop are put over what is there afterwards.
+            // run, and the layers from it up to the next one that reads the backdrop are put over what is there afterwards. (In the frame the picture that is cleared is opaque black; in a mask,
+            // which is the track on its own, it is nothing.)
             let mut next_to_put = numbers.start;
             for (number, pass, steps) in reading_the_backdrop {
                 if number > next_to_put {
                     let layers = (next_to_put..number).collect();
                     passes.push(if next_to_put == numbers.start {
-                        PassPlan::PlaceLayers { layers }
+                        put(layers)
                     } else {
-                        PassPlan::PlaceLayersOver { layers }
+                        put_over(layers)
                     });
                     steps_of_passes.push(Vec::new());
                 } else if next_to_put == numbers.start {
-                    passes.push(PassPlan::ClearAccumulation);
+                    passes.push(if container == 0 {
+                        PassPlan::ClearAccumulation
+                    } else {
+                        put(Vec::new())
+                    });
                     steps_of_passes.push(Vec::new());
                 }
                 passes.push(pass);
                 steps_of_passes.push(steps);
                 next_to_put = number;
             }
-            passes.push(PassPlan::PlaceLayersOver {
-                layers: (next_to_put..numbers.end).collect(),
-            });
+            passes.push(put_over((next_to_put..numbers.end).collect()));
             steps_of_passes.push(Vec::new());
         }
     }

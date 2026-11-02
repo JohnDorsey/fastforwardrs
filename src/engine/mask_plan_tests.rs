@@ -447,3 +447,128 @@ fn a_mask_is_not_a_picture_of_a_frame_the_picture_it_is_made_of_is() {
 
     assert_eq!(description.pictures_used(), [PictureId(1), PictureId(7), PictureId(8)]);
 }
+
+// --- a shader that reads what is behind its layer, in a mask (found by the maintainer's testing, 2026-11-02) ---
+
+/// A shader that reads the backdrop, as a transition does.
+const THE_WIPE: &str = "test:wipe";
+
+fn known_with_a_wipe() -> EffectsThatRun {
+    let mut known = known();
+    known.add_shader_that_reads_the_backdrop(THE_WIPE, 1, 0);
+    known
+}
+
+fn a_wipe() -> EffectCall {
+    call(THE_WIPE, &[0.5])
+}
+
+#[test]
+fn a_shader_that_reads_the_backdrop_runs_in_a_mask_and_reads_the_layers_behind_it_in_the_mask_which_begins_clear() {
+    // The frame's layer is 0; the mask's are 1 (a picture) and 2 (a picture with the wipe on it).
+    let plan = plan_frame(
+        &frame_of_layers(vec![whole_frame(
+            1,
+            vec![reading(
+                READING_ONE_MASK_IN_TWO_PASSES,
+                vec![mask_of(vec![a_picture(7), whole_frame(8, vec![a_wipe()])])],
+            )],
+        )]),
+        &known_with_a_wipe(),
+    );
+
+    assert_eq!(plan.effects_not_run, 0);
+    assert_eq!(
+        plan.passes,
+        vec![
+            // (The layers behind the wipe, in the mask, clearing it first; then the wipe, which reads what is there; then the layers from it up, over what is there.)
+            PassPlan::PlaceGroup {
+                container: 1,
+                layers: vec![1]
+            },
+            PassPlan::Effects {
+                layer: 2,
+                calls: vec![0]
+            },
+            PassPlan::PlaceGroupOver {
+                container: 1,
+                layers: vec![2]
+            },
+            PassPlan::Effects {
+                layer: 0,
+                calls: vec![0]
+            },
+            PassPlan::PlaceLayers { layers: vec![0] },
+            PassPlan::Output,
+        ]
+    );
+    assert_eq!(
+        plan.steps_of_effects[1],
+        vec![EffectStep::Backdrop { call: 0 }, the_call(0)],
+        "the wipe reads the mask's picture so far"
+    );
+    // The two groups' passes, the wipe's two steps, the host's mask step and call (its second pass is a pass of the same call), the layer's place and the output.
+    assert_eq!(plan.passes_recorded(), 1 + 2 + 1 + 3 + 1 + 1);
+}
+
+#[test]
+fn a_shader_that_reads_the_backdrop_on_the_first_layer_of_a_mask_reads_a_picture_with_nothing_in_it() {
+    let plan = plan_frame(
+        &frame_of_layers(vec![whole_frame(
+            1,
+            vec![reading(
+                READING_ONE_MASK_IN_TWO_PASSES,
+                vec![mask_of(vec![whole_frame(8, vec![a_wipe()])])],
+            )],
+        )]),
+        &known_with_a_wipe(),
+    );
+
+    assert_eq!(plan.effects_not_run, 0);
+    assert_eq!(
+        &plan.passes[..3],
+        [
+            // (Nothing is behind it: the mask is cleared, and not put together of nothing.)
+            PassPlan::PlaceGroup {
+                container: 1,
+                layers: vec![]
+            },
+            PassPlan::Effects {
+                layer: 1,
+                calls: vec![0]
+            },
+            PassPlan::PlaceGroupOver {
+                container: 1,
+                layers: vec![1]
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_group_in_a_mask_is_still_a_group_where_a_shader_that_reads_the_backdrop_is_not_run_and_is_counted() {
+    // (The wipe is in a group of the mask, whose picture begins clear as a group's does: the mask's own layers are the ones that can read their backdrop.)
+    let plan = plan_frame(
+        &frame_of_layers(vec![whole_frame(
+            1,
+            vec![reading(
+                READING_ONE_MASK_IN_TWO_PASSES,
+                vec![mask_of(vec![a_group(vec![
+                    a_picture(7),
+                    whole_frame(8, vec![a_wipe()]),
+                ])])],
+            )],
+        )]),
+        &known_with_a_wipe(),
+    );
+
+    assert_eq!(plan.effects_not_run, 1, "the wipe");
+    assert!(
+        !plan
+            .passes
+            .iter()
+            .any(|pass| matches!(pass, PassPlan::PlaceGroupOver { .. })),
+        "{:?}",
+        plan.passes
+    );
+}

@@ -99,7 +99,13 @@ fn two_buffers_that_last() -> ShaderStructure {
     }
 }
 
-fn installed_as(renderer: &mut FrameRenderer, key: &str, header: &str, stage: &str, structure: &ShaderStructure) {
+pub(super) fn installed_as(
+    renderer: &mut FrameRenderer,
+    key: &str,
+    header: &str,
+    stage: &str,
+    structure: &ShaderStructure,
+) {
     renderer
         .install_effect_with_structure(
             key,
@@ -329,7 +335,8 @@ fn a_persistent_effect_on_a_picture_of_another_size_or_on_a_group_keeps_a_state_
 }
 
 #[test]
-fn a_state_that_two_calls_of_one_frame_have_is_kept_by_the_first_and_the_second_goes_without() {
+fn a_state_that_two_calls_of_one_frame_have_is_kept_by_the_first_and_the_second_goes_on_from_the_same_state_and_keeps_nothing()
+ {
     with_software_graphics!(graphics, {
         let mut renderer = renderer_with_the_picture(&graphics);
         installed_as(
@@ -353,11 +360,14 @@ fn a_state_that_two_calls_of_one_frame_have_is_kept_by_the_first_and_the_second_
             frame.pixel(4, 4)
         );
         assert_eq!(renderer.effect_states_kept().0, 1, "one state, whoever has it");
-        // (The first goes on from the frame before as it should.)
+        // (The first goes on from the frame before as it should. The second, which is what is seen, goes on from the same state before the frame, and not from nothing: it is the same
+        // effect done to the same picture again, as it is when a mask reads the picture of a clip that is in the frame too. Before 2026-11-02 it read nothing here, and what was seen
+        // did not go on.)
         let (next, _) = render(&mut renderer, (8, 8), vec![whole_frame(1, twice(1))]);
         assert!(
-            near(i32::from(next.pixel(4, 4)[0]), tenths(1)),
-            "the second call reads nothing, and is what is seen"
+            near(i32::from(next.pixel(4, 4)[0]), tenths(2)),
+            "the second call goes on from the state the first goes on from, and is what is seen: {:?}",
+            next.pixel(4, 4)
         );
         let (alone, _) = render(
             &mut renderer,

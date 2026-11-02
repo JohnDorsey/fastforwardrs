@@ -228,6 +228,23 @@ pub struct BuffersOfACall {
     pub approximate: bool,
 }
 
+impl BuffersOfACall {
+    /// What **another call of the same frame that has the same state** is given (the same effect of the same clip, done to the same picture twice: in the frame, and in a mask that reads the
+    /// track): the state before the frame that the first call goes on from, to read; and nothing to keep. Its buffers that last are drawn into pictures of its own, and it clears, restores and
+    /// checkpoints nothing: the first call does, once, and the second makes the same picture from the same state.
+    pub fn for_another_call_of_the_same_state(&self) -> Self {
+        Self {
+            continuation: self.continuation,
+            base: self.base.clone(),
+            target: vec![None; self.target.len()],
+            to_clear: Vec::new(),
+            to_restore: Vec::new(),
+            to_checkpoint: Vec::new(),
+            approximate: self.approximate,
+        }
+    }
+}
+
 /// The states of all the shaders that depend on earlier frames.
 #[derive(Default)]
 pub struct StatesOfEffects {

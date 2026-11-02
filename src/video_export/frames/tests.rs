@@ -1322,3 +1322,273 @@ fn the_engine_draws_the_number_that_the_picture_of_a_hidden_track_gives_the_shad
         );
     });
 }
+
+// ---- a track that is seen and is read as a mask: the effects of its clip are one effect in the frame and in the mask (found by the maintainer's testing, 2026-11-02)
+
+/// A shader that keeps a number from one frame to the next, in a buffer of one pixel that lasts, as the hold of a television does: it adds a tenth to it in every frame, and shows it as the red.
+const ADD_A_TENTH_OF_RED_IN_EVERY_FRAME: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" } ], \"PASSES\": [ { \"TARGET\": \"held\", \"WIDTH\": 1, \"HEIGHT\": 1, \"FLOAT\": true, \"PERSISTENT\": true }, { } ] }*/
+void main() {
+	vec4 kept = IMG_PIXEL(held, vec2(0.5));
+	if (PASSINDEX == 0) { gl_FragColor = vec4(kept.r + 0.1, 0.0, 0.0, 1.0); }
+	else { gl_FragColor = vec4(kept.r, 0.0, 0.0, 1.0); }
+}
+";
+
+/// A video at the back, seen, with the shader that adds a tenth of red in every frame on its clip; and in front of it a picture file that does not cover the frame, with the shader that
+/// shows its number as a grey on its clip, and that number read from the red of the picture of the video's track.
+fn a_seen_video_with_a_state_that_a_picture_in_front_of_it_reads() -> Project {
+    use crate::project::{DrivenValue, EffectKind, MaskChannel, Member};
+    let mut project = project_with_video(320, 180, false);
+    // (A picture file that is taller than the frame is: 100 by 180 is a third of the frame across, in the middle.)
+    project
+        .import_source(picture_source(2, 100, 180), frame(0))
+        .expect("the picture file goes on a track in front");
+    let (in_front, picture_clip) = (
+        project.tracks()[0].id(),
+        project.tracks()[0].placement_at_index(0).unwrap().id,
+    );
+    let (at_the_back, video_clip) = (
+        project.tracks()[1].id(),
+        project.tracks()[1].placement_at_index(0).unwrap().id,
+    );
+    assert_ne!(in_front, at_the_back);
+
+    let kept = crate::isf::read(ADD_A_TENTH_OF_RED_IN_EVERY_FRAME).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(
+        &kept,
+        "hold.fs",
+        ADD_A_TENTH_OF_RED_IN_EVERY_FRAME,
+    ))
+    .unwrap();
+    assert!(kind.depends_on_earlier_frames());
+    project.add_effect(AnimationTarget::Clip(video_clip), kind).unwrap();
+
+    let file = crate::isf::read(SHOW_THE_LEVEL).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "level.fs", SHOW_THE_LEVEL)).unwrap();
+    let instance = project.add_effect(AnimationTarget::Clip(picture_clip), kind).unwrap();
+    project
+        .set_driven_value(
+            Member::Clip(picture_clip),
+            instance,
+            0,
+            Some(DrivenValue::from_a_track(at_the_back, MaskChannel::Red, 0.0)),
+        )
+        .unwrap();
+    project
+}
+
+/// The frame `described` made on `renderer`, which is sent the pictures `sent` and is given the shaders of the frame that it has not been given (`installed` are the keys it has).
+fn rendered_on(
+    renderer: &mut crate::engine::FrameRenderer,
+    installed: &mut std::collections::HashSet<String>,
+    described: &DescribedFrame,
+    sent: &[(PictureId, PictureData)],
+) -> (crate::engine::RenderedFrame, crate::engine::FrameStatistics) {
+    use crate::engine::{DEFAULT_MOST_PASSES_OF_A_LOOP, guard_wgsl, published_effect_shader_with_structure};
+    for (id, data) in sent {
+        renderer.upload_picture(*id, data).unwrap();
+    }
+    for flat in described.description.flatten().layers {
+        for effect in &flat.layer.effects {
+            if installed.insert(effect.key.clone()) {
+                let (source, structure) = published_effect_shader_with_structure(&effect.key)
+                    .expect("the shader was put on the shelf when the plan was made");
+                renderer
+                    .install_effect_with_structure(
+                        &effect.key,
+                        &guard_wgsl(&source, DEFAULT_MOST_PASSES_OF_A_LOOP).unwrap(),
+                        &structure,
+                    )
+                    .unwrap();
+            }
+        }
+    }
+    renderer
+        .render(&described.description, std::time::Duration::from_secs(60))
+        .unwrap()
+}
+
+#[test]
+fn a_seen_track_that_is_read_as_a_mask_goes_on_in_time_where_it_is_seen_as_it_does_in_the_mask() {
+    use crate::engine::FrameRenderer;
+    let project = a_seen_video_with_a_state_that_a_picture_in_front_of_it_reads();
+    let plan = plan_of(&project);
+    let images = HashMap::from([(SourceMediaIdentifier::new(2), a_picture_file(2, 2))]);
+    let mut describer = describer_of(&plan, &script_of_pictures(255), images, Box::new(NoFontsYet));
+
+    crate::engine::testing::with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        let mut installed = std::collections::HashSet::new();
+        for timeline_frame in 0..4_u64 {
+            let (described, sent) = describe(&mut describer, timeline_frame);
+            // (The video is a layer and so is the picture file; the picture file's effect reads the video's track as a mask, so the video's picture is in the mask too.)
+            let in_front = &described.description.layers[1];
+            assert_eq!(in_front.effects.len(), 1, "frame {timeline_frame}");
+            assert_eq!(in_front.effects[0].masks.len(), 1, "frame {timeline_frame}");
+            let (in_the_frame, in_the_mask) = (
+                described.description.layers[0].effects[0].state,
+                in_front.effects[0].masks[0].layers[0].effects[0].state,
+            );
+            assert!(in_the_frame.is_some(), "frame {timeline_frame}");
+            assert_eq!(
+                in_the_frame, in_the_mask,
+                "frame {timeline_frame}: the effect of the clip is one effect, in the frame and in the mask: one state, at one frame"
+            );
+
+            let (finished, statistics) = rendered_on(&mut renderer, &mut installed, &described, &sent);
+
+            assert_eq!(statistics.effects_not_run, 0, "frame {timeline_frame}");
+            // A tenth of red for each frame so far, as a level of 255.
+            let wanted = (25.5 * (timeline_frame + 1) as f32).round() as u8;
+            // The video where it is seen (the picture file is in the middle third), and the grey that the picture file's number makes of the red of the video's mask.
+            let [seen_red, seen_green, seen_blue, _] = finished.pixel(20, 90);
+            let [grey_red, grey_green, grey_blue, _] = finished.pixel(160, 90);
+            assert!(
+                seen_red.abs_diff(wanted) <= 1 && seen_green == 0 && seen_blue == 0,
+                "frame {timeline_frame}: the video where it is seen is {:?}, wanted a red of {wanted}: it goes on in time",
+                finished.pixel(20, 90)
+            );
+            assert!(
+                [grey_red, grey_green, grey_blue]
+                    .iter()
+                    .all(|grey| grey.abs_diff(wanted) <= 2),
+                "frame {timeline_frame}: the grey made of the mask is {:?}, wanted {wanted}: it is the video as it is seen",
+                finished.pixel(160, 90)
+            );
+        }
+    });
+}
+
+/// A transition that is half done: the mix of what is behind the clip and the clip, by a `progress` that is 0.5 until it is changed.
+const A_TRANSITION_HALF_DONE: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"startImage\", \"TYPE\": \"image\" }, { \"NAME\": \"endImage\", \"TYPE\": \"image\" }, { \"NAME\": \"progress\", \"TYPE\": \"float\", \"MIN\": 0.0, \"MAX\": 1.0, \"DEFAULT\": 0.5 } ] }*/\nvoid main() { gl_FragColor = mix(IMG_NORM_PIXEL(startImage, isf_FragNormCoord.xy), IMG_NORM_PIXEL(endImage, isf_FragNormCoord.xy), progress); }\n";
+
+/// A picture file that is the whole frame, with a transition on its clip; and in front of it a picture file that does not cover the frame, with the shader that shows its number as a grey on its
+/// clip, that number read from the red of the picture of the first one's track.
+fn a_seen_picture_with_a_transition_that_a_picture_in_front_of_it_reads() -> Project {
+    use crate::project::{DrivenValue, EffectKind, MaskChannel, Member};
+    let mut project = Project::empty();
+    project
+        .import_source(picture_source(2, 320, 180), frame(0))
+        .expect("the picture file goes on a track");
+    project
+        .import_source(picture_source(3, 100, 180), frame(0))
+        .expect("the picture file goes on a track in front");
+    let (in_front, picture_clip) = (
+        project.tracks()[0].id(),
+        project.tracks()[0].placement_at_index(0).unwrap().id,
+    );
+    let (at_the_back, whole_frame_clip) = (
+        project.tracks()[1].id(),
+        project.tracks()[1].placement_at_index(0).unwrap().id,
+    );
+    assert_ne!(in_front, at_the_back);
+
+    let file = crate::isf::read(A_TRANSITION_HALF_DONE).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "half.fs", A_TRANSITION_HALF_DONE)).unwrap();
+    assert!(kind.is_a_transition());
+    project
+        .add_effect(AnimationTarget::Clip(whole_frame_clip), kind)
+        .unwrap();
+
+    let file = crate::isf::read(SHOW_THE_LEVEL).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "level.fs", SHOW_THE_LEVEL)).unwrap();
+    let instance = project.add_effect(AnimationTarget::Clip(picture_clip), kind).unwrap();
+    project
+        .set_driven_value(
+            Member::Clip(picture_clip),
+            instance,
+            0,
+            Some(DrivenValue::from_a_track(at_the_back, MaskChannel::Red, 0.0)),
+        )
+        .unwrap();
+    project
+}
+
+#[test]
+fn the_transition_on_a_seen_track_that_is_read_as_a_mask_is_in_the_mask_as_it_is_in_the_frame() {
+    use crate::engine::FrameRenderer;
+    let project = a_seen_picture_with_a_transition_that_a_picture_in_front_of_it_reads();
+    let plan = plan_of(&project);
+    let red = |width: u32, height: u32| RgbaPicture {
+        width_in_pixels: width,
+        height_in_pixels: height,
+        rgba_pixels: [200, 40, 40, 255].repeat((width * height) as usize),
+    };
+    let images = HashMap::from([
+        (SourceMediaIdentifier::new(2), red(2, 2)),
+        (SourceMediaIdentifier::new(3), red(2, 2)),
+    ]);
+    let mut describer = describer_of(&plan, &script_of_pictures(1), images, Box::new(NoFontsYet));
+    let (described, sent) = describe(&mut describer, 10);
+
+    crate::engine::testing::with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        let (finished, statistics) =
+            rendered_on(&mut renderer, &mut std::collections::HashSet::new(), &described, &sent);
+
+        assert_eq!(
+            statistics.effects_not_run, 0,
+            "the transition is run in the frame, and in the mask"
+        );
+        // In the frame the transition is half way from the opaque black behind the picture to the picture, which is a red of 200: 100. In the mask there is nothing behind it, so it is half
+        // way from nothing: the mask covers by a half, with a red of 200 where it covers, and the number is that red mixed with the 0 where the mask has nothing, by the half: 100 again.
+        // (Were the transition not done in the mask, the mask would be the picture, and the number 200.)
+        // (A project of pictures only has a frame of the size that a project has when it has no video: the places are fractions of it. The picture file in front is the middle third.)
+        let (width, height) = (finished.width_in_pixels, finished.height_in_pixels);
+        let seen = finished.pixel(width / 16, height / 2);
+        let grey = finished.pixel(width / 2, height / 2);
+        assert!(
+            seen[0].abs_diff(100) <= 2,
+            "the picture where it is seen: {seen:?}, wanted a red of 100"
+        );
+        assert!(
+            grey[..3].iter().all(|level| level.abs_diff(100) <= 3),
+            "the grey made of the mask: {grey:?}, wanted 100, which is the transition done to the mask"
+        );
+    });
+}
+
+#[test]
+fn a_clip_with_a_state_and_a_transition_after_it_is_the_same_picture_in_the_frame_and_in_the_mask_in_every_frame() {
+    use crate::engine::FrameRenderer;
+    use crate::project::EffectKind;
+    // The report of 2026-11-02: the clip of a seen track has an effect that keeps a state (the hold of a television) and then a transition, and a smaller clip in front of it reads the track.
+    let mut project = a_seen_video_with_a_state_that_a_picture_in_front_of_it_reads();
+    let video_clip = project.tracks()[1].placement_at_index(0).unwrap().id;
+    let file = crate::isf::read(A_TRANSITION_HALF_DONE).unwrap();
+    let transition =
+        EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "half.fs", A_TRANSITION_HALF_DONE)).unwrap();
+    project
+        .add_effect(AnimationTarget::Clip(video_clip), transition)
+        .unwrap();
+    let plan = plan_of(&project);
+    let images = HashMap::from([(SourceMediaIdentifier::new(2), a_picture_file(2, 2))]);
+    let mut describer = describer_of(&plan, &script_of_pictures(255), images, Box::new(NoFontsYet));
+
+    crate::engine::testing::with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        let mut installed = std::collections::HashSet::new();
+        for timeline_frame in 0..4_u64 {
+            let (described, sent) = describe(&mut describer, timeline_frame);
+            let (finished, statistics) = rendered_on(&mut renderer, &mut installed, &described, &sent);
+
+            assert_eq!(
+                statistics.effects_not_run, 0,
+                "frame {timeline_frame}: every effect is run, in the frame and in the mask"
+            );
+            // The hold makes a tenth of red for each frame so far, and the transition is half way from what is behind the clip (opaque black) to that: half of it. In the mask there is nothing
+            // behind it, so the mask covers by a half, with that red where it covers, and the number is that red mixed with the 0 where the mask has nothing: half of it again.
+            let wanted = (12.75 * (timeline_frame + 1) as f32).round() as u8;
+            let seen = finished.pixel(20, 90);
+            let grey = finished.pixel(160, 90);
+            assert!(
+                seen[0].abs_diff(wanted) <= 2 && seen[1] == 0 && seen[2] == 0,
+                "frame {timeline_frame}: the video where it is seen is {seen:?}, wanted a red of {wanted}"
+            );
+            assert!(
+                grey[..3].iter().all(|level| level.abs_diff(wanted) <= 3),
+                "frame {timeline_frame}: the grey made of the mask is {grey:?}, wanted {wanted}: the mask is the video as it is seen"
+            );
+        }
+    });
+}

@@ -10,8 +10,8 @@
 //! A description has a [`fingerprint`](FrameDescription::fingerprint), which is also the key of the cache of finished frames: it is made of all that
 //! decides what the frame looks like, so an edit that changes a frame changes its key and nothing has to be thrown away by hand.
 
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
@@ -456,6 +456,11 @@ impl FlatLayers<'_> {
     /// The container that is the mask number `mask` of the effect number `call` of the layer number `layer`, if there is one.
     pub fn container_of_the_mask(&self, layer: usize, call: usize, mask: usize) -> Option<usize> {
         self.containers_of_masks.get(&(layer, call, mask)).copied()
+    }
+
+    /// The containers that are masks of the effects of the layers (and not the frame, or a group that is the picture of a layer).
+    pub fn containers_that_are_masks(&self) -> HashSet<usize> {
+        self.containers_of_masks.values().copied().collect()
     }
 }
 

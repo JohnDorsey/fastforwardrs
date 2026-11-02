@@ -53,6 +53,13 @@ struct InstalledShader {
     structure: Arc<ShaderStructure>,
 }
 
+/// The call of a frame that keeps a state that has the buffers that last (by the layer and the number among its effects), and the buffers it asked for: a second call of the same state in the
+/// frame goes on from the state before the frame that this one goes on from, if it would ask for the same.
+struct KeeperOfAState {
+    call: (usize, usize),
+    asked_for: Vec<Option<BufferWanted>>,
+}
+
 /// How many bytes of textures that are waiting to be used are kept from one frame to the next.
 const IDLE_TEXTURE_BUDGET_IN_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -763,6 +770,8 @@ impl FrameRenderer {
         // Where the buffers that last are, for each call (by the layer and the number among its effects) that has a state to keep them in, and which states are used, at which frame and how.
         let mut call_buffers: HashMap<(usize, usize), BuffersOfACall> = HashMap::new();
         let mut states_used: Vec<(u64, u64, Continuation)> = Vec::new();
+        // The call that keeps each state of the frame.
+        let mut calls_that_keep_a_state: HashMap<u64, KeeperOfAState> = HashMap::new();
         for (pass_number, pass) in plan.passes.iter().enumerate() {
             let PassPlan::Effects { layer, .. } = pass else {
                 continue;
@@ -797,7 +806,9 @@ impl FrameRenderer {
                 accumulation_shape,
                 largest,
             );
-            // The buffers that last, of the calls that have a state (phase 6.4.2). A state that two calls of a frame have is kept by the first: the second runs as a call that has none.
+            // The buffers that last, of the calls that have a state (phase 6.4.2). A state that two calls of a frame have is kept by the first. The second is the same effect of the same clip
+            // done to the same picture again (in the frame, and in a mask that reads the track): it goes on from the same state before the frame as the first, and makes the same picture,
+            // and keeps nothing. (One that would need buffers of another size cannot, and runs as a call that has no state.)
             let effects = &flat.layers[*layer].layer.effects;
             for step in &plan.steps_of_effects[pass_number] {
                 let EffectStep::Call { call, .. } = step else {
@@ -807,9 +818,7 @@ impl FrameRenderer {
                 let (Some(state), Some(installed)) = (effect.state, self.shader_effects.get(&effect.key)) else {
                     continue;
                 };
-                if !installed.structure.depends_on_earlier_frames()
-                    || states_used.iter().any(|(id, _, _)| *id == state.id)
-                {
+                if !installed.structure.depends_on_earlier_frames() {
                     continue;
                 }
                 let facts = installed.structure.facts_of_the_passes(
@@ -836,6 +845,15 @@ impl FrameRenderer {
                             .flatten()
                     })
                     .collect();
+                if let Some(keeper) = calls_that_keep_a_state.get(&state.id) {
+                    if keeper.asked_for == wanted
+                        && let Some(kept) = call_buffers.get(&keeper.call)
+                    {
+                        let shared = kept.for_another_call_of_the_same_state();
+                        call_buffers.insert((*layer, *call), shared);
+                    }
+                    continue;
+                }
                 // (The preview jumps and may take checkpoints; the export makes every frame in order and takes none.)
                 let buffers = if matches!(output_kind, FrameOutput::Rgba8) {
                     self.effect_states
@@ -845,6 +863,13 @@ impl FrameRenderer {
                         .prepare(&self.device.device, state.id, state.frame, &wanted)
                 };
                 states_used.push((state.id, state.frame, buffers.continuation));
+                calls_that_keep_a_state.insert(
+                    state.id,
+                    KeeperOfAState {
+                        call: (*layer, *call),
+                        asked_for: wanted,
+                    },
+                );
                 call_buffers.insert((*layer, *call), buffers);
             }
             let numbers = plans
@@ -1035,7 +1060,8 @@ impl FrameRenderer {
                     }
                     PassPlan::PlaceLayers { layers }
                     | PassPlan::PlaceLayersOver { layers }
-                    | PassPlan::PlaceGroup { layers, .. } => {
+                    | PassPlan::PlaceGroup { layers, .. }
+                    | PassPlan::PlaceGroupOver { layers, .. } => {
                         effect_slots.push(Vec::new());
                         let mut slots = Vec::new();
                         for &number in layers {
@@ -1144,7 +1170,11 @@ impl FrameRenderer {
                             // (What a step works on: the picture the step before it made, or, for the step that makes the backdrop into codes, what the layers behind the layer made, or, for
                             // the step that makes a mask into codes, the picture of the group that is the mask.)
                             let works_on = match *step {
-                                EffectStep::Backdrop { .. } => &accumulation_view,
+                                // (What is behind the layer: the frame's picture so far, or, for a layer of a mask, the mask's.)
+                                EffectStep::Backdrop { .. } => match flat.layers[*layer].container {
+                                    0 => &accumulation_view,
+                                    container => &group_views[container - 1],
+                                },
                                 EffectStep::Mask { call, mask } => {
                                     &group_views[flat
                                         .container_of_the_mask(*layer, call, mask)
@@ -1313,7 +1343,10 @@ impl FrameRenderer {
                             }
                         }
                     }
-                    PassPlan::PlaceLayers { .. } | PassPlan::PlaceLayersOver { .. } | PassPlan::PlaceGroup { .. } => {
+                    PassPlan::PlaceLayers { .. }
+                    | PassPlan::PlaceLayersOver { .. }
+                    | PassPlan::PlaceGroup { .. }
+                    | PassPlan::PlaceGroupOver { .. } => {
                         let uniform_buffer = uniform_buffer.expect("a frame with layers has uniforms");
                         let slots = &place_slots[pass_number];
                         let mut bind_groups = Vec::with_capacity(slots.len());
@@ -1375,6 +1408,11 @@ impl FrameRenderer {
                                 "engine: put the layers of a group in their places",
                                 &group_views[container - 1],
                                 wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            ),
+                            PassPlan::PlaceGroupOver { container, .. } => (
+                                "engine: put more layers of a group in their places, over what is there",
+                                &group_views[container - 1],
+                                wgpu::LoadOp::Load,
                             ),
                             PassPlan::PlaceLayersOver { .. } => (
                                 "engine: put more layers in their places, over what is there",

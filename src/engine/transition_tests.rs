@@ -55,7 +55,7 @@ fn the_structure_of_a_transition() -> ShaderStructure {
     }
 }
 
-fn installed_wipe(renderer: &mut FrameRenderer) {
+pub(super) fn installed_wipe(renderer: &mut FrameRenderer) {
     renderer
         .install_effect_with_structure(
             THE_WIPE,
@@ -68,16 +68,16 @@ fn installed_wipe(renderer: &mut FrameRenderer) {
         .unwrap();
 }
 
-fn wipe(progress: f32) -> EffectCall {
+pub(super) fn wipe(progress: f32) -> EffectCall {
     call(THE_WIPE, &[progress])
 }
 
-const SIZE: (u32, u32) = (8, 8);
-const RED: [u8; 4] = [200, 40, 40, 255];
+pub(super) const SIZE: (u32, u32) = (8, 8);
+pub(super) const RED: [u8; 4] = [200, 40, 40, 255];
 const GREEN: [u8; 4] = [40, 200, 40, 255];
 const BLUE: [u8; 4] = [40, 40, 200, 255];
 
-fn flat_picture(size: (u32, u32), colour: [u8; 4]) -> TestPicture {
+pub(super) fn flat_picture(size: (u32, u32), colour: [u8; 4]) -> TestPicture {
     TestPicture {
         width: size.0,
         height: size.1,
@@ -127,7 +127,7 @@ fn each_working_space(pictures: &[(u64, &TestPicture)], check: impl FnMut(Workin
 }
 
 /// The same, with the shaders that `install` puts in each renderer.
-fn each_working_space_with(
+pub(super) fn each_working_space_with(
     install: impl Fn(&mut FrameRenderer),
     pictures: &[(u64, &TestPicture)],
     mut check: impl FnMut(WorkingSpace, &mut FrameRenderer),
@@ -148,7 +148,7 @@ fn each_working_space_with(
     }
 }
 
-fn frame_in(
+pub(super) fn frame_in(
     renderer: &mut FrameRenderer,
     working: WorkingSpace,
     layers: Vec<LayerDescription>,
