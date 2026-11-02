@@ -15,6 +15,7 @@ use ladspa_host::LibraryScan;
 use serde::{Deserialize, Serialize};
 
 use super::failure::ScanFailure;
+use super::folders::is_a_vst3_module;
 use super::protocol::SCAN_FORMAT;
 use crate::atomic_file::write_file_atomically;
 
@@ -34,7 +35,8 @@ impl FileFingerprint {
     /// when a file deep in it does.
     pub fn of(path: &Path) -> io::Result<Self> {
         // (An LV2 bundle is a folder of many files, and any may change: its size is theirs together and its time the latest of theirs.)
-        if path.join("manifest.ttl").is_file() {
+        // (A VST3 module that is a folder is the same: the library is deep in it, with its resources.)
+        if path.join("manifest.ttl").is_file() || (path.is_dir() && is_a_vst3_module(path)) {
             return folder_fingerprint(path);
         }
         let metadata = fs::metadata(bundle_executable(path).as_deref().unwrap_or(path))?;
@@ -120,6 +122,8 @@ pub enum CachedOutcome {
     ScannedClap(clap_host::scan::LibraryScan),
     /// An LV2 bundle that was scanned.
     ScannedLv2(lv2_host::BundleScan),
+    /// A VST3 module that was scanned.
+    ScannedVst3(vst3_host::ModuleScan),
     Failed(ScanFailure),
 }
 

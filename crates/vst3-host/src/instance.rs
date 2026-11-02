@@ -222,6 +222,8 @@ fn parameters_of(controller: &ComPtr<IEditController>) -> Vec<ParameterDescripti
             units: wide_text_of(&info.units),
             step_count: info.stepCount,
             default_normalized: info.defaultNormalizedValue,
+            // SAFETY: the controller is live; converting a value is a call with numbers only.
+            default_plain: unsafe { controller.normalizedParamToPlain(info.id, info.defaultNormalizedValue) },
             plain_minimum,
             plain_maximum,
             texts,

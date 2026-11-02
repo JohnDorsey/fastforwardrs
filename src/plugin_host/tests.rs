@@ -531,6 +531,33 @@ fn a_plugin_that_is_not_installed_is_not_run_and_a_library_that_cannot_be_loaded
 }
 
 #[test]
+fn a_vst3_plugin_is_not_run_yet_and_the_sound_goes_through_it_and_it_says_so_once_even_in_a_folder_nobody_was_asked_about()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let mut vst3 = the_test_plugins().remove(0);
+    vst3.address = crate::project::PluginAddress::Vst3 {
+        class_id: vst3_host::ClassId::from_numbers(1, 2, 3, 4),
+    };
+    set_installed_plugins(vec![vst3]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let effect = the_effect(kind, &[1.0]);
+    let host = PluginHost::new();
+    host.allow_everything();
+    let notes = Notes::default();
+
+    assert!(ask(&host, &effect, &notes).is_none());
+    assert!(ask(&host, &effect, &notes).is_none());
+
+    assert!(host.loaded_libraries().is_empty(), "nothing was loaded");
+    let notes = notes.lock().unwrap().clone();
+    assert_eq!(notes.len(), 1, "said once: {notes:?}");
+    assert!(
+        notes[0].contains("VST3 plugin") && notes[0].contains("not run yet") && notes[0].contains("unchanged"),
+        "{notes:?}"
+    );
+}
+
+#[test]
 fn a_library_that_is_not_what_it_was_when_it_was_scanned_is_not_run_and_says_to_scan_again() {
     let _alone = the_installed_plugins_to_myself();
     let mut plugins = the_test_plugins();

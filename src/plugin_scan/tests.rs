@@ -850,7 +850,8 @@ fn the_answer_of_a_clap_scan_is_read_back_as_it_was_written_and_the_other_words_
     // The words of the LADSPA answers are what they were (the cache and the scan program of another version are told apart by the number, not by the words).
     assert!(answer_line(&ScanAnswer::CouldNotBeLoaded("x".to_owned())).contains("CouldNotBeLoaded"));
     // (3: the scan checks whether a CLAP plugin's start depends on memory it did not write. 4, in phase 10: it says whether a CLAP plugin has a window. 5, in phase 11: it reads LV2 bundles too. 6, in 11.5: it says what an LV2 plugin's interface needs. 7, in 11.7: it reads the presets of LV2 bundles. 8, in 13.2: it says where a CLAP plugin takes notes. 9, in 13.7: it says what value each parameter of a CLAP plugin starts at. It is raised when the scan finds something it did not.)
-    assert_eq!(super::protocol::SCAN_FORMAT, 9);
+    // (10, in 15.2: it reads VST3 modules too.)
+    assert_eq!(super::protocol::SCAN_FORMAT, 10);
 }
 
 #[test]
@@ -1138,6 +1139,12 @@ fn the_folders_looked_in_by_default_are_ladspa_path_and_its_usual_places_then_cl
         Some(Path::new("/common")),
         Some(Path::new("/local")),
     ));
+    // (The VST3 folders have no variable: only the usual places of the system.)
+    expected.extend(vst3_folders(
+        Some(home),
+        Some(Path::new("/common")),
+        Some(Path::new("/local")),
+    ));
     // (A variable that says where LV2 bundles are is the only place for them: the usual ones are for when it is not set.)
     expected.push(PathBuf::from("/lv2/from/variable"));
     assert_eq!(folders, expected);
@@ -1145,6 +1152,7 @@ fn the_folders_looked_in_by_default_are_ladspa_path_and_its_usual_places_then_cl
     assert_eq!(
         folders_looked_in_with(&|_| None, None, &[]).len(),
         clap_folders(None, None, None, None).len()
+            + vst3_folders(None, None, None).len()
             + usual_folders(None).len()
             + lv2_host::usual_folders(None, None, None, None).len()
     );
@@ -1206,6 +1214,204 @@ fn the_build_identity_is_read_from_what_a_program_wrote_and_the_last_line_that_s
     assert_eq!(build_id_in("a message that is not it: ffrs-scan-build: 99"), None);
     assert_eq!(build_id_in(""), None);
     assert_eq!(BUILD_ID.len(), 16, "the identity is sixteen hexadecimal digits");
+}
+
+// --- VST3 modules (piece 15.2) ---
+
+#[test]
+fn a_vst3_module_is_named_by_its_ending_in_any_case_and_the_usual_folders_are_those_of_the_vst3_documentation() {
+    assert!(is_a_vst3_module(Path::new("/x/Surge XT.vst3")));
+    assert!(is_a_vst3_module(Path::new("/x/Surge XT.VST3")));
+    assert!(!is_a_vst3_module(Path::new("/x/Surge XT.clap")));
+    assert!(!is_a_vst3_module(Path::new("/x/vst3")));
+    assert!(!is_a_vst3_module(Path::new("/x/a.vst3.txt")));
+
+    let home = Path::new("/home/someone");
+    let common = Path::new("/common");
+    let local = Path::new("/local");
+    let folders = vst3_folders(Some(home), Some(common), Some(local));
+    if cfg!(windows) {
+        assert_eq!(
+            folders,
+            [
+                PathBuf::from("/common").join("VST3"),
+                PathBuf::from("/local").join("Programs").join("Common").join("VST3")
+            ]
+        );
+    } else if cfg!(target_os = "macos") {
+        assert_eq!(
+            folders,
+            [
+                home.join("Library/Audio/Plug-Ins/VST3"),
+                PathBuf::from("/Library/Audio/Plug-Ins/VST3")
+            ]
+        );
+    } else {
+        assert_eq!(
+            folders,
+            [
+                home.join(".vst3"),
+                PathBuf::from("/usr/lib/vst3"),
+                PathBuf::from("/usr/local/lib/vst3")
+            ]
+        );
+    }
+    // Where a system does not give a place, there is none for it (the folders of the system itself need nothing).
+    let alone = vst3_folders(None, None, None);
+    if cfg!(windows) {
+        assert!(alone.is_empty());
+    } else if cfg!(target_os = "macos") {
+        assert_eq!(alone, [PathBuf::from("/Library/Audio/Plug-Ins/VST3")]);
+    } else {
+        assert_eq!(
+            alone,
+            [PathBuf::from("/usr/lib/vst3"), PathBuf::from("/usr/local/lib/vst3")]
+        );
+    }
+}
+
+#[test]
+fn the_vst3_modules_of_a_folder_are_the_files_and_folders_with_the_ending_below_it_and_not_what_is_in_them() {
+    let folder = tempfile::tempdir().unwrap();
+    let plain = touch(folder.path(), "Old.vst3");
+    let bundle = folder.path().join("Surge.vst3");
+    fs::create_dir_all(bundle.join("Contents").join("x86_64-win")).unwrap();
+    touch(&bundle.join("Contents").join("x86_64-win"), "Surge.vst3");
+    let nested = folder.path().join("set").join("deeper");
+    fs::create_dir_all(&nested).unwrap();
+    let in_a_set = nested.join("Reverb.vst3");
+    fs::create_dir(&in_a_set).unwrap();
+    // Not modules: a plugin of another kind, a text file, a folder that is being made.
+    touch(folder.path(), "a.clap");
+    touch(folder.path(), "notes.txt");
+    let making = folder.path().join("fetching.building");
+    fs::create_dir(&making).unwrap();
+    fs::create_dir(making.join("Hidden.vst3")).unwrap();
+
+    let found = vst3_modules_in(folder.path()).unwrap();
+
+    assert_eq!(
+        found,
+        [plain, in_a_set, bundle],
+        "in the order of their paths without regard to case"
+    );
+    assert_eq!(
+        vst3_modules_in(&folder.path().join("nothing_here")).unwrap(),
+        Vec::<PathBuf>::new(),
+        "a folder that is not there has none"
+    );
+}
+
+#[test]
+fn the_walks_for_clap_libraries_and_lv2_bundles_do_not_go_into_a_vst3_module() {
+    let folder = tempfile::tempdir().unwrap();
+    let module = folder.path().join("Thing.vst3");
+    fs::create_dir_all(module.join("inside.lv2")).unwrap();
+    fs::write(module.join("inside.lv2").join("manifest.ttl"), b"x").unwrap();
+    touch(&module, "inside.clap");
+
+    assert_eq!(lv2_bundles_in(folder.path()).unwrap(), Vec::<PathBuf>::new());
+    assert_eq!(clap_libraries_in(folder.path()).unwrap(), Vec::<PathBuf>::new());
+}
+
+#[test]
+fn the_fingerprint_of_a_vst3_module_that_is_a_folder_is_of_all_that_is_in_it_and_a_file_is_a_file() {
+    let folder = tempfile::tempdir().unwrap();
+    let module = folder.path().join("m.vst3");
+    fs::create_dir_all(module.join("Contents").join("x86_64-win")).unwrap();
+    let library = module.join("Contents").join("x86_64-win").join("m.vst3");
+    fs::write(&library, b"123").unwrap();
+    let first = FileFingerprint::of(&module).unwrap();
+    assert_eq!(first.size, 3, "the size of the library deep in the module");
+
+    fs::write(&library, b"12345").unwrap();
+    assert_eq!(
+        FileFingerprint::of(&module).unwrap().size,
+        5,
+        "a change deep in it is a change"
+    );
+
+    let file = folder.path().join("old.vst3");
+    fs::write(&file, b"12").unwrap();
+    assert_eq!(FileFingerprint::of(&file).unwrap().size, 2);
+}
+
+#[test]
+fn the_answer_of_a_vst3_scan_is_read_back_as_it_was_written_and_a_program_that_gave_it_is_understood() {
+    for answer in [
+        ScanAnswer::ScannedVst3(vst3_host::ModuleScan::default()),
+        ScanAnswer::NotAVst3Module("no GetPluginFactory".to_owned()),
+    ] {
+        let said = read_what_was_said(&answer_line(&answer));
+        assert_eq!(said.answer, Some(Ok(answer)));
+    }
+    let scanned = ScanAnswer::ScannedVst3(vst3_host::ModuleScan::default());
+    assert_eq!(
+        outcome(HowItEnded::Exited(ended_well()), said_by_a_scan(&["a"], Some(&scanned))),
+        LibraryOutcome::ScannedVst3(vst3_host::ModuleScan::default())
+    );
+    let not_a_module = ScanAnswer::NotAVst3Module("no GetPluginFactory".to_owned());
+    assert_eq!(
+        outcome(
+            HowItEnded::Exited(ended_well()),
+            said_by_a_scan(&[], Some(&not_a_module))
+        ),
+        LibraryOutcome::Failed(ScanFailure::NotAVst3Module("no GetPluginFactory".to_owned()))
+    );
+    assert!(
+        ScanFailure::NotAVst3Module("x".to_owned())
+            .to_string()
+            .contains("not a VST3 module")
+    );
+}
+
+#[test]
+fn what_a_vst3_module_says_when_it_is_refused_is_a_module_that_is_not_one_or_a_library_that_would_not_load() {
+    assert!(matches!(
+        ScanAnswer::from(vst3_host::OpenError::NotAModule),
+        ScanAnswer::NotAVst3Module(_)
+    ));
+    assert!(matches!(
+        ScanAnswer::from(vst3_host::OpenError::NoFactory),
+        ScanAnswer::NotAVst3Module(_)
+    ));
+    assert!(matches!(
+        ScanAnswer::from(vst3_host::OpenError::CouldNotBeLoaded("no file".to_owned())),
+        ScanAnswer::CouldNotBeLoaded(_)
+    ));
+    assert!(matches!(
+        ScanAnswer::from(vst3_host::OpenError::NoLibrary("x".to_owned())),
+        ScanAnswer::CouldNotBeLoaded(_)
+    ));
+    assert!(matches!(
+        ScanAnswer::from(vst3_host::OpenError::DidNotStart("InitDll")),
+        ScanAnswer::CouldNotBeLoaded(_)
+    ));
+}
+
+#[test]
+fn a_vst3_scan_is_kept_in_the_cache_file_and_found_again_for_a_module_that_has_not_changed() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("scan_cache.json");
+    let module = folder.path().join("m.vst3");
+    fs::create_dir_all(&module).unwrap();
+    fs::write(module.join("inside"), b"1").unwrap();
+    let fingerprint = FileFingerprint::of(&module).unwrap();
+    let mut cache = ScanCache::at(file.clone());
+    cache.record(
+        &module,
+        fingerprint,
+        CachedOutcome::ScannedVst3(vst3_host::ModuleScan::default()),
+    );
+    cache.save();
+
+    let again = ScanCache::at(file);
+    assert_eq!(
+        again.lookup(&module, &fingerprint),
+        Some(&CachedOutcome::ScannedVst3(vst3_host::ModuleScan::default()))
+    );
+    fs::write(module.join("inside"), b"22").unwrap();
+    assert_eq!(again.lookup(&module, &FileFingerprint::of(&module).unwrap()), None);
 }
 
 // --- the plugins that came with the program ---

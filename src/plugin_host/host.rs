@@ -799,6 +799,8 @@ impl PluginHost {
                 PluginAddress::Ladspa { index, .. } => Address::Ladspa { index: *index },
                 PluginAddress::Clap { id } => Address::Clap { id: id.clone() },
                 PluginAddress::Lv2 { uri } => Address::Lv2 { uri: uri.clone() },
+                // (Not reached: `processor_for` returns before a VST3 plugin gets here. Piece 15.3 makes the address.)
+                PluginAddress::Vst3 { .. } => return None,
             },
             library: plugin.library.clone(),
             scanned: WhatWasScanned::of(plugin),
@@ -919,6 +921,14 @@ impl PluginRunner for PluginHost {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&*plugin.descriptor.key);
+        // (A VST3 plugin is found, and can be put on a clip and kept in a project; it is run in a program of its own, which piece 15.3 of `docs/engine-phase-15-vst3-design.md` makes.)
+        if matches!(plugin.address, PluginAddress::Vst3 { .. }) {
+            voice.problem(format!(
+                "The sound plugin \u{ab}{}\u{bb} is a VST3 plugin, and VST3 plugins are not run yet. The sound goes through it unchanged.",
+                plugin.descriptor.name
+            ));
+            return None;
+        }
         let layout = Layout::of(plugin.audio_inputs, plugin.audio_outputs)?;
         let folder = folder_of(&plugin.library);
         let library_name = plugin
@@ -964,6 +974,8 @@ impl PluginRunner for PluginHost {
                         .ok()?;
                     self.the_clap_instances_of(plugin, id, layout, &library, effect.state.as_ref(), &voice)?
                 }
+                // (Not reached: see above.)
+                PluginAddress::Vst3 { .. } => return None,
             }
         };
         PluginEffect::new(

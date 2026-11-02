@@ -18,6 +18,8 @@ pub enum ScanFailure {
     NotAClapLibrary(String),
     /// It is a folder, and not an LV2 bundle: its `manifest.ttl` is not there or is not Turtle.
     NotAnLv2Bundle(String),
+    /// It loaded, and it is not a VST3 module: it has no factory.
+    NotAVst3Module(String),
     /// The scan did not end in the time it was given, and was stopped. `during` is the last thing it said it was about to do.
     TookTooLong { seconds: u64, during: Option<String> },
     /// The scanner ended without an answer and with an exit that is not a success: it crashed. `how` says how, `during` what it was about to do.
@@ -41,6 +43,7 @@ impl fmt::Display for ScanFailure {
             Self::NotALadspaLibrary(reason) => write!(formatter, "it is not a LADSPA library: {reason}"),
             Self::NotAClapLibrary(reason) => write!(formatter, "it is not a CLAP library: {reason}"),
             Self::NotAnLv2Bundle(reason) => write!(formatter, "it is not an LV2 bundle: {reason}"),
+            Self::NotAVst3Module(reason) => write!(formatter, "it is not a VST3 module: {reason}"),
             Self::TookTooLong { seconds, during: step } => {
                 write!(
                     formatter,

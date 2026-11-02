@@ -99,6 +99,16 @@ pub fn plugins_found_in(reports: &[LibraryReport]) -> PluginsFound {
                     });
                 }
             }
+            LibraryOutcome::ScannedVst3(scan) => {
+                for scanned in &scan.classes {
+                    found.add(
+                        &report.path,
+                        &scanned.class.id.text(),
+                        &scanned.class.name,
+                        effect_of_a_vst3_plugin(&report.path, scanned),
+                    );
+                }
+            }
             LibraryOutcome::Failed(_) => {}
         }
     }
@@ -808,6 +818,225 @@ pub fn effect_of_an_lv2_plugin(bundle: &Path, plugin: &lv2_host::ScannedPlugin) 
         pre_roll_samples: SAMPLE_RATE as usize / 2,
         // (An interface of this system's kind that this program can show.)
         has_a_window: lv2_host::window_of(description, crate::plugin_editor::the_kind_of_window()).is_some(),
+        start_warning: None,
+        presets: Vec::new(),
+    })
+}
+
+// --- VST3 plugins (piece 15.2; `docs/engine-phase-15-vst3-design.md`) ---
+
+/// The key of the VST3 plugin whose class has the id `class_id`: `vst3:` and the 32 digits of the id (the four numbers, the same on every system, so that a project made on one
+/// system finds its plugin on another). The same plugin in two folders is one effect.
+pub fn key_of_a_vst3_plugin(class_id: vst3_host::ClassId) -> String {
+    format!("vst3:{}", class_id.text())
+}
+
+/// The id of the value that a VST3 parameter is: `param` and the number the plugin gave the parameter (which VST3 says never changes).
+pub(super) fn id_of_a_vst3_value(parameter_id: u32) -> String {
+    format!("param{parameter_id}")
+}
+
+/// How many samples of sound from before a clip a VST3 plugin that says its tail is `tail` samples is given: the tail, up to [`MOST_PRE_ROLL_SAMPLES`] (`u32::MAX` is for ever). **A tail
+/// of 0 is read as nothing said, which is half a second**: plugins say 0 when they have not thought of it (Dragonfly Reverb says 0 for its reverbs).
+pub fn pre_roll_of_a_vst3_plugin(tail: u32) -> usize {
+    pre_roll_of_a_clap_plugin((tail != 0).then_some(tail))
+}
+
+/// The value that a parameter of a VST3 plugin is, or `Ok(None)` if it is not one, or why the plugin cannot be used. **A value is a parameter that is shown (not hidden), that can be
+/// set (not read-only), that can be automated and that is not a change of program**; a switch is a flag, a list with texts is a choice, a stepped one is a whole number, and the
+/// others are numbers in the plugin's own units (on a logarithmic slider when the most is a thousand times the least or more and the least is above zero).
+fn value_of_a_vst3_parameter(
+    parameter: &vst3_host::ParameterDescription,
+) -> Result<Option<ParameterDescriptor>, String> {
+    if parameter.is_hidden || parameter.is_read_only || !parameter.can_automate || parameter.is_a_program_change {
+        return Ok(None);
+    }
+    let (least, most) = (parameter.plain_minimum, parameter.plain_maximum);
+    if !(least.is_finite() && most.is_finite() && least <= most) {
+        return Err(format!(
+            "its parameter \u{ab}{}\u{bb} has a range that is not a least that is no more than a most ({least} to {most})",
+            parameter.title
+        ));
+    }
+    let default = if parameter.default_plain.is_finite() {
+        parameter.default_plain.clamp(least, most)
+    } else {
+        least
+    };
+    let name = if parameter.title.trim().is_empty() {
+        format!("parameter {}", parameter.id)
+    } else {
+        parameter.title.trim().to_owned()
+    };
+    let steps = f64::from(parameter.step_count);
+    let is_a_switch = parameter.step_count == 1 && least == 0.0 && most == 1.0;
+    // (The texts of a list are the plugin's, one for each step; the options are the plain values, which are whole numbers from the least when the range is as long as the steps.)
+    let is_a_list = parameter.step_count >= 1
+        && parameter.texts.len() == parameter.step_count as usize + 1
+        && (most - least - steps).abs() < 1e-6
+        && least.fract() == 0.0;
+    let (control, default, range, scale) = if is_a_switch {
+        (
+            ParameterControl::Toggle,
+            PropertyValue::Flag(default >= 0.5),
+            None,
+            ValueScale::Linear,
+        )
+    } else if is_a_list {
+        let first = least as i64;
+        let options: Vec<ChoiceOption> = parameter
+            .texts
+            .iter()
+            .take(MOST_OPTIONS_OF_AN_ENUM)
+            .enumerate()
+            .map(|(place, text)| ChoiceOption {
+                id: Cow::Owned((first + place as i64).to_string()),
+                label: Cow::Owned(if text.trim().is_empty() {
+                    (first + place as i64).to_string()
+                } else {
+                    text.trim().to_owned()
+                }),
+            })
+            .collect();
+        let wanted = (default.round() as i64).to_string();
+        let default = if options.iter().any(|option| option.id == wanted) {
+            wanted
+        } else {
+            options[0].id.to_string()
+        };
+        (
+            ParameterControl::Choice(Cow::Owned(options)),
+            PropertyValue::Words(default),
+            None,
+            ValueScale::Linear,
+        )
+    } else if parameter.step_count > 0 {
+        (
+            ParameterControl::Integer,
+            PropertyValue::Number(default.round() as f32),
+            Some((least as f32, most as f32)),
+            ValueScale::Linear,
+        )
+    } else {
+        let logarithmic = least > 0.0 && most / least >= RATIO_OF_A_LOGARITHMIC_SLIDER;
+        (
+            ParameterControl::Automatic,
+            PropertyValue::Number(default as f32),
+            Some((least as f32, most as f32)),
+            if logarithmic {
+                ValueScale::Logarithmic
+            } else {
+                ValueScale::Linear
+            },
+        )
+    };
+    Ok(Some(ParameterDescriptor {
+        id: Cow::Owned(id_of_a_vst3_value(parameter.id)),
+        name: Cow::Owned(name.to_lowercase()),
+        label: Cow::Owned(name),
+        default,
+        range,
+        unit: Cow::Owned(parameter.units.trim().to_owned()),
+        decimals: None,
+        unknown_fields: UnknownFields::none(),
+        scale,
+        control,
+    }))
+}
+
+/// How many channels a main bus of a VST3 plugin has, if it is one an effect can use: mono or stereo.
+fn channels_of_a_vst3_bus(bus: &vst3_host::BusDescription, direction: &str) -> Result<usize, String> {
+    match bus.channels {
+        1 => Ok(1),
+        2 => Ok(2),
+        count => Err(format!(
+            "its main audio {direction} has {count} channel{}, and only mono and stereo are used",
+            if count == 1 { "" } else { "s" }
+        )),
+    }
+}
+
+/// The type of effect that the VST3 class `scanned` of the module `module` is, or why it is not one. (An effect has a main audio input and a main output, of one or two channels; a
+/// class with no main audio input and an event input is a synthesizer, played by notes. A side chain or an extra output is left off.)
+pub fn effect_of_a_vst3_plugin(module: &Path, scanned: &vst3_host::ScannedClass) -> Result<InstalledPlugin, String> {
+    if let Some(problem) = &scanned.problem {
+        return Err(format!("it could not be made or run: {problem}"));
+    }
+    let Some(facts) = &scanned.facts else {
+        return Err("it could not be made".to_owned());
+    };
+    let class = &scanned.class;
+    let main_input = facts.main_audio_input();
+    let is_a_synthesizer = main_input.is_none() && facts.takes_events();
+    let inputs = match main_input {
+        Some((_, bus)) => channels_of_a_vst3_bus(bus, "input")?,
+        None if is_a_synthesizer => 0,
+        None => {
+            return Err(
+                "it has no main audio input and no note input: it makes sound by itself and does not change any (a generator is not used yet)"
+                    .to_owned(),
+            );
+        }
+    };
+    let Some((_, output)) = facts.main_audio_output() else {
+        return Err("it has no main audio output".to_owned());
+    };
+    let outputs = channels_of_a_vst3_bus(output, "output")?;
+    let mut parameters = Vec::new();
+    let mut value_handles = Vec::new();
+    for parameter in &facts.parameters {
+        if let Some(value) = value_of_a_vst3_parameter(parameter)? {
+            if parameters.len() == MOST_VALUES_OF_AN_EFFECT {
+                // (The first ones are kept, as for CLAP: the rest are the ones the plugin lists last.)
+                break;
+            }
+            parameters.push(value);
+            value_handles.push(parameter.id);
+        }
+    }
+    let file = module
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let kinds = class.sub_categories.join(", ");
+    let mut about = if kinds.is_empty() {
+        format!("VST3 plugin, in {file}")
+    } else {
+        format!("VST3 plugin ({kinds}), in {file}")
+    };
+    if scanned.has_state && parameters.len() <= 2 {
+        about.push_str(". It keeps settings that only its own window can change, which cannot be shown here");
+    }
+    let descriptor = EffectDescriptor {
+        shader: None,
+        key: Cow::Owned(key_of_a_vst3_plugin(class.id)),
+        version: (1, 0),
+        name: Cow::Owned(class.name.trim().to_lowercase()),
+        description: Cow::Owned(about),
+        category: Cow::Owned(if class.vendor.trim().is_empty() {
+            "Plugins".to_owned()
+        } else {
+            class.vendor.trim().to_owned()
+        }),
+        domain: EffectDomain::Sound,
+        changes_each_pixel_by_itself: false,
+        makes_sound_from_notes: is_a_synthesizer,
+        parameters: Cow::Owned(parameters),
+        unknown_fields: UnknownFields::none(),
+    };
+    if let Some(problem) = descriptor.problem() {
+        return Err(format!("what it says of itself cannot be used: {problem}"));
+    }
+    Ok(InstalledPlugin {
+        descriptor,
+        library: module.to_owned(),
+        address: PluginAddress::Vst3 { class_id: class.id },
+        audio_inputs: inputs,
+        audio_outputs: outputs,
+        value_handles,
+        pre_roll_samples: pre_roll_of_a_vst3_plugin(facts.tail),
+        // (The window of a VST3 plugin is piece 15.6.)
+        has_a_window: false,
         start_warning: None,
         presets: Vec::new(),
     })

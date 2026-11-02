@@ -155,3 +155,56 @@ fn a_picture_effect_on_a_sound_clip_is_refused_and_a_sound_effect_of_a_plugin_th
     );
     assert_eq!(saved(&loaded), text, "written back as it was");
 }
+
+#[test]
+fn an_effect_of_a_vst3_plugin_is_in_the_file_by_its_key_is_kept_where_the_plugin_is_gone_and_needs_no_new_version_of_the_format()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let key = "vst3:123456789ABCDEF00FEDCBA987654321";
+    let plugin = an_installed_sound_plugin(key, "Maker", &[("mix", 0.5, Some((0.0, 1.0)))]);
+    crate::project::set_installed_plugins(vec![plugin.clone()]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let mut project = project_with_everything();
+    let clip = the_sound_clip_of(&project);
+    let instance = project.add_effect(AnimationTarget::Clip(clip), kind).unwrap();
+    project
+        .set_property_at(
+            AnimationTarget::Clip(clip),
+            PropertyId::effect_value(kind, instance, 0),
+            PropertyValue::Number(0.8),
+            crate::project::TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+
+    let text = saved(&project);
+
+    let file: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        file["file_format_version"], 27,
+        "the format is the one it was before VST3 plugins: the key is all that names the plugin"
+    );
+    assert!(text.contains(key), "the key is in the file");
+    // Where the plugin is not installed, the effect is kept whole.
+    crate::project::set_installed_plugins(Vec::new());
+    let without = project_from_json_text(&text).expect("the file is read");
+    let effects = without
+        .effects_of(AnimationTarget::Clip(the_sound_clip_of(&without)))
+        .unwrap();
+    assert_eq!(effects.iter().count(), 1);
+    assert_eq!(
+        effects.iter().next().unwrap().values().first(),
+        Some(&PropertyValue::Number(0.8))
+    );
+    assert_eq!(saved(&without), text, "and written again as it was");
+    // Where it is installed again, it is an effect of the installed plugin.
+    crate::project::set_installed_plugins(vec![plugin]);
+    let with = project_from_json_text(&text).expect("the file is read");
+    let effect = with
+        .effects_of(AnimationTarget::Clip(the_sound_clip_of(&with)))
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap()
+        .kind();
+    assert!(effect.installed_plugin().is_some());
+}

@@ -48,12 +48,17 @@ ladspa-host = { path = "crates/ladspa-host", version = "0.1.0" }
 clap-host = { path = "crates/clap-host", version = "0.1.0" }
 # Finds, describes and loads LV2 plugins (the third crate with `unsafe` code in it; its scan too is done by the program that scans plugin libraries).
 lv2-host = { path = "crates/lv2-host", version = "0.1.0" }
+# Finds, describes and runs VST3 plugins (the fourth crate with `unsafe` code in it; its scan is done by the program that scans plugin libraries, and a VST3 plugin is only ever run in a
+# program of its own).
+vst3-host = { path = "crates/vst3-host", version = "0.1.0" }
 # The window of the program that shows a plugin's window (`fastforwardrs-plugin-editor`): the same version as eframe's.
 winit = "0.30.13"
 
 [dev-dependencies]
 # A plugin library written for the tests (see docs/engine-phase-7-design.md, G2); `cargo` builds its library beside the tests.
 ladspa-test-plugins = { path = "crates/ladspa-test-plugins", version = "0.1.0" }
+# A VST3 plugin library written for the tests (see docs/engine-phase-15-vst3-design.md).
+vst3-test-plugins = { path = "crates/vst3-test-plugins", version = "0.1.0" }
 clap-test-plugins = { path = "crates/clap-test-plugins", version = "0.1.0" }
 lv2-test-plugins = { path = "crates/lv2-test-plugins", version = "0.1.0" }
 egui_kittest = { version = "0.36.2", features = ["wgpu"] }

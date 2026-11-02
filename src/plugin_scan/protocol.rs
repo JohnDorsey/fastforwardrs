@@ -41,7 +41,7 @@ pub fn build_id_in(output: &str) -> Option<String> {
 
 /// What is in the cache of scans as well as on the wire. **Raise it when the scan finds something it did not (or means something else by what it finds)**, so that the answers
 /// that were kept are not believed any more. (2: the scan reads CLAP libraries too. 3: the scan checks whether a CLAP plugin's start depends on memory it did not write. 4: the scan says whether a CLAP plugin has a window. 5: the scan reads LV2 bundles too. 6: what an LV2 plugin's bundle says of its windows (the features and the extension data of an interface). 7: the presets that an LV2 bundle says. 8: the note ports of a CLAP plugin, so that an instrument can be told from an effect. 9: the value that each parameter of a CLAP plugin has when the plugin is new, because some plugins say 0 for every default: Surge XT would be given all its levels at 0.)
-pub const SCAN_FORMAT: u32 = 9;
+pub const SCAN_FORMAT: u32 = 10;
 
 /// The answer of the scan program.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -51,11 +51,26 @@ pub enum ScanAnswer {
     ScannedClap(clap_host::scan::LibraryScan),
     /// An LV2 bundle (a folder with a `manifest.ttl`) that was read, with what its plugins said and how each did when it was made and run.
     ScannedLv2(lv2_host::BundleScan),
+    /// A VST3 module (a `.vst3` folder or file) that loaded, with its plugin classes and how each did when it was made and run.
+    ScannedVst3(vst3_host::ModuleScan),
     CouldNotBeLoaded(String),
     NotALadspaLibrary(String),
     NotAClapLibrary(String),
     /// A folder that is not an LV2 bundle (no manifest that can be read as Turtle).
     NotAnLv2Bundle(String),
+    /// A `.vst3` that loaded, and is not a VST3 module (no factory).
+    NotAVst3Module(String),
+}
+
+impl From<vst3_host::OpenError> for ScanAnswer {
+    fn from(error: vst3_host::OpenError) -> Self {
+        match error {
+            vst3_host::OpenError::NotAModule | vst3_host::OpenError::NoFactory => {
+                Self::NotAVst3Module(error.to_string())
+            }
+            other => Self::CouldNotBeLoaded(other.to_string()),
+        }
+    }
 }
 
 impl From<clap_host::OpenError> for ScanAnswer {

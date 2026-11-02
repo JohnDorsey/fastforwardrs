@@ -31,6 +31,8 @@ pub enum PluginAddress {
     Clap { id: String },
     /// An LV2 plugin is the one with a URI, in a bundle (the library of the plugin is the bundle's folder; its binary is what the bundle's Turtle says).
     Lv2 { uri: String },
+    /// A VST3 plugin is the class with an id (four numbers, the same on every system), in a module (the library of the plugin is the `.vst3` folder or file).
+    Vst3 { class_id: vst3_host::ClassId },
 }
 
 impl PluginAddress {
@@ -38,7 +40,7 @@ impl PluginAddress {
     pub fn ladspa_index(&self) -> Option<usize> {
         match self {
             Self::Ladspa { index, .. } => Some(*index),
-            Self::Clap { .. } | Self::Lv2 { .. } => None,
+            Self::Clap { .. } | Self::Lv2 { .. } | Self::Vst3 { .. } => None,
         }
     }
 }

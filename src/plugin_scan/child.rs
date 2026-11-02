@@ -186,6 +186,8 @@ pub(super) fn outcome_of(did: &WhatItDid, time_limit: Duration) -> LibraryOutcom
             Some(Ok(ScanAnswer::Scanned(scan))) => LibraryOutcome::Scanned(scan),
             Some(Ok(ScanAnswer::ScannedClap(scan))) => LibraryOutcome::ScannedClap(scan),
             Some(Ok(ScanAnswer::ScannedLv2(scan))) => LibraryOutcome::ScannedLv2(scan),
+            Some(Ok(ScanAnswer::ScannedVst3(scan))) => LibraryOutcome::ScannedVst3(scan),
+            Some(Ok(ScanAnswer::NotAVst3Module(reason))) => LibraryOutcome::Failed(ScanFailure::NotAVst3Module(reason)),
             Some(Ok(ScanAnswer::NotAnLv2Bundle(reason))) => LibraryOutcome::Failed(ScanFailure::NotAnLv2Bundle(reason)),
             Some(Ok(ScanAnswer::CouldNotBeLoaded(reason))) => {
                 LibraryOutcome::Failed(ScanFailure::CouldNotBeLoaded(reason))

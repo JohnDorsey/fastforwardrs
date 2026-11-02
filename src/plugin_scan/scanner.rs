@@ -15,6 +15,7 @@ use super::child::{SCAN_TIME_LIMIT, build_id_of_a_program, scan_in_a_program};
 use super::failure::ScanFailure;
 use super::folders::{
     clap_libraries_in, dependency_search_folders, libraries_in, library_search_variable, lv2_bundles_in,
+    vst3_modules_in,
 };
 use super::protocol::BUILD_ID;
 use ladspa_host::LibraryScan;
@@ -27,6 +28,8 @@ pub enum LibraryOutcome {
     ScannedClap(clap_host::scan::LibraryScan),
     /// An LV2 bundle was scanned.
     ScannedLv2(lv2_host::BundleScan),
+    /// A VST3 module was scanned.
+    ScannedVst3(vst3_host::ModuleScan),
     Failed(ScanFailure),
 }
 
@@ -36,6 +39,7 @@ impl From<LibraryOutcome> for CachedOutcome {
             LibraryOutcome::Scanned(scan) => Self::Scanned(scan),
             LibraryOutcome::ScannedClap(scan) => Self::ScannedClap(scan),
             LibraryOutcome::ScannedLv2(scan) => Self::ScannedLv2(scan),
+            LibraryOutcome::ScannedVst3(scan) => Self::ScannedVst3(scan),
             LibraryOutcome::Failed(failure) => Self::Failed(failure),
         }
     }
@@ -47,6 +51,7 @@ impl From<CachedOutcome> for LibraryOutcome {
             CachedOutcome::Scanned(scan) => Self::Scanned(scan),
             CachedOutcome::ScannedClap(scan) => Self::ScannedClap(scan),
             CachedOutcome::ScannedLv2(scan) => Self::ScannedLv2(scan),
+            CachedOutcome::ScannedVst3(scan) => Self::ScannedVst3(scan),
             CachedOutcome::Failed(failure) => Self::Failed(failure),
         }
     }
@@ -257,10 +262,11 @@ impl PluginScanner {
         let mut scan = FolderScan::default();
         let mut found = Vec::new();
         for folder in folders {
-            // (The LADSPA libraries of the folder, and then the CLAP ones in it and below it, and then the LV2 bundles in it.)
+            // (The LADSPA libraries of the folder, and then the CLAP ones in it and below it, then the LV2 bundles in it, then the VST3 modules.)
             let libraries = match libraries_in(folder).and_then(|mut found| {
                 found.extend(clap_libraries_in(folder)?);
                 found.extend(lv2_bundles_in(folder)?);
+                found.extend(vst3_modules_in(folder)?);
                 Ok(found)
             }) {
                 Ok(libraries) => libraries,

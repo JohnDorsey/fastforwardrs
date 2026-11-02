@@ -657,6 +657,133 @@ fn the_window_says_what_the_scan_found_the_libraries_that_failed_with_the_reason
 }
 
 #[test]
+fn the_window_counts_the_plugins_of_a_vst3_module_and_says_when_a_module_is_not_one() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut window = Window::showing(super::test_window::project_of(100));
+    open_the_window(&mut window);
+    let library = |name: &str, outcome: LibraryOutcome| LibraryReport {
+        path: std::path::PathBuf::from(format!("/plugins/{name}")),
+        outcome,
+        from_cache: false,
+    };
+    let class = |name: &str| {
+        let mut scanned = vst3_host::ScannedClass {
+            class: vst3_host::ClassDescription {
+                id: vst3_host::ClassId::from_numbers(1, 2, 3, 4),
+                name: name.to_owned(),
+                category: "Audio Module Class".to_owned(),
+                sub_categories: Vec::new(),
+                vendor: String::new(),
+                version: String::new(),
+                sdk_version: String::new(),
+            },
+            facts: None,
+            problem: None,
+            has_state: false,
+        };
+        scanned.problem = Some("it could not be made".to_owned());
+        scanned
+    };
+    window.application_mut().pretend_the_scan_found(vec![
+        library(
+            "pair.vst3",
+            LibraryOutcome::ScannedVst3(vst3_host::ModuleScan {
+                factory: Default::default(),
+                classes: vec![class("one"), class("two")],
+            }),
+        ),
+        library(
+            "single.vst3",
+            LibraryOutcome::ScannedVst3(vst3_host::ModuleScan {
+                factory: Default::default(),
+                classes: vec![class("one")],
+            }),
+        ),
+        library(
+            "fake.vst3",
+            LibraryOutcome::Failed(ScanFailure::NotAVst3Module("no GetPluginFactory".to_owned())),
+        ),
+    ]);
+    window.settle();
+
+    assert!(is_shown(&window, "pair.vst3: 2 plugins (VST3)"));
+    assert!(is_shown(&window, "single.vst3: 1 plugin (VST3)"));
+    assert!(is_shown(
+        &window,
+        "fake.vst3: it is not a VST3 module: no GetPluginFactory"
+    ));
+}
+
+#[test]
+fn a_vst3_plugin_is_offered_in_a_smaller_menu_of_its_own_after_the_others_and_can_be_put_on_a_clip() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugin = a_reverb();
+    plugin.descriptor.key = "vst3:123456789ABCDEF00FEDCBA987654321".into();
+    plugin.descriptor.name = "dragonfly room".into();
+    plugin.descriptor.category = "Michael Willis".into();
+    plugin.address = crate::project::PluginAddress::Vst3 {
+        class_id: vst3_host::ClassId::from_numbers(0x1234_5678, 0x9ABC_DEF0, 0x0FED_CBA9, 0x8765_4321),
+    };
+    set_installed_plugins(vec![plugin, a_reverb()]);
+    let (mut window, clip) = window_with_the_video_selected();
+
+    open_the_menu_of_the_plus_button(&mut window);
+    assert!(is_shown(&window, "VST3 \u{23f5}"), "a smaller menu for VST3 plugins");
+    assert!(
+        window.rectangle_of("LADSPA \u{23f5}").top() < window.rectangle_of("VST3 \u{23f5}").top(),
+        "after the others"
+    );
+    window.open_the_smaller_menu("VST3");
+    assert!(is_shown(&window, "Michael Willis"), "the heading is the vendor");
+    window.harness.get_by_label("Dragonfly room").click();
+    window.settle();
+
+    let effects = the_effects(&window, clip);
+    assert_eq!(effects.len(), 1);
+    assert_eq!(effects[0].key(), "vst3:123456789ABCDEF00FEDCBA987654321");
+}
+
+#[test]
+fn the_placeholder_of_a_vst3_plugin_that_is_not_installed_names_the_modules_that_failed_and_no_others() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut plugin = a_reverb();
+    plugin.descriptor.key = "vst3:123456789ABCDEF00FEDCBA987654321".into();
+    plugin.descriptor.name = "dragonfly room".into();
+    set_installed_plugins(vec![plugin]);
+    let (mut window, _) = window_with_the_video_selected();
+    open_the_menu_of_the_plus_button(&mut window);
+    window.open_the_smaller_menu("VST3");
+    window.harness.get_by_label("Dragonfly room").click();
+    window.settle();
+    set_installed_plugins(Vec::new());
+    window.settle();
+
+    the_scan_found(&mut window, Vec::new(), Vec::new());
+    assert!(shows_containing(
+        &window,
+        "No plugin with this id was found in the folders that are looked in"
+    ));
+
+    the_scan_found(
+        &mut window,
+        vec![
+            a_failed_library("one.vst3", ScanFailure::NotAVst3Module("no factory".to_owned())),
+            a_failed_library("not_a_vst3_one.clap", ScanFailure::GaveNoAnswer { during: None }),
+        ],
+        Vec::new(),
+    );
+    assert!(shows_containing(&window, "a library failed in the last scan"));
+    assert!(shows_containing(
+        &window,
+        "one.vst3 (it is not a VST3 module: no factory"
+    ));
+    assert!(
+        !shows_containing(&window, "not_a_vst3_one.clap"),
+        "only modules of the kind of the plugin"
+    );
+}
+
+#[test]
 fn asking_to_scan_again_with_no_scan_program_does_nothing_and_does_not_fail() {
     let mut window = Window::showing(super::test_window::project_of(100));
     open_the_window(&mut window);

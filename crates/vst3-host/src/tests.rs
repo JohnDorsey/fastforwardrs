@@ -371,6 +371,7 @@ fn the_gain_effect_is_two_classes_with_main_stereo_buses_and_every_kind_of_param
     );
     assert_eq!((gain.plain_minimum, gain.plain_maximum), (0.0, 4.0));
     assert_eq!(gain.default_normalized, 0.25);
+    assert_eq!(gain.default_plain, 1.0, "a quarter of 0 to 4, as the plugin says");
     assert!(gain.can_automate && !gain.is_read_only && !gain.is_hidden && !gain.is_the_bypass);
     assert!(gain.texts.is_empty(), "a continuous parameter has no step texts");
     let mode = parameter(facts, plugins::PARAMETER_MODE);

@@ -427,6 +427,15 @@ fn show_libraries(ui: &mut Ui, view: &PluginManagerView<'_>) {
                 ))
                 .on_hover_text(library.path.display().to_string());
             }
+            LibraryOutcome::ScannedVst3(scan) => {
+                // (A module can hold several plugins; a class that is not a plugin is not counted.)
+                let count = scan.classes.len();
+                ui.label(format!(
+                    "{name}: {count} plugin{} (VST3)",
+                    if count == 1 { "" } else { "s" }
+                ))
+                .on_hover_text(library.path.display().to_string());
+            }
             LibraryOutcome::Failed(failure) => {
                 ui.colored_label(ui.visuals().warn_fg_color, format!("{name}: {failure}"))
                     .on_hover_text(library.path.display().to_string());

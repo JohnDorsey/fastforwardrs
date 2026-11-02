@@ -23,7 +23,7 @@ use crate::plugin_scan::{
     bundled_plugins_folder, folders_looked_in_by_default, plugins_found_in, recover, scan_a_library_alone,
     scanner_program_beside_this_program,
 };
-use crate::plugin_scan::{is_a_clap_file, is_an_lv2_bundle};
+use crate::plugin_scan::{is_a_clap_file, is_a_vst3_module, is_an_lv2_bundle};
 use crate::plugin_trust::{FolderStanding, folder_for_a_person, folder_of};
 use crate::project::{EffectKind, set_installed_plugins, set_installed_shaders};
 use crate::shader_files::{
@@ -172,7 +172,7 @@ impl PluginSearch {
         }
         let key = kind.key();
         let (namespace, rest) = key.split_once(':')?;
-        if namespace != "ladspa" && namespace != "clap" && namespace != "lv2" {
+        if namespace != "ladspa" && namespace != "clap" && namespace != "lv2" && namespace != "vst3" {
             return None;
         }
         Some(self.why_a_plugin_is_not_installed(namespace, rest))
@@ -207,7 +207,7 @@ impl PluginSearch {
                 .map(|stem| stem.to_string_lossy().replace(':', "_"))
                 .unwrap_or_default()
         };
-        // (A LADSPA key is `ladspa:` the file without its ending, a colon and the label; a CLAP key is `clap:` and the id, which names no file.)
+        // (A LADSPA key is `ladspa:` the file without its ending, a colon and the label; a CLAP key is `clap:` and the id, which names no file; nor does a VST3 key, which is the id of the class.)
         let (library_stem, label) = match namespace {
             "ladspa" => match rest.split_once(':') {
                 Some((stem, label)) => (Some(stem), label),
@@ -219,7 +219,8 @@ impl PluginSearch {
         let own_kind = |path: &Path| match namespace {
             "lv2" => is_an_lv2_bundle(path),
             "clap" => is_a_clap_file(path),
-            _ => !is_a_clap_file(path) && !is_an_lv2_bundle(path),
+            "vst3" => is_a_vst3_module(path),
+            _ => !is_a_clap_file(path) && !is_an_lv2_bundle(path) && !is_a_vst3_module(path),
         };
         // The plugin was found, and cannot be an effect.
         if let Some(not_used) = self.result.not_used.iter().find(|not_used| {

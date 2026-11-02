@@ -67,6 +67,8 @@ pub struct ParameterDescription {
     /// 0 for a continuous parameter; for a stepped one the number of steps (a switch has 1, a list of three has 2): its values are the `step_count + 1` whole numbers.
     pub step_count: i32,
     pub default_normalized: f64,
+    /// What the plugin says the default is as a plain value (not worked out from the range: a parameter need not be linear).
+    pub default_plain: f64,
     /// What the plugin says the value is at the bottom and at the top of the normalised range (the plain value).
     pub plain_minimum: f64,
     pub plain_maximum: f64,

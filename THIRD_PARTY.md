@@ -12,10 +12,10 @@ source of the ffmpeg that is shipped with a release is to be offered with it (`d
 
 | Licence | Libraries |
 |---|---|
-| [MIT License](#MIT) | 353 |
+| [MIT License](#MIT) | 355 |
 | [Unicode License v3](#Unicode-3.0) | 19 |
 | [Apache License 2.0](#Apache-2.0) | 18 |
-| [GNU General Public License v3.0 or later](#GPL-3.0-or-later) | 5 |
+| [GNU General Public License v3.0 or later](#GPL-3.0-or-later) | 6 |
 | [BSD 3-Clause "New" or "Revised" License](#BSD-3-Clause) | 3 |
 | [Boost Software License 1.0](#BSL-1.0) | 2 |
 | [zlib License](#Zlib) | 2 |
@@ -2227,6 +2227,7 @@ Used by:
 - clap-host 0.1.0 (https://github.com/JohnDorsey/fastforwardrs)
 - ladspa-host 0.1.0 (https://github.com/JohnDorsey/fastforwardrs)
 - lv2-host 0.1.0 (https://github.com/JohnDorsey/fastforwardrs)
+- vst3-host 0.1.0 (https://github.com/JohnDorsey/fastforwardrs)
 
 ```text
 GNU GENERAL PUBLIC LICENSE
@@ -6318,6 +6319,7 @@ Used by:
 - accesskit_windows 0.32.1 (https://github.com/AccessKit/accesskit)
 - block2 0.5.1 (https://github.com/madsmtm/objc2)
 - block2 0.6.2 (https://github.com/madsmtm/objc2)
+- com-scrape-types 0.1.1 (https://github.com/coupler-rs/vst3-rs)
 - dasp_sample 0.11.0 (https://github.com/rustaudio/sample.git)
 - dispatch2 0.3.1 (https://github.com/madsmtm/objc2)
 - dispatch 0.2.0 (http://github.com/SSheldon/rust-dispatch)
@@ -6763,6 +6765,7 @@ Used by:
 - thiserror 2.0.21 (https://github.com/dtolnay/thiserror)
 - typed-path 0.12.4 (https://github.com/chipsenkbeil/typed-path)
 - unicode-ident 1.0.27 (https://github.com/dtolnay/unicode-ident)
+- vst3 0.3.0 (https://github.com/coupler-rs/vst3-rs)
 - x11-dl 2.21.0 (https://github.com/AltF02/x11-rs.git)
 - zbus-lockstep-macros 0.5.2 (https://github.com/luukvanderduim/zbus-lockstep)
 - zbus-lockstep 0.5.2 (https://github.com/luukvanderduim/zbus-lockstep)

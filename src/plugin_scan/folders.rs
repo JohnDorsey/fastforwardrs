@@ -100,6 +100,11 @@ pub fn folders_looked_in_with(
         environment("COMMONPROGRAMFILES").map(PathBuf::from).as_deref(),
         environment("LOCALAPPDATA").map(PathBuf::from).as_deref(),
     ));
+    usual.extend(vst3_folders(
+        home,
+        environment("COMMONPROGRAMFILES").map(PathBuf::from).as_deref(),
+        environment("LOCALAPPDATA").map(PathBuf::from).as_deref(),
+    ));
     usual.extend(lv2_host::usual_folders(
         environment("LV2_PATH").as_deref(),
         home,
@@ -146,7 +151,12 @@ fn collect_lv2_bundles(folder: &Path, folders_down: usize, bundles: &mut Vec<Pat
         // (A link to a bundle is one, as it is in the folders of a system that links its bundles; a link to another folder is not looked into.)
         if is_an_lv2_bundle(&path) {
             bundles.push(path);
-        } else if kind.is_dir() && folders_down > 0 && !is_being_made(&path) && !is_a_clap_file(&path) {
+        } else if kind.is_dir()
+            && folders_down > 0
+            && !is_being_made(&path)
+            && !is_a_clap_file(&path)
+            && !is_a_vst3_module(&path)
+        {
             // (A folder that cannot be read is left out: the rest of the folder is still looked in.)
             let _ = collect_lv2_bundles(&path, folders_down - 1, bundles);
         }
@@ -160,6 +170,69 @@ pub fn is_a_clap_file(path: &Path) -> bool {
     path.extension()
         .and_then(OsStr::to_str)
         .is_some_and(|extension| extension.eq_ignore_ascii_case("clap"))
+}
+
+/// Whether `path` is named like a VST3 module: it ends in `.vst3` (whatever case). A module is a folder (`Name.vst3`, with the library inside it), or on Windows, for older plugins,
+/// the library itself with that ending.
+pub fn is_a_vst3_module(path: &Path) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("vst3"))
+}
+
+/// The folders that VST3 plugins are installed in, as the VST3 documentation says: Windows `%COMMONPROGRAMFILES%\VST3` and `%LOCALAPPDATA%\Programs\Common\VST3`; macOS
+/// `/Library/Audio/Plug-Ins/VST3` and `~/Library/Audio/Plug-Ins/VST3`; elsewhere `~/.vst3`, `/usr/lib/vst3` and `/usr/local/lib/vst3`. (There is no variable for them; the three places a
+/// system gives are passed in, so that this does not look at the environment.)
+pub fn vst3_folders(
+    home: Option<&Path>,
+    common_program_files: Option<&Path>,
+    local_app_data: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut folders: Vec<PathBuf> = Vec::new();
+    if cfg!(windows) {
+        folders.extend(common_program_files.map(|folder| folder.join("VST3")));
+        folders.extend(local_app_data.map(|folder| folder.join("Programs").join("Common").join("VST3")));
+    } else if cfg!(target_os = "macos") {
+        folders.extend(home.map(|home| home.join("Library").join("Audio").join("Plug-Ins").join("VST3")));
+        folders.push(PathBuf::from("/Library/Audio/Plug-Ins/VST3"));
+    } else {
+        folders.extend(home.map(|home| home.join(".vst3")));
+        folders.push(PathBuf::from("/usr/lib/vst3"));
+        folders.push(PathBuf::from("/usr/local/lib/vst3"));
+    }
+    folders
+}
+
+/// How many folders down from a folder that is looked in the VST3 modules are looked for (as for CLAP and LV2: the plugins that the *Bundles* tab fetches are in a folder of their set).
+const MOST_FOLDERS_DOWN_FOR_VST3: usize = 6;
+
+/// The VST3 modules in `folder` **and in the folders in it**, down to six folders: the files and folders that end in `.vst3`, in the order of their paths without regard to case. A
+/// module is not looked into (what is in it is its own), nor is a folder that is a link to another, nor one that the *Bundles* tab is making. A folder that is not there has none; a
+/// folder inside that cannot be read is left out, and the folder that was asked for being unreadable is an error.
+pub fn vst3_modules_in(folder: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut modules = Vec::new();
+    match fs::read_dir(folder) {
+        Ok(_) => collect_vst3_modules(folder, MOST_FOLDERS_DOWN_FOR_VST3, &mut modules)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    }
+    sort_by_path_without_regard_to_case(&mut modules);
+    Ok(modules)
+}
+
+fn collect_vst3_modules(folder: &Path, folders_down: usize, modules: &mut Vec<PathBuf>) -> io::Result<()> {
+    for entry in fs::read_dir(folder)? {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else { continue };
+        if is_a_vst3_module(&path) && (path.is_file() || path.is_dir()) {
+            modules.push(path);
+        } else if kind.is_dir() && folders_down > 0 && !is_being_made(&path) {
+            // (A folder that cannot be read is left out: the rest of the folder is still looked in.)
+            let _ = collect_vst3_modules(&path, folders_down - 1, modules);
+        }
+    }
+    Ok(())
 }
 
 /// The folders that CLAP plugins are installed in, from the value of `CLAP_PATH` (a list of folders in the way the system makes a list of paths) and then the usual ones of the
@@ -308,7 +381,7 @@ fn collect_clap_libraries(folder: &Path, folders_down: usize, libraries: &mut Ve
         let Ok(kind) = entry.file_type() else { continue };
         if is_a_clap_file(&path) && (path.is_file() || (cfg!(target_os = "macos") && path.is_dir())) {
             libraries.push(path);
-        } else if kind.is_dir() && folders_down > 0 && !is_being_made(&path) {
+        } else if kind.is_dir() && folders_down > 0 && !is_being_made(&path) && !is_a_vst3_module(&path) {
             // (A folder that cannot be read is left out: the rest of the folder is still looked in.)
             let _ = collect_clap_libraries(&path, folders_down - 1, libraries);
         }
