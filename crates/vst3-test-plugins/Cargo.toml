@@ -1,0 +1,16 @@
+[package]
+name = "vst3-test-plugins"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "CC0-1.0"
+repository = "https://github.com/JohnDorsey/fastforwardrs"
+description = "A VST3 plugin library written for the tests of fastforwardrs: effects with every kind of parameter, a latency, an instrument that takes notes and a mapping of controllers, a plugin that is its own controller, and some that fail on purpose"
+publish = false
+
+[lib]
+# (A library that is loaded at run time, and a Rust library for the tests that want its names and a module folder made of it.)
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vst3 = "0.3.0"
