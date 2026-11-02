@@ -46,6 +46,7 @@ fn plan_of(sections: Vec<(u64, u64, Vec<Layer>)>) -> PicturePlan {
                 end_timeline_frame,
                 layers,
                 groups: Vec::new(),
+                masks: Vec::new(),
             })
             .collect(),
         frames_missing_a_picture: 0,
@@ -206,6 +207,7 @@ fn a_picture_that_is_not_a_video_has_no_run_and_does_not_cut_the_video_under_it(
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     });
     let plan = plan_of(vec![
         (0, 10, vec![video_layer(0, 1, 0, 10, 1)]),
@@ -224,4 +226,72 @@ fn a_picture_that_is_not_a_video_has_no_run_and_does_not_cut_the_video_under_it(
 fn a_plan_with_no_video_has_no_runs() {
     assert!(runs_of(&plan_of(Vec::new())).is_empty());
     assert!(runs_of(&plan_of(vec![(0, 10, Vec::new())])).is_empty());
+}
+
+// --- masks ---
+
+/// A mask that is the video `layer`, which is the picture of its track over the frames `first..end` of the timeline.
+fn a_mask_of(layer: Layer, first: u64, end: u64) -> crate::composition::MaskPicture {
+    crate::composition::MaskPicture {
+        track: layer.track,
+        section: PictureSection {
+            first_timeline_frame: first,
+            end_timeline_frame: end,
+            layers: vec![layer],
+            groups: Vec::new(),
+            masks: Vec::new(),
+        },
+    }
+}
+
+#[test]
+fn the_video_of_a_mask_is_a_run_of_its_own_with_its_source_frames_counted_from_the_first_frame_of_the_section_that_has_it()
+ {
+    // A section of frames 40 to 70 that has a mask whose video is the picture of its track over frames 0 to 100: at the frame 40 it shows the source frame 500 + 40.
+    let mut plan = plan_of(vec![(40, 70, vec![video_layer(0, 1, 40, 70, 1)])]);
+    plan.sections[0].masks = vec![a_mask_of(video_layer(5, 2, 500, 600, 1), 0, 100)];
+
+    let runs = runs_of(&plan);
+
+    assert_eq!(
+        runs.len(),
+        2,
+        "the video that is in the picture, and the one that is only a mask"
+    );
+    let the_mask = runs
+        .iter()
+        .find(|run| run.clip == clip(5))
+        .expect("the mask's video has a run");
+    assert_eq!(the_mask.source, SourceMediaIdentifier::new(2));
+    assert_eq!((the_mask.first_timeline_frame, the_mask.end_timeline_frame), (40, 70));
+    assert_eq!((the_mask.first_source_frame, the_mask.source_frame_count), (540, 30));
+}
+
+#[test]
+fn the_pieces_a_section_is_cut_into_by_a_mask_go_on_as_one_run_for_the_video_of_the_mask_as_well() {
+    // The mask's track shows one video over frames 0 to 100; the section is cut into three pieces, each of which has the whole of that stretch.
+    let mask = || a_mask_of(video_layer(5, 2, 500, 600, 1), 0, 100);
+    let mut plan = plan_of(vec![
+        (0, 30, vec![video_layer(0, 1, 0, 30, 1)]),
+        (30, 60, vec![video_layer(0, 1, 30, 60, 1)]),
+        (60, 100, vec![video_layer(0, 1, 60, 100, 1)]),
+    ]);
+    for section in &mut plan.sections {
+        section.masks = vec![mask()];
+    }
+
+    let runs = runs_of(&plan);
+
+    assert_eq!(runs.len(), 2, "one run for each video, however many pieces: {runs:?}");
+    let the_mask = runs.iter().find(|run| run.clip == clip(5)).unwrap();
+    assert_eq!((the_mask.first_timeline_frame, the_mask.end_timeline_frame), (0, 100));
+    assert_eq!((the_mask.first_source_frame, the_mask.source_frame_count), (500, 100));
+}
+
+#[test]
+fn a_clip_that_is_in_the_picture_and_in_a_mask_has_one_run() {
+    let mut plan = plan_of(vec![(0, 50, vec![video_layer(0, 1, 0, 50, 1)])]);
+    plan.sections[0].masks = vec![a_mask_of(video_layer(0, 1, 0, 50, 1), 0, 50)];
+
+    assert_eq!(runs_of(&plan).len(), 1);
 }

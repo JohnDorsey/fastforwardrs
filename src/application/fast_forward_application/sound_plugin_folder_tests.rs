@@ -100,6 +100,7 @@ fn the_sound_comes_to(window: &Window, kind: EffectKind, notes: &Notes) {
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     };
     let clip = SoundClipToExport {
         source_input: 0,

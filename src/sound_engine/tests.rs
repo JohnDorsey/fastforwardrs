@@ -1342,6 +1342,7 @@ fn clip_that_has_sound_from_before(
             tail_length: Default::default(),
             passes_notes_on: false,
             shared_by: None,
+            driven: Default::default(),
         }],
         sent_to: None,
         tail_routes: Vec::new(),
@@ -1815,6 +1816,7 @@ fn an_effect_that_rings_for(tail: crate::project::TailLength) -> crate::composit
         tail_length: tail,
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     }
 }
 

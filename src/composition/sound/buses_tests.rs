@@ -311,6 +311,7 @@ fn a_plugin_effect(tail_length: crate::project::TailLength, pre_roll_samples: us
         tail_length,
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     }
 }
 

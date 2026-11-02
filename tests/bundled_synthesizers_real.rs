@@ -140,6 +140,7 @@ fn an_effect_with_the_values_it_has_when_it_is_put_on(kind: EffectKind) -> Layer
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     }
 }
 

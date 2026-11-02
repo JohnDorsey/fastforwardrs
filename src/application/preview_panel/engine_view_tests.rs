@@ -43,6 +43,7 @@ fn content<'a>(layers: Vec<PreviewLayer<'a>>, selected: Option<u32>) -> PreviewC
         layers,
         symbol: None,
         groups: Vec::new(),
+        masks: Vec::new(),
         indicator_layout: SpeedIndicatorLayout::DEFAULT,
         selected_clip: selected.map(clip),
     }
@@ -1197,6 +1198,7 @@ fn the_state_that_a_shader_goes_on_with_is_in_the_call_that_the_engine_is_asked_
             state: Some((77, 12)),
             images: Vec::new(),
             reads_the_backdrop: false,
+            masks: Vec::new(),
         },
         crate::project::PictureOperation::Shader {
             key: "isf:forgets-000000000000".to_owned(),
@@ -1204,6 +1206,7 @@ fn the_state_that_a_shader_goes_on_with_is_in_the_call_that_the_engine_is_asked_
             state: None,
             images: Vec::new(),
             reads_the_backdrop: false,
+            masks: Vec::new(),
         },
     ];
 
@@ -1229,6 +1232,7 @@ fn a_generator_is_drawn_into_a_picture_of_its_own_that_has_nothing_in_it_for_its
             state: None,
             images: Vec::new(),
             reads_the_backdrop: false,
+            masks: Vec::new(),
         },
         crate::project::PictureOperation::Mix(ColourMatrix::hue_rotation(90.0)),
     ];
@@ -1291,6 +1295,7 @@ fn the_images_a_shader_brings_are_asked_of_the_supply_made_so_that_the_shader_re
         state: None,
         images: vec![imported(5, 10), imported(6, 20)],
         reads_the_backdrop: false,
+        masks: Vec::new(),
     };
     for working in [
         WorkingSpace::DisplayReferred,
@@ -1377,6 +1382,7 @@ fn a_shader_whose_image_the_supply_cannot_make_is_left_out_of_the_frame() {
             }),
         }],
         reads_the_backdrop: false,
+        masks: Vec::new(),
     };
     let mut layer = image_layer(0, 1, Some(&picture), place);
     layer.operations = vec![make()];
@@ -1405,6 +1411,7 @@ fn the_shader(key: &str, reads_the_backdrop: bool) -> crate::project::PictureOpe
         state: None,
         images: Vec::new(),
         reads_the_backdrop,
+        masks: Vec::new(),
     }
 }
 

@@ -1206,3 +1206,119 @@ fn a_describer_that_is_told_how_to_describe_makes_the_frame_that_size_in_that_co
         }
     }
 }
+
+// ---- a mask: the picture of a track whose eye is closed, read by the number of a shader (docs/shader-masks-design.md)
+
+/// A shader that shows its number `level` (0 to 1) as a grey and ignores its picture.
+const SHOW_THE_LEVEL: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"level\", \"TYPE\": \"float\", \"DEFAULT\": 0.5 } ] }*/\nvoid main() { gl_FragColor = vec4(vec3(level), 1.0); }\n";
+
+/// A video at the back, with a shader on its clip that shows `level`, which is read from the red of the picture of the track in front of it, whose eye is closed: a picture file of the
+/// same shape as the frame, whose red is 200. Where the picture file has nothing the number is 0.
+fn video_with_a_shader_that_reads_a_hidden_picture_file() -> Project {
+    use crate::project::{DrivenValue, EffectKind, MaskChannel, Member};
+    let mut project = project_with_video(320, 180, false);
+    project
+        .import_source(picture_source(2, 320, 180), frame(0))
+        .expect("the picture file goes on a track in front");
+    let (in_front, host_clip) = (
+        project.tracks()[0].id(),
+        project.tracks()[1].placement_at_index(0).unwrap().id,
+    );
+    project.set_track_hidden(in_front, true).unwrap();
+    let file = crate::isf::read(SHOW_THE_LEVEL).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "level.fs", SHOW_THE_LEVEL)).unwrap();
+    let instance = project.add_effect(AnimationTarget::Clip(host_clip), kind).unwrap();
+    project
+        .set_driven_value(
+            Member::Clip(host_clip),
+            instance,
+            0,
+            Some(DrivenValue::from_a_track(in_front, MaskChannel::Red, 0.0)),
+        )
+        .unwrap();
+    project
+}
+
+#[test]
+fn the_picture_of_a_track_whose_eye_is_closed_is_described_as_the_mask_of_the_effect_that_reads_it_and_is_not_a_layer()
+{
+    let project = video_with_a_shader_that_reads_a_hidden_picture_file();
+    let plan = plan_of(&project);
+    let images = HashMap::from([(SourceMediaIdentifier::new(2), a_picture_file(2, 2))]);
+    let mut describer = describer_of(&plan, &script_of_pictures(255), images, Box::new(NoFontsYet));
+
+    let (described, sent) = describe(&mut describer, 10);
+
+    assert_eq!(
+        described.description.layers.len(),
+        1,
+        "only the video is in the picture"
+    );
+    let effect = &described.description.layers[0].effects[0];
+    assert!(
+        effect.key.contains("+masks["),
+        "the shader that reads a mask: {}",
+        effect.key
+    );
+    assert_eq!(effect.masks.len(), 1);
+    assert_eq!(effect.masks[0].layers.len(), 1, "the picture file");
+    assert_eq!(effect.values[4], 0.0, "the number where the mask has nothing");
+    assert_eq!(
+        sent.len(),
+        2,
+        "the picture of the video, and the picture file that only the mask has"
+    );
+}
+
+#[test]
+fn the_engine_draws_the_number_that_the_picture_of_a_hidden_track_gives_the_shader_in_the_frame_of_the_export() {
+    use crate::engine::{
+        DEFAULT_MOST_PASSES_OF_A_LOOP, FrameRenderer, guard_wgsl, published_effect_shader_with_structure,
+    };
+    let project = video_with_a_shader_that_reads_a_hidden_picture_file();
+    let plan = plan_of(&project);
+    // The red of the picture file is 200 of 255, and the video's own pictures (3 here) are not looked at by the shader.
+    let images = HashMap::from([(
+        SourceMediaIdentifier::new(2),
+        RgbaPicture {
+            width_in_pixels: 2,
+            height_in_pixels: 2,
+            rgba_pixels: [200, 10, 10, 255].repeat(4),
+        },
+    )]);
+    let mut describer = describer_of(&plan, &script_of_pictures(255), images, Box::new(NoFontsYet));
+    let (described, sent) = describe(&mut describer, 10);
+
+    crate::engine::testing::with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        for (id, data) in &sent {
+            renderer.upload_picture(*id, data).unwrap();
+        }
+        // (The program gives the engine the shaders that a frame needs when it sets the frame going; a test of this part does it by hand.)
+        for flat in described.description.flatten().layers {
+            for effect in &flat.layer.effects {
+                let (source, structure) = published_effect_shader_with_structure(&effect.key)
+                    .expect("the shader that reads the mask was put on the shelf when the plan was made");
+                renderer
+                    .install_effect_with_structure(
+                        &effect.key,
+                        &guard_wgsl(&source, DEFAULT_MOST_PASSES_OF_A_LOOP).unwrap(),
+                        &structure,
+                    )
+                    .unwrap();
+            }
+        }
+
+        let (finished, statistics) = renderer
+            .render(&described.description, std::time::Duration::from_secs(60))
+            .unwrap();
+
+        assert_eq!(statistics.effects_not_run, 0);
+        let [red, green, blue, _] = finished.pixel(160, 90);
+        assert!(
+            red.abs_diff(200) <= 1 && green.abs_diff(200) <= 1 && blue.abs_diff(200) <= 1,
+            "the grey of the red of the picture file, 200: {:?}",
+            finished.pixel(160, 90)
+        );
+    });
+}

@@ -13,8 +13,8 @@ mod pictures;
 mod sound;
 
 pub use pictures::{
-    EffectClock, GroupSpan, Layer, LayerContent, LayerEffect, PicturePlan, PictureSection, SpanOwner, VisibleVideo,
-    operations_of_effects, plan_pictures,
+    EffectClock, GroupSpan, Layer, LayerContent, LayerEffect, MaskPicture, PicturePlan, PictureSection, SpanOwner,
+    VisibleVideo, operations_of_effects, plan_pictures,
 };
 pub use sound::{
     DecibelsAt, Loudness, Music, NoteConsumer, PlannedControl, PlannedNote, SOUND_SAMPLES_A_SECOND, SoundBus,

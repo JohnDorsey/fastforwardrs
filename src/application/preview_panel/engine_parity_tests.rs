@@ -215,6 +215,7 @@ impl Scene {
             layers,
             symbol: self.symbol,
             groups: Vec::new(),
+            masks: Vec::new(),
             indicator_layout: self.indicator_layout,
             selected_clip: None,
         }
@@ -630,6 +631,7 @@ fn a_video_picture_that_is_the_size_of_the_frame_is_exactly_what_the_old_drawing
             }],
             symbol: None,
             groups: Vec::new(),
+            masks: Vec::new(),
             indicator_layout: SpeedIndicatorLayout::DEFAULT,
             selected_clip: None,
         };
@@ -676,6 +678,7 @@ fn a_text_object_is_the_same_picture_in_the_engine_and_in_the_old_drawing_whatev
                 layers: vec![object("Hello, preview", colour, placement)],
                 symbol: None,
                 groups: Vec::new(),
+                masks: Vec::new(),
                 indicator_layout: SpeedIndicatorLayout::DEFAULT,
                 selected_clip: None,
             };
@@ -716,6 +719,7 @@ fn the_symbol_over_a_video_is_the_same_picture_in_the_engine_and_in_the_old_draw
                         speed: SpeedFactor::new(speed).unwrap(),
                     }),
                     groups: Vec::new(),
+                    masks: Vec::new(),
                     indicator_layout: layout,
                     selected_clip: None,
                 };

@@ -19,7 +19,9 @@ use std::hash::{Hash, Hasher};
 
 use egui::{Rect, pos2, vec2};
 
-use super::{PreviewContent, PreviewGroup, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
+use super::{
+    PreviewContent, PreviewGroup, PreviewLayer, PreviewLayerContent, PreviewMask, SymbolOnThePreview, VideoInThePicture,
+};
 use crate::colour_space::{StandardPrimaries, TransferFunction};
 use crate::cube_table::Interpolation;
 use crate::engine::{
@@ -29,7 +31,7 @@ use crate::engine::{
 };
 use crate::media::{CompressedPicture, ThumbnailKey};
 use crate::playback::{SuppliedFrame, SuppliedPicture, colour_for_the_engine};
-use crate::project::{Corner, PictureOperation, SpeedFactor, SpeedIndicatorLayout, TextObject};
+use crate::project::{Corner, PictureOperation, SpeedFactor, SpeedIndicatorLayout, TextObject, TrackId};
 use crate::rgba_picture::RgbaPicture;
 use crate::speed_indicator::{
     SMALLEST_HEIGHT_IN_PIXELS, indicator_aspect_ratio, place_indicator, render_speed_indicator,
@@ -266,8 +268,28 @@ pub fn describe_frame(
         working: colour.working,
         supply,
     };
-    description.layers = describer.describe_layers(0, content.layers.len(), &content.groups);
+    // (The masks first: an effect that reads one is given its group, and the groups of the masks are described once however many effects read them.)
+    let mask_groups = describer.describe_masks(&content.masks);
+    description.layers = describer.describe_layers(
+        &content.layers,
+        0,
+        content.layers.len(),
+        &content.groups,
+        &mask_groups,
+        content.symbol,
+    );
     description
+}
+
+/// The groups that the masks read at one place of a frame are, by the track each is the picture of: the layers of the track on its own, as a group the size of the frame.
+type MaskGroups = Vec<(TrackId, GroupDescription)>;
+
+/// The group of the mask made of `track` among `mask_groups`, or one with nothing in it (a track that is being made inside itself has nothing: the value is the call's number there).
+fn group_of_the_mask(mask_groups: &[(TrackId, GroupDescription)], track: TrackId) -> GroupDescription {
+    mask_groups
+        .iter()
+        .find(|(found, _)| *found == track)
+        .map_or_else(|| GroupDescription { layers: Vec::new() }, |(_, group)| group.clone())
 }
 
 /// What describing the layers of a frame needs, which is the same for every layer of it and every group.
@@ -282,9 +304,30 @@ struct Describer<'c, 'a, Supply: PictureSupply> {
 }
 
 impl<Supply: PictureSupply> Describer<'_, '_, Supply> {
-    /// The layers `first..end` of the content, the one at the back first, where `groups` are the groups that make a picture of their own inside them (the one that holds another
-    /// first): **a group is a layer made of the layers in it**, with the effects of the group, put over the whole frame. A group that has nothing to show is not there.
-    fn describe_layers(&mut self, first: usize, end: usize, groups: &[PreviewGroup]) -> Vec<LayerDescription> {
+    /// The groups that `masks` are: the layers of each, as the layers of a frame are, with the masks that those layers read described first.
+    fn describe_masks(&mut self, masks: &[PreviewMask<'_>]) -> MaskGroups {
+        masks
+            .iter()
+            .map(|mask| {
+                let inside = self.describe_masks(&mask.masks);
+                let layers = self.describe_layers(&mask.layers, 0, mask.layers.len(), &mask.groups, &inside, None);
+                (mask.track, GroupDescription { layers })
+            })
+            .collect()
+    }
+
+    /// The layers `first..end` of `from` (the layers of the frame, or of a mask), the one at the back first, where `groups` are the groups that make a picture of their own inside them (the
+    /// one that holds another first): **a group is a layer made of the layers in it**, with the effects of the group, put over the whole frame. A group that has nothing to show is not there.
+    /// `mask_groups` are the masks that the effects of these layers read. `symbol` is the fast-forward symbol, which only the layers of the frame have.
+    fn describe_layers(
+        &mut self,
+        from: &[PreviewLayer<'_>],
+        first: usize,
+        end: usize,
+        groups: &[PreviewGroup],
+        mask_groups: &[(TrackId, GroupDescription)],
+        symbol: Option<SymbolOnThePreview>,
+    ) -> Vec<LayerDescription> {
         let mut layers = Vec::new();
         let mut at = first;
         while at < end {
@@ -299,9 +342,11 @@ impl<Supply: PictureSupply> Describer<'_, '_, Supply> {
                     .take_while(|inner| inner.first_layer < group.end_layer)
                     .cloned()
                     .collect();
-                let mut children = self.describe_layers(group.first_layer, group.end_layer, &inside);
+                let mut children =
+                    self.describe_layers(from, group.first_layer, group.end_layer, &inside, mask_groups, symbol);
                 // (A group is a picture the size of the frame already: a transition among its effects needs no group made for it.)
-                let (effects, _) = calls_of_the_operations(&group.operations, self.working, &mut *self.supply);
+                let (effects, _) =
+                    calls_of_the_operations(&group.operations, self.working, &mut *self.supply, mask_groups);
                 if effects.is_empty() {
                     // (A group whose effects do nothing at this frame is pass-through: its layers are drawn into what it is in. What is behind it is black already, if it
                     // is at the frame, so no black is put there.)
@@ -326,7 +371,7 @@ impl<Supply: PictureSupply> Describer<'_, '_, Supply> {
                 at = group.end_layer.max(at + 1);
                 continue;
             }
-            let layer = &self.content.layers[at];
+            let layer = &from[at];
             layers.extend(describe_layer(
                 layer,
                 self.picture_size,
@@ -334,8 +379,9 @@ impl<Supply: PictureSupply> Describer<'_, '_, Supply> {
                 self.colour_of_a_layer_without_a_picture,
                 self.working,
                 self.supply,
+                mask_groups,
             ));
-            if let Some(symbol) = self.content.symbol
+            if let Some(symbol) = symbol
                 && symbol.over == layer.clip
             {
                 layers.extend(describe_symbol(
@@ -360,6 +406,7 @@ fn describe_layer(
     colour_of_a_layer_without_a_picture: [u8; 4],
     working: WorkingSpace,
     supply: &mut impl PictureSupply,
+    mask_groups: &[(TrackId, GroupDescription)],
 ) -> Option<LayerDescription> {
     let corners = corners_of(layer, picture_size);
     // (A text, a symbol and a thumbnail are sRGB. The picture of a video or of a picture file is what its file says, or what the user says, or what is assumed of it: it
@@ -419,7 +466,8 @@ fn describe_layer(
         PreviewLayerContent::Generator => {
             // (Its shader reads no picture and makes one, so what the effects work on is a picture that has nothing in it, the size of the frame, and what they make of it is put where
             // the clip is. A generator whose shader cannot be run, which has no effect that does anything, is nothing.)
-            let (effects, reads_the_backdrop) = calls_of_the_operations(&layer.operations, working, &mut *supply);
+            let (effects, reads_the_backdrop) =
+                calls_of_the_operations(&layer.operations, working, &mut *supply, mask_groups);
             if effects.is_empty() {
                 return None;
             }
@@ -451,7 +499,7 @@ fn describe_layer(
     }
     // A layer's effects are its operations, one call each (the colours that are mixed one after another are one operation already, and the window cuts the
     // colours off once, at the end), unless one changes nothing.
-    let (effects, reads_the_backdrop) = calls_of_the_operations(&layer.operations, working, &mut *supply);
+    let (effects, reads_the_backdrop) = calls_of_the_operations(&layer.operations, working, &mut *supply, mask_groups);
     Some(with_the_transition_done_in_the_frame(
         LayerDescription {
             source: LayerSource::Picture(wanted.id),
@@ -468,11 +516,12 @@ fn calls_of_the_operations(
     operations: &[PictureOperation],
     working: WorkingSpace,
     supply: &mut impl PictureSupply,
+    mask_groups: &[(TrackId, GroupDescription)],
 ) -> (Vec<EffectCall>, Vec<bool>) {
     let mut calls = Vec::with_capacity(operations.len());
     let mut reads_the_backdrop = Vec::with_capacity(operations.len());
     for operation in operations {
-        if let Some(call) = call_of_an_operation(operation, working, supply) {
+        if let Some(call) = call_of_an_operation(operation, working, supply, mask_groups) {
             calls.push(call);
             reads_the_backdrop.push(matches!(
                 operation,
@@ -533,6 +582,7 @@ fn call_of_an_operation(
     operation: &PictureOperation,
     working: WorkingSpace,
     supply: &mut impl PictureSupply,
+    mask_groups: &[(TrackId, GroupDescription)],
 ) -> Option<EffectCall> {
     if operation.changes_nothing() {
         return None;
@@ -559,6 +609,7 @@ fn call_of_an_operation(
             state,
             images,
             reads_the_backdrop: _,
+            masks,
         } => {
             let colour = colour_of_an_imported_image(working);
             let tag = colour_tag_of(colour, working);
@@ -581,7 +632,10 @@ fn call_of_an_operation(
                 table: None,
                 state: state.map(|(id, frame)| EffectState { id, frame }),
                 images: ids,
-                masks: Vec::new(),
+                masks: masks
+                    .iter()
+                    .map(|track| group_of_the_mask(mask_groups, *track))
+                    .collect(),
             }
         }
         PictureOperation::Crop {

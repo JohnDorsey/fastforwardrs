@@ -16,9 +16,12 @@ mod colour;
 mod describe;
 mod section;
 
+#[cfg(test)]
+mod mask_tests;
+
 pub use colour::{colour_of_a_picture_file, colour_of_the_export, colour_of_the_preview, working_space_of};
 pub use describe::{HowToMakeIt, PictureSupply, PictureWanted, SentPictures, TextPictures, describe_frame};
-pub use section::{groups_of_a_section, layers_of_a_section, symbol_of_a_section};
+pub use section::{groups_of_a_section, layers_of_a_section, masks_of_a_section, symbol_of_a_section};
 
 use std::borrow::Cow;
 
@@ -116,6 +119,14 @@ pub struct PreviewGroup {
     pub over_black: bool,
 }
 
+/// A mask that the effects of a frame read (`docs/shader-masks-design.md`): the picture of one track on its own, as layers, with the masks that those layers read.
+pub struct PreviewMask<'a> {
+    pub track: TrackId,
+    pub layers: Vec<PreviewLayer<'a>>,
+    pub groups: Vec<PreviewGroup>,
+    pub masks: Vec<PreviewMask<'a>>,
+}
+
 /// The fast-forward symbol: shown over the layer of this clip, which is the front-most video.
 #[derive(Clone, Copy)]
 pub struct SymbolOnThePreview {
@@ -131,6 +142,8 @@ pub struct PreviewContent<'a> {
     pub layers: Vec<PreviewLayer<'a>>,
     /// The groups that make a picture of their own over some of the layers, the one that holds another first.
     pub groups: Vec<PreviewGroup>,
+    /// The masks that the effects of the layers and the groups read, each once. (The old drawing leaves them out: it cannot draw a shader.)
+    pub masks: Vec<PreviewMask<'a>>,
     /// The symbol of the video that is in front, if that is sped up.
     pub symbol: Option<SymbolOnThePreview>,
     pub indicator_layout: SpeedIndicatorLayout,

@@ -78,6 +78,7 @@ fn a_gain(kind: EffectKind, gain: f32) -> LayerEffect {
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     }
 }
 
@@ -351,6 +352,7 @@ fn a_clap_plugin_that_delays_the_sound_is_made_up_for_in_the_export_and_in_the_p
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     };
     let (plain, _) = by_the_export(&toolchain, &specification_of_a_second_with(Vec::new()), &sources, None);
     let specification = specification_of_a_second_with(vec![delaying]);
@@ -444,6 +446,7 @@ fn a_clip_that_begins_in_the_middle_of_an_echo_has_the_sound_of_playing_through_
             tail_length: Default::default(),
             passes_notes_on: false,
             shared_by: None,
+            driven: Default::default(),
         }
     };
     let host = || Some(a_host_that_runs_everything());
@@ -556,6 +559,7 @@ fn an_echo() -> LayerEffect {
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     }
 }
 

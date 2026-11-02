@@ -141,6 +141,7 @@ fn the_effect_of(plugin: &'static InstalledPlugin) -> LayerEffect {
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     }
 }
 

@@ -23,9 +23,9 @@ use super::plan::ExportPlan;
 use crate::engine::{FrameColour, FrameDescription, PictureData, PictureId};
 use crate::frame_scene::{
     PreviewContent, SentPictures, TextPictures, VideoInThePicture, colour_of_a_picture_file, describe_frame,
-    groups_of_a_section, layers_of_a_section, symbol_of_a_section,
+    groups_of_a_section, layers_of_a_section, masks_of_a_section, symbol_of_a_section,
 };
-use crate::project::{SourceMediaIdentifier, TimelineFrameIndex};
+use crate::project::{ClipId, SourceMediaIdentifier, TimelineFrameIndex};
 use crate::rgba_picture::RgbaPicture;
 
 /// The number that tells the ids of the pictures that are made from files from those of an earlier project (the window changes it when it lets go of what it knows
@@ -145,36 +145,36 @@ impl<'plan, Starter: RunStreamStarter> FrameDescriber<'plan, Starter> {
 
         // The picture of each video of the frame, taken before anything is built from them: they are what the content borrows.
         let mut pictures_of_the_videos = HashMap::new();
-        for (layer, _) in section.video_layers() {
+        // (The videos of the masks too, which are not in the picture when their track's eye is closed: a clip that is in the picture and in a mask is taken once.)
+        for (layer, _) in section.all_video_layers() {
+            if pictures_of_the_videos.contains_key(&layer.clip) {
+                continue;
+            }
             let run = plan
                 .run_of(layer.clip, timeline_frame)
                 .ok_or(FrameProblem::NoRunForAVideo(timeline_frame))?;
             pictures_of_the_videos.insert(layer.clip, self.pictures.picture(run, timeline_frame, cancelled)?);
         }
 
-        // (The layers and the symbol are made from the section by the very functions that the window makes them with.)
+        // (The layers, the masks and the symbol are made from the section by the very functions that the window makes them with.)
+        let picture_of = |clip: ClipId| {
+            VideoInThePicture::Picture(
+                pictures_of_the_videos
+                    .get(&clip)
+                    .expect("a picture was taken for every video"),
+            )
+        };
+        let mut image = |source: SourceMediaIdentifier| {
+            (
+                self.images.get(&source),
+                colour_of_a_picture_file(&plan.images.get(&source).map(|image| image.colour).unwrap_or_default()),
+            )
+        };
         let content = PreviewContent {
             picture_size: Some(self.how.picture_size),
-            layers: layers_of_a_section(
-                section,
-                frame,
-                |layer, _| {
-                    VideoInThePicture::Picture(
-                        pictures_of_the_videos
-                            .get(&layer.clip)
-                            .expect("a picture was taken for every video"),
-                    )
-                },
-                |source| {
-                    (
-                        self.images.get(&source),
-                        colour_of_a_picture_file(
-                            &plan.images.get(&source).map(|image| image.colour).unwrap_or_default(),
-                        ),
-                    )
-                },
-            ),
+            layers: layers_of_a_section(section, frame, |layer, _| picture_of(layer.clip), &mut image),
             groups: groups_of_a_section(section, frame),
+            masks: masks_of_a_section(section, frame, &mut |_, layer, _| picture_of(layer.clip), &mut image),
             symbol: symbol_of_a_section(section),
             indicator_layout: plan.symbol_layout,
             selected_clip: None,

@@ -362,6 +362,7 @@ fn a_section_with_nothing_in_it_has_no_layers_and_no_symbol() {
         end_timeline_frame: 10,
         layers: Vec::new(),
         groups: Vec::new(),
+        masks: Vec::new(),
     };
 
     let layers = layers_of_a_section(

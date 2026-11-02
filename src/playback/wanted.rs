@@ -56,6 +56,18 @@ pub fn wanted_pictures(
         .video_layers()
         .filter_map(|(layer, video)| wanted_picture_of(plan, section_index, timeline_frame.value(), layer, video))
         .collect();
+    // (The videos of the masks too, which no layer shows when the eye of their track is closed. A track that is seen and is a mask is wanted once.)
+    for (in_section, layer, video) in plan.sections[section_index].video_layers_of_the_masks() {
+        if wanted.iter().any(|already| already.track == layer.track) {
+            continue;
+        }
+        wanted.extend(wanted_picture_of_a_mask(
+            in_section,
+            timeline_frame.value(),
+            layer,
+            video,
+        ));
+    }
 
     let horizon = timeline_frame.value().saturating_add(look_ahead_frames);
     for (index, section) in plan.sections.iter().enumerate().skip(section_index + 1) {
@@ -69,6 +81,17 @@ pub fn wanted_pictures(
             wanted.extend(wanted_picture_of(
                 plan,
                 index,
+                section.first_timeline_frame,
+                layer,
+                video,
+            ));
+        }
+        for (in_section, layer, video) in section.video_layers_of_the_masks() {
+            if wanted.iter().any(|already| already.track == layer.track) {
+                continue;
+            }
+            wanted.extend(wanted_picture_of_a_mask(
+                in_section,
                 section.first_timeline_frame,
                 layer,
                 video,
@@ -127,6 +150,27 @@ fn wanted_picture_of(
         range_end_source_frame: SourceFrameIndex::new(range_end_source_frame),
         pictures_left: end_timeline_frame - timeline_frame,
         next_video,
+    })
+}
+
+/// The picture that the video of `layer`, a layer of a mask (`in_section` is the stretch of the mask's track that it is in), needs at `timeline_frame`, a frame of that stretch. The stretch
+/// is the whole of what is asked for: a mask is not looked ahead past, and its stream goes on for as long as the stretch does (the pieces that the section that has the mask is cut into
+/// all have this same stretch of the mask, so nothing makes the stream start again).
+fn wanted_picture_of_a_mask(
+    in_section: &PictureSection,
+    timeline_frame: u64,
+    layer: &Layer,
+    video: &VisibleVideo,
+) -> Option<WantedPicture> {
+    let source_frame = in_section.source_frame_at(video, TimelineFrameIndex::new(timeline_frame))?;
+    Some(WantedPicture {
+        track: layer.track,
+        source: video.source,
+        source_frame: SourceFrameIndex::new(source_frame),
+        speed_factor: video.speed,
+        range_end_source_frame: SourceFrameIndex::new(video.end_source_frame),
+        pictures_left: in_section.end_timeline_frame - timeline_frame,
+        next_video: None,
     })
 }
 
@@ -255,6 +299,120 @@ mod tests {
             vec![(0, video_clip(0, 100, 1))],
         ]);
         assert_eq!(wanted_pictures(&seen, frame(50), 0).len(), 2);
+    }
+
+    /// A shader with a number that has a range: the first, `amount`.
+    const TINT: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"amount\", \"TYPE\": \"float\", \"DEFAULT\": 0.25 } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }\n";
+
+    /// The plan of a project whose tracks (the front one first) are these, each with whether it is hidden, where the effect of the shader on the first clip of the last track reads its
+    /// number from the track at `mask_track`.
+    fn plan_where_the_last_track_reads_a_mask_from(
+        tracks: Vec<(bool, Vec<(u64, Clip)>)>,
+        mask_track: usize,
+    ) -> (PicturePlan, TrackId) {
+        use crate::project::{AnimationTarget, DrivenValue, EffectKind, MaskChannel, Member};
+        let source = SourceMedia::video(
+            VIDEO,
+            SourceMediaLink::from_absolute_path(PathBuf::from("/videos/holiday.mp4")),
+            SourceVideoProperties {
+                frame_rate: FrameRate::from_whole_frames_per_second(30).unwrap(),
+                total_frame_count: 1000,
+                display_width_in_pixels: 640,
+                display_height_in_pixels: 360,
+                has_audio: false,
+            },
+        );
+        let tracks = tracks
+            .into_iter()
+            .enumerate()
+            .map(|(number, (hidden, clips))| {
+                Track::new(TrackId::new(number as u32), "track")
+                    .with_clips(clips)
+                    .with_hidden(hidden)
+            })
+            .collect();
+        let mut project = Project::from_parts(vec![source], tracks, SpeedIndicatorLayout::DEFAULT).unwrap();
+        let host_track = project.tracks().last().unwrap();
+        let host_clip = host_track.placement_at_index(0).unwrap().id;
+        let mask = project.tracks()[mask_track].id();
+        let file = crate::isf::read(TINT).unwrap();
+        let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "tint.fs", TINT)).unwrap();
+        let instance = project.add_effect(AnimationTarget::Clip(host_clip), kind).unwrap();
+        project
+            .set_driven_value(
+                Member::Clip(host_clip),
+                instance,
+                0,
+                Some(DrivenValue::from_a_track(mask, MaskChannel::Red, 0.0)),
+            )
+            .unwrap();
+        (plan_pictures(&project, |_| true), mask)
+    }
+
+    #[test]
+    fn the_video_of_a_hidden_track_that_is_a_mask_is_wanted_as_if_it_were_seen_and_a_track_that_is_both_is_wanted_once()
+    {
+        // A small video in front (the mask), hidden, and a video behind it that an effect reads the mask for.
+        let (plan, mask) = plan_where_the_last_track_reads_a_mask_from(
+            vec![
+                (true, vec![(0, small_video_clip(500, 600))]),
+                (false, vec![(0, video_clip(0, 100, 1))]),
+            ],
+            0,
+        );
+
+        for timeline_frame in [0, 50, 99] {
+            let wanted = wanted_pictures(&plan, frame(timeline_frame), 0);
+            assert_eq!(wanted.len(), 2, "the video behind, and the mask: {wanted:?}");
+            let the_mask = wanted
+                .iter()
+                .find(|picture| picture.track == mask)
+                .expect("the mask is wanted");
+            assert_eq!(the_mask.source_frame, SourceFrameIndex::new(500 + timeline_frame));
+            assert_eq!(the_mask.range_end_source_frame, SourceFrameIndex::new(600));
+            assert_eq!(the_mask.pictures_left, 100 - timeline_frame);
+            assert_eq!(the_mask.next_video, None);
+        }
+        // Seen, the same track is a layer and a mask, and is wanted once.
+        let (seen, mask) = plan_where_the_last_track_reads_a_mask_from(
+            vec![
+                (false, vec![(0, small_video_clip(500, 600))]),
+                (false, vec![(0, video_clip(0, 100, 1))]),
+            ],
+            0,
+        );
+        let wanted = wanted_pictures(&seen, frame(50), 0);
+        assert_eq!(
+            wanted.iter().filter(|picture| picture.track == mask).count(),
+            1,
+            "{wanted:?}"
+        );
+        assert_eq!(wanted.len(), 2);
+    }
+
+    #[test]
+    fn a_mask_that_begins_within_the_look_ahead_on_a_hidden_track_is_wanted_as_its_first_picture() {
+        // The mask is a hidden video from frame 60 to frame 100; the video behind it, which reads it, lasts 100 frames.
+        let (plan, mask) = plan_where_the_last_track_reads_a_mask_from(
+            vec![
+                (true, vec![(60, small_video_clip(500, 540))]),
+                (false, vec![(0, video_clip(0, 100, 1))]),
+            ],
+            0,
+        );
+
+        assert!(
+            wanted_pictures(&plan, frame(10), 0)
+                .iter()
+                .all(|picture| picture.track != mask),
+            "not yet, when not looking ahead"
+        );
+        let ahead = wanted_pictures(&plan, frame(10), 100);
+        let the_mask = ahead
+            .iter()
+            .find(|picture| picture.track == mask)
+            .expect("looked ahead for");
+        assert_eq!(the_mask.source_frame, SourceFrameIndex::new(500), "its first picture");
     }
 
     #[test]

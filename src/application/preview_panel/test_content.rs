@@ -37,6 +37,7 @@ pub fn content(layers: Vec<PreviewLayer<'static>>, selected: Option<u32>) -> Pre
         layers,
         symbol: None,
         groups: Vec::new(),
+        masks: Vec::new(),
         indicator_layout: SpeedIndicatorLayout::DEFAULT,
         selected_clip: selected.map(clip),
     }

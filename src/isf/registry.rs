@@ -11,9 +11,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use super::compile::{CompiledShader, compile_in_a_worker};
+use super::compile::{CompiledShader, compile_in_a_worker, compile_in_a_worker_with_driven_inputs};
 use super::descriptor::key_is_of_the_source;
 use super::reader::{IsfFile, IsfProblem, Shape, read};
+use super::rewrite::DrivenInput;
 use crate::engine::ShaderStructure;
 use crate::project::{EffectDescriptor, ShaderLanguage, ShaderSource};
 
@@ -145,6 +146,60 @@ pub fn compiled_shader_of(descriptor: &EffectDescriptor) -> Option<Made> {
         .or_default()
         .push((source.clone(), Arc::clone(&made)));
     Some(made)
+}
+
+/// The key that the engine has the shader of the effect with key `base_key` under when the numbers `driven` are read from masks (the key of the shader as it is, and which numbers are read
+/// from which mask as which channel).
+pub fn driven_variant_key(base_key: &str, driven: &[DrivenInput]) -> String {
+    let parts: Vec<String> = driven
+        .iter()
+        .map(|one| format!("{}={}:{:?}", one.name, one.mask, one.channel))
+        .collect();
+    format!("{base_key}+masks[{}]", parts.join(","))
+}
+
+/// Makes the shader of `source` with the numbers `driven` read from masks, and puts it on the engine's shelf under `key`.
+fn make_variant(key: &str, source: &ShaderSource, driven: &[DrivenInput]) -> Result<(), Vec<IsfProblem>> {
+    let file = read(&source.text).map_err(|problem| vec![problem])?;
+    let compiled = compile_in_a_worker_with_driven_inputs(&file, driven)?;
+    let structure = compiled.structure.clone()?;
+    structure.check().map_err(|why| {
+        vec![IsfProblem::nowhere_in_particular(format!(
+            "this shader cannot be run yet: {why}"
+        ))]
+    })?;
+    crate::engine::publish_effect_shader_with(key, &compiled.wgsl, structure);
+    Ok(())
+}
+
+/// What was made of each shader that reads masks, by its key: whether it could be made.
+static COMPILED_VARIANTS: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
+
+/// The key under which the engine has the shader of `descriptor` with the numbers `driven` read from masks, made and put on the engine's shelf if it was not yet (the same shader with the
+/// same numbers read from the same masks is made once). `None` if the effect is no ISF shader that this version can run, or if the shader cannot be made that way (the effect then does
+/// nothing, as one that is not installed does).
+pub fn driven_variant_of(descriptor: &EffectDescriptor, driven: &[DrivenInput]) -> Option<String> {
+    let source = descriptor.shader.as_ref()?;
+    if driven.is_empty() || !matches!(compiled_shader_of(descriptor).as_deref(), Some(Ok(_))) {
+        return None;
+    }
+    let key = driven_variant_key(descriptor.key.as_ref(), driven);
+    if let Some(made) = COMPILED_VARIANTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .and_then(|compiled| compiled.get(&key))
+    {
+        return made.then_some(key);
+    }
+    // (Not under the lock, as for a shader that reads no mask.)
+    let made = make_variant(&key, source, driven).is_ok();
+    COMPILED_VARIANTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_with(HashMap::new)
+        .insert(key.clone(), made);
+    made.then_some(key)
 }
 
 /// What the shader of `descriptor` is for, if it is an ISF shader that this version can run (a filter reads `inputImage`; a generator reads no picture; a transition reads `startImage` and `endImage`).

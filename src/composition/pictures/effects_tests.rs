@@ -91,6 +91,7 @@ fn a_layer_has_the_effects_of_its_clip_with_the_values_they_have_when_they_are_n
             tail_length: Default::default(),
             passes_notes_on: false,
             shared_by: None,
+            driven: Default::default(),
         }]
     );
     assert!(!layer.has_keyframes());
@@ -528,6 +529,7 @@ fn what_an_effect_with_several_values_has_at_a_frame_is_what_the_keyframes_of_ea
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     };
 
     assert_eq!(

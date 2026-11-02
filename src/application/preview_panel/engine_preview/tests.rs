@@ -42,6 +42,7 @@ fn content<'a>(layers: Vec<PreviewLayer<'a>>) -> PreviewContent<'a> {
         layers,
         symbol: None,
         groups: Vec::new(),
+        masks: Vec::new(),
         indicator_layout: SpeedIndicatorLayout::DEFAULT,
         selected_clip: None,
     }
@@ -1289,6 +1290,7 @@ fn with_a_state_at(layer: PreviewLayer<'_>, frame_of_the_state: u64) -> PreviewL
             state: Some((9, frame_of_the_state)),
             images: Vec::new(),
             reads_the_backdrop: false,
+            masks: Vec::new(),
         }],
         ..layer
     }

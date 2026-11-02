@@ -146,6 +146,7 @@ fn show_the_preview(ui: &mut egui::Ui, preview: &mut Preview) {
         layers,
         symbol: None,
         groups: Vec::new(),
+        masks: Vec::new(),
         indicator_layout: SpeedIndicatorLayout::DEFAULT,
         selected_clip: None,
     };

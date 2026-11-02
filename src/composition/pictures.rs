@@ -25,9 +25,9 @@ use crate::colour_effects::ColourMatrix;
 use crate::cube_table::CubeTable;
 use crate::project::tracks::{CanvasArea, Clip, ClipId, Placement, TextObject, TrackId};
 use crate::project::{
-    Animation, AnimationTarget, AppliedEffect, EffectInstanceId, EffectKind, FrameRate, GroupId, ImportedPicture,
-    Member, PictureOperation, Project, PropertyId, PropertyValue, ResolvedAnimations, SourceMediaIdentifier,
-    SpeedFactor, TailLength, TimelineFrameIndex, text_object_of_values,
+    Animation, AnimationTarget, AppliedEffect, DrivenValues, EffectInstanceId, EffectKind, FrameRate, GroupId,
+    ImportedPicture, Member, PictureOperation, Project, PropertyId, PropertyValue, ResolvedAnimations,
+    SourceMediaIdentifier, SpeedFactor, TailLength, TimelineFrameIndex, text_object_of_values,
 };
 
 /// The properties that say where a layer is on the picture.
@@ -93,6 +93,16 @@ impl EffectClock {
     }
 }
 
+/// A mask that the effects of a section read: **the picture of one track on its own**, as the plan makes it of the track alone (whether or not the track's eye is open, and without the
+/// effects of the groups it is in), with the masks that its own effects read.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaskPicture {
+    pub track: TrackId,
+    /// The stretch of the timeline, which contains the frames of the section that has the mask and may be longer, over which the track's picture is made of the same layers. (A video that
+    /// the track shows is one range of source frames over the whole of it, however many pieces the section that has it is cut into: nothing makes its stream of pictures start again.)
+    pub section: PictureSection,
+}
+
 /// An effect that is on a layer: one that its clip has, or that its track has, with what its values are and the keyframes of them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayerEffect {
@@ -121,6 +131,9 @@ pub struct LayerEffect {
     /// *one copy for each clip* is one instance for a run of clips (or for the whole track), so the clips of the run have the same number here, and the state that a shader that depends on
     /// earlier frames keeps goes on from one of them to the next. `None`: the state is the clip's own, as it is for the effects of a clip and of a tag.
     pub shared_by: Option<u64>,
+    /// The values of the effect that are read from masks (tracks) instead of from their sliders (`docs/shader-masks-design.md`). They are not animated: the slider's keyframes are not used
+    /// while the value is read from a mask.
+    pub driven: DrivenValues,
 }
 
 impl LayerEffect {
@@ -300,6 +313,30 @@ fn imported_pictures_of(effect: &LayerEffect) -> Vec<ImportedPicture> {
         .collect()
 }
 
+/// The key that the engine has the shader of `effect` under, and the tracks of the masks it reads in the order it numbers them: for a shader whose numbers are all on their sliders, its own
+/// key and none; for one that has a number read from a mask, the key of the shader that does that (made, and given to the engine, if it was not). `None` if that shader cannot be made.
+fn shader_and_masks_of(effect: &LayerEffect) -> Option<(String, Vec<TrackId>)> {
+    if effect.driven.is_empty() {
+        return Some((effect.kind.key().to_owned(), Vec::new()));
+    }
+    let tracks = effect.driven.tracks();
+    let inputs: Vec<crate::isf::DrivenInput> = effect
+        .driven
+        .iter()
+        .filter_map(|(slot, driven)| {
+            Some(crate::isf::DrivenInput {
+                name: effect.kind.parameters().get(slot)?.id.to_string(),
+                mask: tracks
+                    .iter()
+                    .position(|track| driven.source.tracks().any(|source| source == *track))?,
+                channel: driven.channel,
+            })
+        })
+        .collect();
+    let key = crate::isf::driven_variant_of(effect.kind.descriptor(), &inputs)?;
+    Some((key, tracks))
+}
+
 /// What `effects` do to a picture at `timeline_frame`, one after another in the order they are applied in. An effect that does nothing at the frame is left out, and neighbouring
 /// effects that mix colours are one. `seed` is a number that tells what the effects are done to (a clip, or a group) from every other thing: the states of the effects that depend on
 /// earlier frames are told from each other by it.
@@ -323,9 +360,20 @@ pub fn operations_of_effects(
                 clock.frames_at(timeline_frame.value()) as f32,
                 0.0,
             ];
+            // (A number that is read from a mask is the number the call has for it where the mask has nothing: the shader mixes it with what the mask says.)
+            let mut values = values;
+            for (slot, driven) in effect.driven.iter() {
+                if let Some(value) = values.get_mut(slot) {
+                    *value = PropertyValue::Number(driven.value_where_nothing);
+                }
+            }
             numbers.extend(crate::isf::numbers_of_the_values(&values));
+            let Some((key, masks)) = shader_and_masks_of(effect) else {
+                continue;
+            };
             PictureOperation::Shader {
-                key: effect.kind.key().to_owned(),
+                key,
+                masks,
                 numbers,
                 state: effect
                     .kind
@@ -402,9 +450,48 @@ pub struct PictureSection {
     pub layers: Vec<Layer>,
     /// The groups that make a picture of their own over some of the layers, the one that holds another first (see [`GroupSpan`]).
     pub groups: Vec<GroupSpan>,
+    /// The masks that the effects of the layers and of the groups read, each once, in the order they are first read in (`docs/shader-masks-design.md`). The section is cut where a mask
+    /// changes, so that each is the same over the whole of it.
+    pub masks: Vec<MaskPicture>,
 }
 
 impl PictureSection {
+    /// The videos of the layers, and of the layers of the masks, and of the masks of the masks: every video whose pictures are needed to make the picture of the section.
+    pub fn all_video_layers(&self) -> std::vec::IntoIter<(&Layer, &VisibleVideo)> {
+        self.all_video_layers_in_their_sections()
+            .into_iter()
+            .map(|(_, layer, video)| (layer, video))
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    /// The same, each with the section it is a layer of: this one for its own layers, and the stretch of the mask's track for a layer of a mask (which is what the source frames of its video
+    /// are counted from).
+    pub fn all_video_layers_in_their_sections(&self) -> Vec<(&PictureSection, &Layer, &VisibleVideo)> {
+        let mut found: Vec<(&PictureSection, &Layer, &VisibleVideo)> =
+            self.video_layers().map(|(layer, video)| (self, layer, video)).collect();
+        found.extend(self.video_layers_of_the_masks());
+        found
+    }
+
+    /// The videos of the layers of the masks, and of the masks of the masks, each with the stretch of its mask's track it is a layer of: the videos that no layer of the section shows
+    /// when the eye of their track is closed, and that the section needs the pictures of all the same.
+    pub fn video_layers_of_the_masks(&self) -> Vec<(&PictureSection, &Layer, &VisibleVideo)> {
+        self.masks
+            .iter()
+            .flat_map(|mask| mask.section.all_video_layers_in_their_sections())
+            .collect()
+    }
+
+    /// Every layer of the section and of its masks, and of the masks of its masks.
+    pub fn all_layers(&self) -> Vec<&Layer> {
+        let mut found: Vec<&Layer> = self.layers.iter().collect();
+        for mask in &self.masks {
+            found.extend(mask.section.all_layers());
+        }
+        found
+    }
+
     pub fn timeline_frame_count(&self) -> u64 {
         self.end_timeline_frame - self.first_timeline_frame
     }
@@ -565,6 +652,7 @@ pub(crate) fn layer_effect_of(
         tail_length: applied.effect.tail_length(),
         passes_notes_on: applied.effect.passes_notes_on(),
         shared_by: None,
+        driven: applied.effect.driven_values().clone(),
         animation,
         tables: kind
             .parameters()
@@ -622,20 +710,45 @@ fn runs_of_clips_that_share_the_state_of_a_tracks_effects(
     keys
 }
 
+/// Which tracks a plan is made of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Scope {
+    /// The picture of the project: every track whose eye is open, and the effects of the groups.
+    TheSeenTracks,
+    /// The picture of one track on its own, whether or not its eye is open and without the effects of the groups it is in: what a mask made of that track is.
+    OnlyTrack(TrackId),
+}
+
 /// Works out the picture at every frame of the project. A video from a file that is not `usable`
 /// has no pictures, as a video has none where its file has no more.
 pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier) -> bool) -> PicturePlan {
+    plan_pictures_of(project, &is_usable, Scope::TheSeenTracks, &[])
+}
+
+/// The plan of the tracks `scope` says. `making` are the tracks whose pictures are being made, one inside another, as masks: a mask of one of them is not made again (a ring of tracks that
+/// read each other, which a moved clip can make, has nothing at the place where it closes).
+pub(super) fn plan_pictures_of(
+    project: &Project,
+    is_usable: &dyn Fn(SourceMediaIdentifier) -> bool,
+    scope: Scope,
+    making: &[TrackId],
+) -> PicturePlan {
     let picture_size = project.picture_size();
     let animations = project.resolved_animations();
     let applied_effects = project.effects_applied_to_every_clip_by_itself();
-    let group_effects = effects_of_the_groups_that_make_pictures(project, &animations);
+    let group_effects = match scope {
+        Scope::TheSeenTracks => effects_of_the_groups_that_make_pictures(project, &animations),
+        Scope::OnlyTrack(_) => HashMap::new(),
+    };
     let runs = runs_of_clips_that_share_the_state_of_a_tracks_effects(project, &group_effects);
     let mut candidates = Vec::new();
     for (track_position, track) in project.tracks().iter().enumerate() {
         // (A track whose eye is closed has nothing in the picture: no layer, no adjustment, no boundary of a section. Its place in the list of tracks is not changed by that, so the others are
         // where they were. Its sound is not the plan's to say.)
-        if track.is_hidden() {
-            continue;
+        match scope {
+            Scope::TheSeenTracks if track.is_hidden() => continue,
+            Scope::OnlyTrack(only) if track.id() != only => continue,
+            Scope::TheSeenTracks | Scope::OnlyTrack(_) => {}
         }
         for placement in track.placements() {
             let source_frame_count = match placement.clip {
@@ -748,7 +861,7 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
         frame_rate: project.frame_rate(),
         picture_size,
         total_frame_count,
-        sections,
+        sections: masks::with_the_masks_attached(project, is_usable, sections, making),
         frames_missing_a_picture,
     }
 }
@@ -850,6 +963,7 @@ fn sections_between(
             end_timeline_frame: until,
             layers,
             groups,
+            masks: Vec::new(),
         });
     }
     (sections, frames_missing_a_picture)
@@ -922,6 +1036,7 @@ fn runs_on(before: VisibleVideo, frame_count: u64, after: VisibleVideo) -> bool 
 }
 
 mod group_nodes;
+mod masks;
 use group_nodes::{
     Entry, Node, drain_what_is_behind_what_covers, effects_of_the_groups_that_make_pictures, flatten,
     make_the_adjustments_groups, nodes_of,
@@ -943,6 +1058,8 @@ mod group_effects_tests;
 mod hidden_track_tests;
 #[cfg(test)]
 mod imported_tests;
+#[cfg(test)]
+mod mask_tests;
 #[cfg(test)]
 mod operations_tests;
 #[cfg(test)]

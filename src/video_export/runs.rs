@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use crate::composition::{Layer, LayerContent, PicturePlan};
+use crate::composition::{Layer, LayerContent, PicturePlan, PictureSection, VisibleVideo};
 use crate::project::{ClipId, SourceMediaIdentifier, SpeedFactor, TimelineFrameIndex};
 
 /// One clip's video over a stretch of the timeline that is made of whole sections, read by one decode process.
@@ -58,10 +58,10 @@ pub fn find_the_runs(pictures: &PicturePlan, picture_size: (u32, u32)) -> Vec<Vi
     // The latest run of each clip, which the clip's video in a later section may go on.
     let mut latest_of_each_clip: HashMap<ClipId, usize> = HashMap::new();
     for section in &pictures.sections {
-        for layer in &section.layers {
-            let LayerContent::Video(video) = &layer.content else {
-                continue;
-            };
+        // (The videos of the masks too, with their source frames counted from the first frame of this section, as those of its own layers are: a mask is one stretch of its track's
+        // picture that the section may be a piece of.)
+        for (layer, video) in videos_of_a_section_from_its_first_frame(section) {
+            let video = &video;
             let goes_on = latest_of_each_clip.get(&layer.clip).copied().filter(|&index| {
                 let so_far = &found[index];
                 // (It was seen in the section before this one: the run ends where this section begins. A clip that was hidden for a while is not read on from where it
@@ -113,6 +113,30 @@ pub fn find_the_runs(pictures: &PicturePlan, picture_size: (u32, u32)) -> Vec<Vi
         .collect()
 }
 
+/// The videos of the layers of `section` and of its masks, each with its layer, with the source frames of each counted from the first frame of `section`, which a layer of a mask has
+/// counted from the first frame of the stretch of its own track that it is in (a clip that is in the picture and in a mask is one video: it comes once).
+fn videos_of_a_section_from_its_first_frame(section: &PictureSection) -> Vec<(&Layer, VisibleVideo)> {
+    let mut found: Vec<(&Layer, VisibleVideo)> = section.video_layers().map(|(layer, video)| (layer, *video)).collect();
+    for (in_section, layer, video) in section.video_layers_of_the_masks() {
+        if found.iter().any(|(already, _)| already.clip == layer.clip) {
+            continue;
+        }
+        let behind = section.first_timeline_frame - in_section.first_timeline_frame;
+        let speed = u64::from(video.speed.value());
+        let first_source_frame = video.first_source_frame + behind * speed;
+        found.push((
+            layer,
+            VisibleVideo {
+                first_source_frame,
+                end_source_frame: (first_source_frame + section.timeline_frame_count() * speed)
+                    .min(video.end_source_frame),
+                ..*video
+            },
+        ));
+    }
+    found
+}
+
 impl RunSoFar<'_> {
     /// The source frame that the picture after the last one of the run so far is of: where a section that goes on with the run begins.
     fn end_source_frame_of_whole_pictures(&self) -> u64 {
@@ -151,7 +175,7 @@ pub(super) fn largest_box_of_an_image(
     pictures
         .sections
         .iter()
-        .flat_map(|section| section.layers.iter().map(move |layer| (section, layer)))
+        .flat_map(|section| section.all_layers().into_iter().map(move |layer| (section, layer)))
         .filter(|(_, layer)| matches!(&layer.content, LayerContent::Image { source: found } if *found == source))
         .map(|(section, layer)| {
             largest_box_over(

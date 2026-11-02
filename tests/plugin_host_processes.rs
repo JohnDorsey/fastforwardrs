@@ -114,6 +114,7 @@ fn an_effect(kind: EffectKind, values: Vec<PropertyValue>, state: Option<&[u8]>)
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     }
 }
 

@@ -77,6 +77,7 @@ fn a_gain(kind: EffectKind, gain: f32) -> LayerEffect {
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     }
 }
 

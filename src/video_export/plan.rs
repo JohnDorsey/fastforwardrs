@@ -185,7 +185,8 @@ pub fn plan_export_of_the_files_that_can_be_read(
     let mut used_sources: BTreeSet<SourceMediaIdentifier> = sound_sources.clone();
     let mut videos = BTreeMap::new();
     let mut image_sources = BTreeSet::new();
-    for layer in pictures.sections.iter().flat_map(|section| &section.layers) {
+    // (The layers of the masks too: a video or a picture that is only a mask is read, and sent, like any other.)
+    for layer in pictures.sections.iter().flat_map(|section| section.all_layers()) {
         match &layer.content {
             LayerContent::Video(video) => {
                 used_sources.insert(video.source);

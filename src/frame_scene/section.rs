@@ -8,7 +8,7 @@
 //! What the two do not share is passed in: what shows where a video is (the window may have only a thumbnail of it yet, or nothing; the export always has the
 //! picture) and the decoded picture of an image file.
 
-use super::{PreviewGroup, PreviewLayer, PreviewLayerContent, SymbolOnThePreview, VideoInThePicture};
+use super::{PreviewGroup, PreviewLayer, PreviewLayerContent, PreviewMask, SymbolOnThePreview, VideoInThePicture};
 use crate::composition::{Layer, LayerContent, PictureSection, VisibleVideo};
 use crate::engine::PictureColour;
 use crate::project::{SourceMediaIdentifier, TimelineFrameIndex};
@@ -50,6 +50,32 @@ pub fn layers_of_a_section<'a>(
                 // (Never: an adjustment clip is a group of what is behind it, and is not a layer of a section.)
                 LayerContent::Adjustment => unreachable!("an adjustment clip is not a layer of a section"),
             },
+        })
+        .collect()
+}
+
+/// The masks of `section` as they are at `frame` (a frame of the section): the layers of each, as [`layers_of_a_section`] makes them, and the masks those layers read. `video` and `image` are
+/// asked for the layers of the masks as they are for those of the section; `video` is also told which section of the plan the layer is in (the stretch of the mask's track that has
+/// the frame), which is what a video's source frames are counted from.
+pub fn masks_of_a_section<'a>(
+    section: &'a PictureSection,
+    frame: TimelineFrameIndex,
+    video: &mut dyn FnMut(&PictureSection, &Layer, &VisibleVideo) -> VideoInThePicture<'a>,
+    image: &mut dyn FnMut(SourceMediaIdentifier) -> (Option<&'a RgbaPicture>, PictureColour),
+) -> Vec<PreviewMask<'a>> {
+    section
+        .masks
+        .iter()
+        .map(|mask| PreviewMask {
+            track: mask.track,
+            layers: layers_of_a_section(
+                &mask.section,
+                frame,
+                |layer, visible| video(&mask.section, layer, visible),
+                &mut *image,
+            ),
+            groups: groups_of_a_section(&mask.section, frame),
+            masks: masks_of_a_section(&mask.section, frame, &mut *video, &mut *image),
         })
         .collect()
 }

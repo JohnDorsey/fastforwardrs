@@ -173,6 +173,7 @@ fn one_clap_plugin_of_a_library_on_a_clip_for_the_driver() {
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     };
     let specification_from =
         |first_source_frame: u64, frames: u64, effects: Vec<LayerEffect>| SoundGraphSpecification {

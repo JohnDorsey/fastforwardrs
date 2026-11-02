@@ -76,6 +76,7 @@ fn an_effect(kind: EffectKind, values: Vec<PropertyValue>) -> LayerEffect {
         tail_length: Default::default(),
         passes_notes_on: false,
         shared_by: None,
+        driven: Default::default(),
     }
 }
 
