@@ -369,3 +369,26 @@ fn a_graph_that_has_no_room_among_the_numbers_of_the_shader_is_refused() {
 
     assert!(reason.contains("no room"), "{reason}");
 }
+
+#[test]
+fn an_effect_with_many_values_and_no_graph_is_not_refused_for_want_of_room() {
+    // (Found 2026-11-02: a plugin with hundreds of values was refused by the check of room for graphs.)
+    let mut project = edited_project(link_to_missing_video());
+    let clip = project.tracks()[0].placement_at_index(0).unwrap().id;
+    let kind = {
+        let floats: Vec<String> = (0..60)
+            .map(|number| format!("{{ \"NAME\": \"p{number}\", \"TYPE\": \"float\", \"MIN\": 0.0, \"MAX\": 1.0 }}"))
+            .collect();
+        let text = format!(
+            "/*{{ \"INPUTS\": [ {{ \"NAME\": \"inputImage\", \"TYPE\": \"image\" }}, {} ] }}*/\nvoid main() {{ gl_FragColor = IMG_THIS_PIXEL(inputImage); }}\n",
+            floats.join(", ")
+        );
+        let file = crate::isf::read(&text).unwrap();
+        EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "huge.fs", &text)).unwrap()
+    };
+    project
+        .add_effect(crate::project::AnimationTarget::Clip(clip), kind)
+        .unwrap();
+
+    assert!(project_from_json_text(&saved(&project)).is_ok());
+}

@@ -217,7 +217,8 @@ impl Effect {
             .iter()
             .filter(|(_, one)| matches!(one.map, MaskMap::Graph(_)))
             .count();
-        self.numbers_of_a_call_with_graphs(graphs) <= crate::isf::MOST_NUMBERS_OF_A_CALL
+        // (An effect with no graph has nothing to fit: a plugin with hundreds of values is not a shader whose call has 64 numbers.)
+        graphs == 0 || self.numbers_of_a_call_with_graphs(graphs) <= crate::isf::MOST_NUMBERS_OF_A_CALL
     }
 
     /// How many numbers a call of the effect has if `graphs` of its values are mapped by a graph: the four of the shader's own, those of the values, and the points of the graphs.
