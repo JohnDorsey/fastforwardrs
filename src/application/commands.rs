@@ -169,6 +169,11 @@ pub enum Command {
         track: TrackId,
         muted: bool,
     },
+    /// Open or close the eye of a track, after its title: a track that is hidden has none of its pictures in the picture (its sound is as it was).
+    SetTrackHidden {
+        track: TrackId,
+        hidden: bool,
+    },
     /// Take a track, and everything on it, out of the project (from the menu of its title box).
     DeleteTrack(TrackId),
     /// Put a copy of a track, with all its clips and everything in all its drawers, right in front of it or right behind it
@@ -517,6 +522,7 @@ impl Command {
             | Self::SetTrackSpeed { .. }
             | Self::SetTrackGain { .. }
             | Self::SetTrackMuted { .. }
+            | Self::SetTrackHidden { .. }
             | Self::SetTrackHeight { .. }
             | Self::NewTextObject { .. }
             | Self::NewAdjustmentClip { .. }
@@ -658,6 +664,7 @@ impl Command {
             | Self::SetTrackTitle { .. }
             | Self::SetTrackGain { .. }
             | Self::SetTrackMuted { .. }
+            | Self::SetTrackHidden { .. }
             | Self::DeleteTrack(_)
             | Self::DuplicateTrack { .. }
             | Self::MoveTrack { .. }
@@ -982,6 +989,10 @@ mod tests {
             Command::SetTrackHeight {
                 track: TrackId::new(0),
                 height: TrackHeight::DEFAULT,
+            },
+            Command::SetTrackHidden {
+                track: TrackId::new(0),
+                hidden: true,
             },
             Command::SetTextObject {
                 clip: clip(0),

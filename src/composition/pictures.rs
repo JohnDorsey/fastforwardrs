@@ -632,6 +632,11 @@ pub fn plan_pictures(project: &Project, is_usable: impl Fn(SourceMediaIdentifier
     let runs = runs_of_clips_that_share_the_state_of_a_tracks_effects(project, &group_effects);
     let mut candidates = Vec::new();
     for (track_position, track) in project.tracks().iter().enumerate() {
+        // (A track whose eye is closed has nothing in the picture: no layer, no adjustment, no boundary of a section. Its place in the list of tracks is not changed by that, so the others are
+        // where they were. Its sound is not the plan's to say.)
+        if track.is_hidden() {
+            continue;
+        }
         for placement in track.placements() {
             let source_frame_count = match placement.clip {
                 Clip::Video(media) if is_usable(media.source()) => {
@@ -934,6 +939,8 @@ mod effects_tests;
 mod generator_tests;
 #[cfg(test)]
 mod group_effects_tests;
+#[cfg(test)]
+mod hidden_track_tests;
 #[cfg(test)]
 mod imported_tests;
 #[cfg(test)]

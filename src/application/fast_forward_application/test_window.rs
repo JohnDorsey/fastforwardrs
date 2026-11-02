@@ -21,7 +21,9 @@ use crate::application::commands::Command;
 use crate::application::file_chooser::ScriptedFileChooser;
 use crate::application::preview_panel::EnginePreview;
 use crate::application::theme;
-use crate::application::timeline_panel::{GripDotArrangement, VERTICES_IN_A_GRIP_DOT, strip_label};
+use crate::application::timeline_panel::{
+    GripDotArrangement, HIDE_TRACK_LABEL, SHOW_TRACK_LABEL, VERTICES_IN_A_GRIP_DOT, strip_label,
+};
 use crate::engine::testing::{SoftwareGraphics, software_graphics};
 use crate::engine::{AdapterChoice, Engine, EngineSettings};
 use crate::media::ToolchainError;
@@ -746,14 +748,28 @@ impl Window {
         self.text_field_showing(&self.title_of_track(position)).rect()
     }
 
-    /// The whole box at the left of the track at `position`: the title in it has the same room again at each side, and
-    /// it is as tall as the strip.
+    /// The whole box at the left of the track at `position`: the title in it has room at its left, the box is as wide as the boxes are
+    /// (the eye is at the right end of the title's line, so the title's right edge says nothing of the box's), and it is as tall as the strip.
     pub(super) fn box_of_track(&self, position: usize) -> Rect {
         let (title, strip) = (self.title_box_of_track(position), self.strip_of_track(position));
+        let left = title.left() - 8.0;
         Rect::from_min_max(
-            Pos2::new(title.left() - 8.0, strip.top()),
-            Pos2::new(title.right() + 8.0, strip.bottom()),
+            Pos2::new(left, strip.top()),
+            Pos2::new(left + theme::TRACK_HEADER_WIDTH, strip.bottom()),
         )
+    }
+
+    /// The eye in the box of the track at `position`, open (it is called "Hide track": that is what it does) or closed ("Show track").
+    pub(super) fn eye_of_track(&self, position: usize) -> Rect {
+        let strip = self.strip_of_track(position);
+        let found: Vec<Rect> = [HIDE_TRACK_LABEL, SHOW_TRACK_LABEL]
+            .into_iter()
+            .flat_map(|label| self.harness.query_all_by_label(label))
+            .map(|node| node.rect())
+            .filter(|rectangle| rectangle.center().y > strip.top() && rectangle.center().y < strip.bottom())
+            .collect();
+        assert_eq!(found.len(), 1, "one eye in the box of track {position}: {found:?}");
+        found[0]
     }
 
     /// Where, on screen, the start of timeline frame `frame` is along the strip of the track at

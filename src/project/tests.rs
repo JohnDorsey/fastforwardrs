@@ -707,6 +707,45 @@ fn restoring_an_earlier_copy_brings_back_the_heights_of_the_tracks() {
 }
 
 #[test]
+fn a_track_is_seen_until_it_is_hidden_and_hiding_it_changes_nothing_else_and_one_that_is_not_there_is_an_error() {
+    let mut project = project_with_a_video(300);
+    let track = project.tracks()[0].id();
+    assert!(
+        !project.track(track).unwrap().is_hidden(),
+        "a track begins by being seen"
+    );
+    let before = project.clone();
+
+    project.set_track_hidden(track, true).unwrap();
+    assert!(project.track(track).unwrap().is_hidden());
+    assert_ne!(project, before, "the eye is a part of what the project is");
+    // Nothing but the eye changed: the track is the same when it is seen again.
+    project.set_track_hidden(track, false).unwrap();
+    assert_eq!(project, before);
+
+    assert_eq!(
+        project.set_track_hidden(TrackId::new(99), true),
+        Err(EditError::UnknownTrack {
+            track: TrackId::new(99)
+        })
+    );
+}
+
+#[test]
+fn restoring_an_earlier_copy_brings_back_a_track_that_was_seen_and_one_that_was_hidden() {
+    let mut project = project_with_a_video(300);
+    let track = project.tracks()[0].id();
+    let seen = project.clone();
+    project.set_track_hidden(track, true).unwrap();
+    let hidden = project.clone();
+
+    project.restore(seen);
+    assert!(!project.track(track).unwrap().is_hidden());
+    project.restore(hidden);
+    assert!(project.track(track).unwrap().is_hidden());
+}
+
+#[test]
 fn clips_on_different_tracks_can_be_moved_in_one_go() {
     let mut project = project_with_a_video(300);
     project.import_source(audio_source(2, 10), frame(0)).unwrap();

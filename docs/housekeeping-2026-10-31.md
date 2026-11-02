@@ -67,7 +67,7 @@ The locked tree needs **Rust 1.95** (egui, epaint, emath, egui-wgpu, egui_kittes
 
 ## 7. What is left for the maintainer
 
-* `tests/surge_xt_in_a_process_real.rs` still has the fork's uncommitted knobs (`SURGE_SCENE_MODE`, `SURGE_PROGRAM`): theirs, not touched.
+* ~~`tests/surge_xt_in_a_process_real.rs` still has the fork's uncommitted knobs (`SURGE_SCENE_MODE`, `SURGE_PROGRAM`)~~ **discarded on 2026-11-01** (the maintainer's word: the crash is fixed upstream, so the experiment is over); the diff was kept outside the repository.
 * The 52 dependency updates (section 5), if wanted.
 * The leak of test bundles (section 6): `.tmp*` folders in `%TEMP%` that hold a `test.lv2` can be deleted when no test is running.
 * The Windows runners (section 3): nothing to change here; if the times matter, a later run will show whether they came back.

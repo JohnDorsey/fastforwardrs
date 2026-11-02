@@ -187,6 +187,8 @@ mod text_object_tests;
 #[cfg(test)]
 mod tidying_tests;
 #[cfg(test)]
+mod track_eye_tests;
+#[cfg(test)]
 mod track_height_tests;
 #[cfg(test)]
 mod track_reorder_tests;

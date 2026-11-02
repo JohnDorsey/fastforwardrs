@@ -1051,6 +1051,12 @@ impl Project {
         Ok(())
     }
 
+    /// Opens or closes the eye of a track: a track that is hidden has none of its pictures in the picture of the project (its sound is the same).
+    pub fn set_track_hidden(&mut self, track: TrackId, hidden: bool) -> Result<(), EditError> {
+        self.track_mut_or_error(track)?.set_hidden(hidden);
+        Ok(())
+    }
+
     /// Makes the row of a track on the timeline taller or shorter.
     pub fn set_track_height(&mut self, track: TrackId, height: TrackHeight) -> Result<(), EditError> {
         self.track_mut_or_error(track)?.set_height(height);

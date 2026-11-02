@@ -241,6 +241,10 @@ pub(super) struct TrackDocument {
     /// How much faster than normal everything on the track plays, on top of each clip's own speed.
     pub speed_factor: SpeedFactor,
     pub muted: bool,
+    /// Whether the pictures of the track are left out of the picture of the project: the eye of its box is closed (format 23 and after). Left out for a track that is seen, and in the
+    /// files of earlier versions.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
     /// How tall the row of the track is on the timeline. Left out for a track of the normal
     /// height, and in the files of versions before 4, which had no heights.
     #[serde(default = "normal_height_in_points", skip_serializing_if = "is_the_normal_height")]

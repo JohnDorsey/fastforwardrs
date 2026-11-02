@@ -5,6 +5,7 @@
 //! box (or its title) selects the track, which is not the clips on it: the settings of the track are then
 //! shown in the properties panel. Right-clicking the box (or its title) opens a menu to put a copy of the track above it or
 //! below it, and to delete it.
+//! The eye at the right end of the line of the title (see [`super::eye`]) opens and closes: a track whose eye is closed is hidden, which leaves its pictures out of the picture of the project.
 //! Dragging the box up or down moves the track to another place in the list (see [`super::track_reordering`]),
 //! and so does dragging the title up or down: dragging it along (sideways) selects the text, as it does in any
 //! text box. The grip dots on the top of the box say that it can be dragged.
@@ -13,9 +14,10 @@
 //! meet with nothing notched between them.
 
 use egui::{
-    Button, CornerRadius, Rect, Response, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, WidgetInfo, pos2,
+    Button, CornerRadius, Rect, Response, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, WidgetInfo, pos2, vec2,
 };
 
+use super::eye;
 use super::grip_dots::{self, Arrangement};
 use crate::application::commands::Command;
 use crate::application::selection::{Selection, SelectionChange};
@@ -50,6 +52,13 @@ const CORNERS: CornerRadius = CornerRadius {
     ne: 0,
     se: 0,
 };
+
+/// What the eye in the box of a track is called while it is open (clicking it hides the track) and while it is closed (clicking it shows the track).
+pub const HIDE_TRACK_LABEL: &str = "Hide track";
+pub const SHOW_TRACK_LABEL: &str = "Show track";
+
+/// How much room there is between the title and the eye after it, in points.
+const GAP_BEFORE_THE_EYE: f32 = 4.0;
 
 /// What the menu of the box of a track offers to delete.
 pub const DELETE_TRACK_LABEL: &str = "Delete track";
@@ -195,9 +204,14 @@ pub(super) fn show(
     let lowest_middle = (header_rectangle.bottom() - MARGIN_BELOW_THE_TITLE - TITLE_HEIGHT / 2.0).max(highest_middle);
     let middle_y = header_rectangle.center().y.clamp(highest_middle, lowest_middle);
 
+    // The eye is at the right end of the line of the title, and the title has the room that is left.
+    let eye_centre_x = header_rectangle.right() - MARGIN - eye::SIZE / 2.0;
     let title_rectangle = Rect::from_min_max(
         pos2(header_rectangle.left() + MARGIN, middle_y - TITLE_HEIGHT / 2.0),
-        pos2(header_rectangle.right() - MARGIN, middle_y + TITLE_HEIGHT / 2.0),
+        pos2(
+            eye_centre_x - eye::SIZE / 2.0 - GAP_BEFORE_THE_EYE,
+            middle_y + TITLE_HEIGHT / 2.0,
+        ),
     );
 
     // (The box is made in a child of its own, so that putting it here does not move the place the
@@ -226,6 +240,38 @@ pub(super) fn show(
         commands.push(Command::SetTrackTitle {
             track: track.id(),
             title,
+        });
+    }
+
+    // (The eye is level with the title as it is drawn: the box of a title is shorter than the row it is put in, and is at the top of it.)
+    let eye_rectangle = Rect::from_center_size(
+        pos2(eye_centre_x, title_response.rect.center().y),
+        vec2(eye::SIZE, eye::SIZE),
+    );
+    let hidden = track.is_hidden();
+    let (label, hint) = if hidden {
+        (
+            SHOW_TRACK_LABEL,
+            "This track is hidden: its pictures are not in the picture (its sound is as it was). Click to show it.",
+        )
+    } else {
+        (
+            HIDE_TRACK_LABEL,
+            "Hide this track: its pictures are left out of the picture (its sound is not changed).",
+        )
+    };
+    let eye = eye::show(
+        ui,
+        eye_rectangle,
+        ui.id().with(("eye of track", track.id())),
+        hidden,
+        can_edit,
+        (label, hint),
+    );
+    if eye.clicked() {
+        commands.push(Command::SetTrackHidden {
+            track: track.id(),
+            hidden: !hidden,
         });
     }
 

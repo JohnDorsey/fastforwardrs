@@ -108,6 +108,10 @@ impl Track {
         self.muted = muted;
     }
 
+    pub fn set_hidden(&mut self, hidden: bool) {
+        self.hidden = hidden;
+    }
+
     /// Says how much of the track one instance of its effects covers (phase 12). The rules about groups are the project's to check: see `Project::set_track_sharing`.
     pub fn set_sharing(&mut self, sharing: EffectSharing) {
         self.sharing = sharing;

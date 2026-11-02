@@ -232,6 +232,7 @@ fn a_track_is_copied_above_or_below_itself_with_everything_on_it_and_in_its_draw
     project.set_track_title(front, "captions").unwrap();
     project.set_track_gain(front, Gain::from_decibels(-3.0)).unwrap();
     project.set_track_muted(front, true).unwrap();
+    project.set_track_hidden(front, true).unwrap();
     project.set_track_height(front, TrackHeight::from_points(60.0)).unwrap();
     project.set_track_speed(front, SpeedFactor::new(2).unwrap()).unwrap();
 
@@ -245,6 +246,7 @@ fn a_track_is_copied_above_or_below_itself_with_everything_on_it_and_in_its_draw
     assert_eq!(copied.title(), "captions copy");
     assert_eq!(copied.gain(), Gain::from_decibels(-3.0));
     assert!(copied.is_muted());
+    assert!(copied.is_hidden(), "a copy of a track that is hidden is hidden");
     assert_eq!(copied.height(), TrackHeight::from_points(60.0));
     assert_eq!(copied.speed(), SpeedFactor::new(2).unwrap());
     assert_eq!(copied.entries().len(), 1);

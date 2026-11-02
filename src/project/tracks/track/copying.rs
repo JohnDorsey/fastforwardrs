@@ -64,6 +64,7 @@ impl Track {
             gain: self.gain,
             speed: self.speed,
             muted: self.muted,
+            hidden: self.hidden,
             height: self.height,
             drawer: Drawer::default(),
             effects: self.effects.clone(),

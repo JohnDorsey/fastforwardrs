@@ -239,6 +239,58 @@ fn write_screenshots_of_tracks_sound_and_text() {
         .save_project_to(folder.join("demo.fastforwardrs.json"));
 }
 
+/// Clicks the eye in the box of the track at `position`, open or closed.
+fn click_the_eye_of_track(journey: &mut Journey, position: usize) {
+    let strip = journey.strip_of_track(position);
+    let eye = ["Hide track", "Show track"]
+        .into_iter()
+        .flat_map(|label| journey.harness.query_all_by_label(label))
+        .map(|node| node.rect())
+        .find(|rectangle| rectangle.center().y > strip.top() && rectangle.center().y < strip.bottom())
+        .expect("the box of the track has an eye");
+    journey.click(eye.center());
+    journey.settle();
+}
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_tracks_with_open_and_closed_eyes() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let video = colourful_video(&toolchain, &folder);
+    let sound = pulsing_sound(&toolchain, &folder);
+    let mut journey = Journey::importing(&toolchain, &video);
+    journey.import(&sound);
+    journey.add_a_track();
+    journey.make_a_text_object_at(0, 30);
+    journey.move_playhead_to_frame(60);
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "30_three_tracks_with_open_eyes");
+
+    // The track with the text is hidden: the text is gone from the picture, and the eye is closed.
+    click_the_eye_of_track(&mut journey, 0);
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "31_the_track_with_the_text_hidden");
+
+    // The video is hidden too: nothing is left but black, and the sound goes on.
+    click_the_eye_of_track(&mut journey, 2);
+    journey.wait_until_idle();
+    save(&mut journey, &folder, "32_the_video_hidden_as_well");
+
+    // A hovered eye, and a hovered closed one.
+    let hovered = journey.strip_of_track(2);
+    let eye = journey
+        .harness
+        .query_all_by_label("Show track")
+        .map(|node| node.rect())
+        .find(|rectangle| rectangle.center().y > hovered.top() && rectangle.center().y < hovered.bottom())
+        .unwrap();
+    journey.move_pointer_to(eye.center());
+    journey.settle();
+    save(&mut journey, &folder, "33_a_closed_eye_under_the_pointer");
+}
+
 #[test]
 #[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
 fn write_screenshots_of_many_tracks_and_missing_files() {

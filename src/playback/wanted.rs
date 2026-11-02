@@ -192,6 +192,11 @@ mod tests {
 
     /// A project whose tracks (the front one first) have these clips, each with the empty frames before it.
     fn plan_of(tracks: Vec<Vec<(u64, Clip)>>) -> PicturePlan {
+        plan_of_tracks_that_are_seen_or_hidden(tracks.into_iter().map(|clips| (false, clips)).collect())
+    }
+
+    /// The same, each track with whether it is hidden (its eye is closed).
+    fn plan_of_tracks_that_are_seen_or_hidden(tracks: Vec<(bool, Vec<(u64, Clip)>)>) -> PicturePlan {
         let source = SourceMedia::video(
             VIDEO,
             SourceMediaLink::from_absolute_path(PathBuf::from("/videos/holiday.mp4")),
@@ -206,9 +211,11 @@ mod tests {
         let tracks = tracks
             .into_iter()
             .enumerate()
-            .map(|(number, clips)| {
+            .map(|(number, (hidden, clips))| {
                 crate::test_support::with_the_text_effect_on_every_text(
-                    Track::new(TrackId::new(number as u32), "track").with_clips(clips),
+                    Track::new(TrackId::new(number as u32), "track")
+                        .with_clips(clips)
+                        .with_hidden(hidden),
                 )
             })
             .collect();
@@ -226,6 +233,28 @@ mod tests {
     /// Timeline: clip 0 = frames 0..100 (1x), clip 1 = 100..150 (200 source frames at 4x).
     fn two_clips() -> PicturePlan {
         plan_of(vec![vec![(0, video_clip(0, 100, 1)), (0, video_clip(100, 300, 4))]])
+    }
+
+    #[test]
+    fn nothing_is_wanted_of_a_video_on_a_hidden_track_and_the_video_behind_it_is_wanted_as_if_it_were_alone() {
+        // A small video in front, hidden, and a video behind it that fills the picture: only the one behind is asked of the decoder, at every frame of the front one too.
+        let plan = plan_of_tracks_that_are_seen_or_hidden(vec![
+            (true, vec![(0, small_video_clip(500, 600))]),
+            (false, vec![(0, video_clip(0, 100, 1))]),
+        ]);
+
+        for timeline_frame in [0, 50, 99] {
+            let wanted = wanted_pictures(&plan, frame(timeline_frame), 0);
+            assert_eq!(wanted.len(), 1, "one video: {wanted:?}");
+            assert_eq!(wanted[0].track, TrackId::new(1), "the one behind");
+            assert_eq!(wanted[0].source_frame, SourceFrameIndex::new(timeline_frame));
+        }
+        // Seen, the same two are both asked for (so that it is the eye that makes the difference).
+        let seen = plan_of(vec![
+            vec![(0, small_video_clip(500, 600))],
+            vec![(0, video_clip(0, 100, 1))],
+        ]);
+        assert_eq!(wanted_pictures(&seen, frame(50), 0).len(), 2);
     }
 
     #[test]

@@ -26,6 +26,7 @@ mod clip_menu;
 mod clip_shape;
 mod clips;
 mod drawers;
+mod eye;
 mod flash;
 mod grip_dots;
 mod group_edges;
@@ -69,7 +70,9 @@ pub use grip_dots::{Arrangement as GripDotArrangement, draw as draw_grip_dots};
 #[cfg(test)]
 pub use group_title_bars::HEIGHT as HEIGHT_OF_A_GROUP_TITLE_BAR;
 #[cfg(test)]
-pub use header::{HEIGHT_THE_BOX_NEEDS, TITLE_HEIGHT as HEIGHT_OF_THE_ROOM_FOR_A_TITLE};
+pub use header::{
+    HEIGHT_THE_BOX_NEEDS, HIDE_TRACK_LABEL, SHOW_TRACK_LABEL, TITLE_HEIGHT as HEIGHT_OF_THE_ROOM_FOR_A_TITLE,
+};
 #[cfg(test)]
 pub use rack_dragging::NOT_ENOUGH_SPACE_MESSAGE;
 pub use rack_look::grain_image as grain_of_the_racks;

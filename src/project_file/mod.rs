@@ -138,7 +138,10 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 ///
 /// **Version 22 added `passes_notes_on` to an effect** (phase 13, piece 13.5): `true` for a synthesizer that passes the notes that reach it on to the next one (left out when it does not, which is how it
 /// is put on). A file of version 21 has none: every synthesizer in it consumes the notes.
-pub const FILE_FORMAT_VERSION: u32 = 22;
+///
+/// **Version 23 added `hidden` to a track**: `true` for a track whose eye is closed, so that none of its pictures are in the picture of the project (left out when the track is seen, which is how a track is
+/// made). Its sound is as it was. A file of version 22 has none: all its tracks are seen.
+pub const FILE_FORMAT_VERSION: u32 = 23;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -1042,6 +1045,7 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             gain_decibels,
             speed_factor,
             muted,
+            hidden,
             height_in_points,
             animation,
             drawer,
@@ -1066,6 +1070,7 @@ fn project_from_document(document: ProjectDocument) -> Result<Project, ProjectFi
             .with_gain(gain_decibels)
             .with_speed(speed_factor)
             .with_muted(muted)
+            .with_hidden(hidden)
             .with_height(TrackHeight::from_points(height_in_points))
             .with_sharing(EffectSharing {
                 picture: sharing.picture,
@@ -1279,6 +1284,7 @@ fn document_from_project(project: &Project, project_directory: &Path) -> Result<
                 gain_decibels: track.gain(),
                 speed_factor: track.speed(),
                 muted: track.is_muted(),
+                hidden: track.is_hidden(),
                 height_in_points: track.height().points(),
                 animation: AnimationDocument::default(),
                 drawer: racks_of(AnimationTarget::Track(track.id()), track.drawer())?,
@@ -1524,3 +1530,5 @@ mod shader_tests;
 mod tests;
 #[cfg(test)]
 mod text_effect_tests;
+#[cfg(test)]
+mod track_visibility_tests;

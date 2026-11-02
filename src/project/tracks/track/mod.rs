@@ -116,6 +116,9 @@ pub struct Track {
     gain: Gain,
     speed: SpeedFactor,
     muted: bool,
+    /// Whether the track's pictures are left out of the picture of the project (the eye of its box is closed). Only what is seen: the sound of the track is the same, and so is
+    /// everything the track holds.
+    hidden: bool,
     /// How tall the track's row is on the timeline. (A way of looking at the track, not part of
     /// what it plays: it is saved with the project because it is something that was arranged.)
     height: TrackHeight,
@@ -213,6 +216,7 @@ impl Track {
             gain: Gain::UNCHANGED,
             speed: SpeedFactor::NORMAL,
             muted: false,
+            hidden: false,
             height: TrackHeight::DEFAULT,
             drawer: Drawer::default(),
             effects: Effects::none(),
@@ -296,6 +300,12 @@ impl Track {
     }
 
     #[must_use]
+    pub fn with_hidden(mut self, hidden: bool) -> Self {
+        self.hidden = hidden;
+        self
+    }
+
+    #[must_use]
     pub fn with_height(mut self, height: TrackHeight) -> Self {
         self.height = height;
         self
@@ -326,6 +336,11 @@ impl Track {
 
     pub fn is_muted(&self) -> bool {
         self.muted
+    }
+
+    /// Whether the pictures of the track are left out of the picture of the project (the eye of its box is closed). The sound of a hidden track is as it was.
+    pub fn is_hidden(&self) -> bool {
+        self.hidden
     }
 
     /// How much of the track one instance of its effects covers (phase 12).

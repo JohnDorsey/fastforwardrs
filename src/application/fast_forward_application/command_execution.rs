@@ -215,6 +215,9 @@ impl FastForwardApplication {
             Command::SetTrackMuted { track, muted } => {
                 self.set_muted_at_the_playhead(AnimationTarget::Track(track), muted, now);
             }
+            Command::SetTrackHidden { track, hidden } => {
+                let _ = self.document.project.set_track_hidden(track, hidden);
+            }
             Command::SetTrackHeight { track, height } => {
                 let _ = self.document.project.set_track_height(track, height);
             }
