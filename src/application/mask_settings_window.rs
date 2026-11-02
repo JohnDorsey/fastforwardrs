@@ -12,11 +12,11 @@ use egui::{Align2, ComboBox, Context, Grid, Id, Slider, SliderClamping, Window, 
 use super::commands::Command;
 use super::mask_graph;
 use crate::project::{
-    DrivenValue, EffectInstanceId, Graph, MaskChannel, MaskMap, MaskSource, Member, Project, PropertyValue, TrackId,
+    DrivenValue, EffectInstanceId, Graph, GroupKind, MaskChannel, MaskMap, MaskSource, Member, Project, PropertyValue,
 };
 
 /// What the lines of the window are called.
-pub const TRACK_LABEL: &str = "Track";
+pub const TRACK_LABEL: &str = "Source";
 pub const CHANNEL_LABEL: &str = "Channel";
 pub const VALUE_WHERE_NOTHING_LABEL: &str = "Where the track has nothing";
 pub const USE_THE_SLIDER_AGAIN_LABEL: &str = "Use the slider again";
@@ -25,7 +25,7 @@ pub const STRAIGHT_LINE_AGAIN_LABEL: &str = "Straight line again";
 pub const REAL_BACKDROP_LABEL: &str = "Transitions see the real backdrop";
 
 /// What the box of the track says while no track is chosen.
-pub const NO_TRACK_CHOSEN_LABEL: &str = "Choose a track";
+pub const NO_TRACK_CHOSEN_LABEL: &str = "Choose a track or a group";
 
 /// What is said under the lines while the number is not read from a mask.
 pub const NOT_READ_FROM_A_MASK_NOTE: &str =
@@ -62,11 +62,29 @@ pub fn title_for(label: &str) -> String {
     format!("Mask for {label}")
 }
 
-/// What a track is called in the window.
-fn name_of_a_track(project: &Project, track: TrackId) -> String {
-    project
-        .track(track)
-        .map_or_else(|| format!("{track}"), |found| found.title().to_owned())
+/// The sources that a mask can be made of, with what each is called in the list: the tracks, then the clip groups and the track groups.
+fn sources_to_choose_from(project: &Project) -> Vec<(MaskSource, String)> {
+    let mut sources: Vec<(MaskSource, String)> = project
+        .tracks()
+        .iter()
+        .map(|track| (MaskSource::Track(track.id()), track.title().to_owned()))
+        .collect();
+    for group in project.groups() {
+        match group.kind() {
+            GroupKind::ClipGroup => sources.push((
+                MaskSource::ClipGroup(group.id()),
+                format!("{} (clip group)", group.name()),
+            )),
+            GroupKind::TrackGroup => {
+                sources.push((
+                    MaskSource::TrackGroup(group.id()),
+                    format!("{} (track group)", group.name()),
+                ));
+            }
+            GroupKind::Tag => {}
+        }
+    }
+    sources
 }
 
 /// Shows the window of `open_for`, if there is one and the effect is still in the project, and adds a command for a change made in it. The window closes (`open_for` becomes `None`) when
@@ -110,19 +128,18 @@ pub fn show(context: &Context, open_for: &mut Option<WhichValue>, project: &Proj
                 .spacing([24.0, 8.0])
                 .show(ui, |ui| {
                     ui.label(TRACK_LABEL);
-                    let chosen = driven.map(|driven| match driven.source {
-                        MaskSource::Track(track) => track,
-                    });
-                    ComboBox::from_id_salt(("the track of a mask", which.instance, which.slot))
+                    let chosen = driven.map(|driven| driven.source);
+                    ComboBox::from_id_salt(("the source of a mask", which.instance, which.slot))
                         .selected_text(chosen.map_or_else(
                             || NO_TRACK_CHOSEN_LABEL.to_owned(),
-                            |track| name_of_a_track(project, track),
+                            |source| project.name_of_the_source(source),
                         ))
                         .show_ui(ui, |ui| {
-                            for track in project.tracks() {
-                                let id = track.id();
-                                let name = track.title().to_owned();
-                                let loops = project.a_mask_made_of_this_track_would_loop(which.owner, id);
+                            for (id, name) in sources_to_choose_from(project) {
+                                let loops = project
+                                    .tracks_of_the_source(id)
+                                    .into_iter()
+                                    .any(|track| project.a_mask_made_of_this_track_would_loop(which.owner, track));
                                 let text = if loops {
                                     format!("{name} {WOULD_BE_MADE_FROM_ITSELF_NOTE}")
                                 } else {
@@ -136,7 +153,7 @@ pub fn show(context: &Context, open_for: &mut Option<WhichValue>, project: &Proj
                                 {
                                     // (The first time a track is chosen the number is read as brightness, and where the track has nothing it is what the slider says now.)
                                     commands.push(set(DrivenValue {
-                                        source: MaskSource::Track(id),
+                                        source: id,
                                         channel: driven.map_or(MaskChannel::Brightness, |driven| driven.channel),
                                         value_where_nothing: driven
                                             .map_or(slider_now, |driven| driven.value_where_nothing),

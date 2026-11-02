@@ -189,6 +189,7 @@ impl Project {
                 }
             }
             project.groups.retain(|found| found.id() != group);
+            project.let_go_of_the_masks_made_of_groups_that_are_gone();
             project.drop_the_empty_groups();
             Ok(())
         })

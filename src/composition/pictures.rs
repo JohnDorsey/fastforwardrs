@@ -17,7 +17,7 @@
 
 use std::borrow::Cow;
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
@@ -729,6 +729,9 @@ pub(super) enum Scope {
     TheSeenTracks,
     /// The picture of one track on its own, whether or not its eye is open and without the effects of the groups it is in: what a mask made of that track is.
     OnlyTrack(TrackId),
+    /// The picture that a clip group or a track group makes of its own, whether or not the eyes of its tracks are open: the layers of the clips in it, with the effects of the clips, of their
+    /// tracks, of the group and of the groups in it, and **not** of the groups it is in. What a mask made of that group is.
+    OnlyGroup(GroupId),
 }
 
 /// Works out the picture at every frame of the project. A video from a file that is not `usable`
@@ -749,8 +752,13 @@ pub(super) fn plan_pictures_of(
     let animations = project.resolved_animations();
     let applied_effects = project.effects_applied_to_every_clip_by_itself();
     let group_effects = match scope {
-        Scope::TheSeenTracks => effects_of_the_groups_that_make_pictures(project, &animations),
+        Scope::TheSeenTracks | Scope::OnlyGroup(_) => effects_of_the_groups_that_make_pictures(project, &animations),
         Scope::OnlyTrack(_) => HashMap::new(),
+    };
+    // (The clips that a group's picture is made of; none are left out for a plan of tracks.)
+    let clips_of_the_group: Option<HashSet<ClipId>> = match scope {
+        Scope::OnlyGroup(group) => Some(project.clips_in(group).into_iter().collect()),
+        Scope::TheSeenTracks | Scope::OnlyTrack(_) => None,
     };
     let runs = runs_of_clips_that_share_the_state_of_a_tracks_effects(project, &group_effects);
     let mut candidates = Vec::new();
@@ -760,9 +768,15 @@ pub(super) fn plan_pictures_of(
         match scope {
             Scope::TheSeenTracks if track.is_hidden() => continue,
             Scope::OnlyTrack(only) if track.id() != only => continue,
-            Scope::TheSeenTracks | Scope::OnlyTrack(_) => {}
+            Scope::TheSeenTracks | Scope::OnlyTrack(_) | Scope::OnlyGroup(_) => {}
         }
         for placement in track.placements() {
+            if clips_of_the_group
+                .as_ref()
+                .is_some_and(|clips| !clips.contains(&placement.id))
+            {
+                continue;
+            }
             let source_frame_count = match placement.clip {
                 Clip::Video(media) if is_usable(media.source()) => {
                     project.frame_count_of_source(media.source()).unwrap_or(0)
@@ -825,11 +839,21 @@ pub(super) fn plan_pictures_of(
                 // that its keyframes do not make the picture different at every frame, which makes the export slower.)
                 effects: effects_of_the_picture.0,
                 text: effects_of_the_picture.1,
-                shapes: project
-                    .shapes_round_the_clip_outermost_first(placement.id)
-                    .into_iter()
-                    .filter(|shape| group_effects.contains_key(shape))
-                    .collect(),
+                shapes: {
+                    let round_it = project.shapes_round_the_clip_outermost_first(placement.id);
+                    // (The picture of a group is made without the groups that it is in: they are cut off at the group.)
+                    let inside = match scope {
+                        Scope::OnlyGroup(group) => round_it
+                            .iter()
+                            .position(|shape| *shape == group)
+                            .map_or_else(|| round_it.clone(), |at| round_it[at..].to_vec()),
+                        Scope::TheSeenTracks | Scope::OnlyTrack(_) => round_it,
+                    };
+                    inside
+                        .into_iter()
+                        .filter(|shape| group_effects.contains_key(shape))
+                        .collect()
+                },
             });
         }
     }

@@ -4,6 +4,9 @@
 //! A value of an effect that is read from a **mask** instead of from its slider (`docs/shader-masks-design.md`): what the mask is made of, which channel of its colour gives the
 //! value, and the number the value is where the mask has nothing. The slider of the value is kept (with its keyframes) and is not used while the value is driven.
 
+use std::collections::HashSet;
+
+use crate::project::groups::GroupId;
 use crate::project::tracks::TrackId;
 
 mod graph;
@@ -13,18 +16,24 @@ pub use graph::{Graph, LEAST_DISTANCE_BETWEEN_PLACES, MOST_POINTS_OF_A_GRAPH, NU
 
 /// What a mask is made of: where the picture that a value is read from comes from.
 ///
-/// **Only a track for now**: the picture of the track is what its clips make, with the effects of the clips and of the track, whether or not the track's eye is open. (A contiguous group
-/// of clips, a group of tracks and a layer that is not on a track are to come, as other kinds of source.)
+/// * **A track**: what its clips make, with the effects of the clips and of the track, whether or not the track's eye is open.
+/// * **A clip group** or **a track group**: what the clips in it make (for a track group, the clips on its tracks), with the effects of the clips, of their tracks and of **the group itself and
+///   the groups in it**, but not of the groups that it is in. (The picture that the group makes of its own, as the picture of the project shows it, without what is round it.)
+///
+/// A layer that is not on a track is not a kind of source: the eye of a track does what it was thought of for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MaskSource {
     Track(TrackId),
+    ClipGroup(GroupId),
+    TrackGroup(GroupId),
 }
 
 impl MaskSource {
-    /// The tracks whose clips the source's picture is made of.
-    pub fn tracks(self) -> impl Iterator<Item = TrackId> {
+    /// The group that the source is, if it is one.
+    pub fn group(self) -> Option<GroupId> {
         match self {
-            Self::Track(track) => std::iter::once(track),
+            Self::Track(_) => None,
+            Self::ClipGroup(group) | Self::TrackGroup(group) => Some(group),
         }
     }
 }
@@ -200,17 +209,15 @@ impl DrivenValues {
         uses
     }
 
-    /// The tracks that any of the values is read from, each once, in the order they are first met in.
-    pub fn tracks(&self) -> Vec<TrackId> {
-        let mut tracks: Vec<TrackId> = Vec::new();
+    /// The sources that any of the values is read from, each once, in the order they are first met in.
+    pub fn sources(&self) -> Vec<MaskSource> {
+        let mut sources: Vec<MaskSource> = Vec::new();
         for (_, driven) in &self.values {
-            for track in driven.source.tracks() {
-                if !tracks.contains(&track) {
-                    tracks.push(track);
-                }
+            if !sources.contains(&driven.source) {
+                sources.push(driven.source);
             }
         }
-        tracks
+        sources
     }
 
     /// The same, without any value that is read from the track `track` (what happens to a value whose track is gone, if the project is to have no such value).
@@ -221,7 +228,20 @@ impl DrivenValues {
                 .values
                 .iter()
                 .copied()
-                .filter(|(_, driven)| !driven.source.tracks().any(|found| found == track))
+                .filter(|(_, driven)| driven.source != MaskSource::Track(track))
+                .collect(),
+        }
+    }
+
+    /// The same, without any value that is read from a group that is not among `groups` (what happens to a value whose group is gone).
+    #[must_use]
+    pub fn without_the_groups_not_among(&self, groups: &HashSet<GroupId>) -> Self {
+        Self {
+            values: self
+                .values
+                .iter()
+                .copied()
+                .filter(|(_, driven)| driven.source.group().is_none_or(|group| groups.contains(&group)))
                 .collect(),
         }
     }

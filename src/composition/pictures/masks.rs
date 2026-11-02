@@ -32,16 +32,15 @@ fn masks_read_by(section: &PictureSection) -> Vec<MaskUse> {
     masks
 }
 
-/// The track that a source is the picture of. (Only a track for now.)
-fn track_of(source: MaskSource) -> TrackId {
-    let MaskSource::Track(track) = source;
-    track
-}
-
-/// How many of the layers of `section`, from the back, are behind the track `track` in the frame: those of the tracks that are after it in the project's list (the layers go from the back
-/// to the front, and the tracks from the front to the back).
-fn layers_behind(project: &Project, section: &PictureSection, track: TrackId) -> usize {
-    let Some(place) = project.track_position(track) else {
+/// How many of the layers of `section`, from the back, are behind the source in the frame: those of the tracks that are after all the source's tracks in the project's list (the layers go
+/// from the back to the front, and the tracks from the front to the back).
+fn layers_behind(project: &Project, section: &PictureSection, source: MaskSource) -> usize {
+    let Some(place) = project
+        .tracks_of_the_source(source)
+        .into_iter()
+        .filter_map(|track| project.track_position(track))
+        .max()
+    else {
         return 0;
     };
     section
@@ -97,15 +96,19 @@ pub(super) fn with_the_masks_attached(
     let mut plans: HashMap<MaskSource, PicturePlan> = HashMap::new();
     for section in &sections {
         for used in masks_read_by(section) {
-            let track = track_of(used.source);
-            if plans.contains_key(&used.source) || making.contains(&track) || project.track(track).is_none() {
+            let tracks = project.tracks_of_the_source(used.source);
+            if plans.contains_key(&used.source)
+                || tracks.iter().any(|track| making.contains(track))
+                || !project.a_source_is_there(used.source)
+            {
                 continue;
             }
-            let inside: Vec<TrackId> = making.iter().copied().chain([track]).collect();
-            plans.insert(
-                used.source,
-                plan_pictures_of(project, is_usable, Scope::OnlyTrack(track), &inside),
-            );
+            let inside: Vec<TrackId> = making.iter().copied().chain(tracks).collect();
+            let scope = match used.source {
+                MaskSource::Track(track) => Scope::OnlyTrack(track),
+                MaskSource::ClipGroup(group) | MaskSource::TrackGroup(group) => Scope::OnlyGroup(group),
+            };
+            plans.insert(used.source, plan_pictures_of(project, is_usable, scope, &inside));
         }
     }
     if plans.is_empty() {
@@ -146,7 +149,7 @@ pub(super) fn with_the_masks_attached(
                         .section_at(TimelineFrameIndex::new(from))
                         .map(|mask| MaskPicture {
                             which: *used,
-                            layers_behind: layers_behind(project, &section, track_of(used.source)),
+                            layers_behind: layers_behind(project, &section, used.source),
                             section: mask.clone(),
                         })
                 })

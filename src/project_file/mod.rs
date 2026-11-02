@@ -153,7 +153,10 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 ///
 /// **Version 26 added `real_backdrop` to a `driven` number**: `false` when the transitions among the effects of the clips of the source are done over nothing and not over the tracks behind it
 /// in the frame (written only when it is `false`; a number is read with the real backdrop when it is not said). A file of version 25 has none: every number sees the real backdrop.
-pub const FILE_FORMAT_VERSION: u32 = 26;
+///
+/// **Version 27 added two kinds of source to a `driven` number**: `{ "clip_group": n }` and `{ "track_group": n }`, where `n` is the place of the group in the file's list of groups, from 0, and
+/// the group is of that kind. A file where the group is not there or is of the other kind is refused. A file of version 26 has only `{ "track": n }`.
+pub const FILE_FORMAT_VERSION: u32 = 27;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;

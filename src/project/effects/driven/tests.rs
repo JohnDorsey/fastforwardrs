@@ -19,7 +19,7 @@ fn a_value_that_is_read_from_a_track_says_which_and_how_and_what_it_is_where_the
     assert_eq!(driven.channel, MaskChannel::Brightness);
     assert_eq!(driven.value_where_nothing, 0.25);
     assert!(driven.is_well_formed());
-    assert_eq!(driven.source.tracks().collect::<Vec<_>>(), [track(3)]);
+    assert_eq!(driven.source, MaskSource::Track(track(3)));
 }
 
 #[test]
@@ -115,8 +115,15 @@ fn the_tracks_the_values_are_read_from_are_each_named_once_in_the_order_they_are
     ])
     .unwrap();
 
-    assert_eq!(values.tracks(), [track(5), track(2), track(9)]);
-    assert!(DrivenValues::none().tracks().is_empty());
+    assert_eq!(
+        values.sources(),
+        [
+            MaskSource::Track(track(5)),
+            MaskSource::Track(track(2)),
+            MaskSource::Track(track(9))
+        ]
+    );
+    assert!(DrivenValues::none().sources().is_empty());
 }
 
 #[test]
@@ -154,5 +161,5 @@ fn a_value_sees_the_real_backdrop_until_it_is_said_otherwise_and_two_settings_of
         [seeing.mask_use(), not_seeing.mask_use()],
         "the third reads the first's mask: the same track, the same setting"
     );
-    assert_eq!(values.tracks(), [track(3)], "and it is one track");
+    assert_eq!(values.sources(), [MaskSource::Track(track(3))], "and it is one source");
 }

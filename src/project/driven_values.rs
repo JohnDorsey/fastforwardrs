@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 use super::groups::EffectOwner;
 use super::tracks::TrackId;
-use super::{DrivenValue, EditError, EffectInstanceId, InconsistentProject, Member, Project};
+use super::{DrivenValue, EditError, EffectInstanceId, InconsistentProject, MaskSource, Member, Project};
 
 impl Project {
     /// Reads the value in place `slot` of the effect named `instance` in the chain of `owner` from a mask, as `driven` says, or from its slider again (`None`). Its slider and its
@@ -44,13 +44,23 @@ impl Project {
             {
                 return Err(EditError::ValueCannotBeDriven { reason });
             }
-            for source in driven.source.tracks() {
-                if self.track(source).is_none() {
-                    return Err(EditError::UnknownTrack { track: source });
+            match driven.source {
+                MaskSource::Track(track) if self.track(track).is_none() => {
+                    return Err(EditError::UnknownTrack { track });
                 }
-                if self.a_mask_made_of_this_track_would_loop(owner, source) {
-                    return Err(EditError::MaskWouldReadItself { track: source });
+                MaskSource::ClipGroup(group) | MaskSource::TrackGroup(group)
+                    if !self.a_source_is_there(driven.source) =>
+                {
+                    return Err(EditError::UnknownGroup { group });
                 }
+                _ => {}
+            }
+            if let Some(track) = self
+                .tracks_of_the_source(driven.source)
+                .into_iter()
+                .find(|track| self.a_mask_made_of_this_track_would_loop(owner, *track))
+            {
+                return Err(EditError::MaskWouldReadItself { track });
             }
         }
         let chain = self
@@ -76,6 +86,67 @@ impl Project {
         members
     }
 
+    /// Whether the project has the thing that `source` is: the track, or a group of the kind that the source says.
+    pub fn a_source_is_there(&self, source: MaskSource) -> bool {
+        match source {
+            MaskSource::Track(track) => self.track(track).is_some(),
+            MaskSource::ClipGroup(group) => self
+                .group(group)
+                .is_some_and(|found| found.kind() == super::GroupKind::ClipGroup),
+            MaskSource::TrackGroup(group) => self
+                .group(group)
+                .is_some_and(|found| found.kind() == super::GroupKind::TrackGroup),
+        }
+    }
+
+    /// What a source is called: the title of a track, the name of a group.
+    pub fn name_of_the_source(&self, source: MaskSource) -> String {
+        match source {
+            MaskSource::Track(track) => self
+                .track(track)
+                .map_or_else(|| format!("{track}"), |found| found.title().to_owned()),
+            MaskSource::ClipGroup(group) | MaskSource::TrackGroup(group) => self
+                .group(group)
+                .map_or_else(|| "a group".to_owned(), |found| found.name().to_owned()),
+        }
+    }
+
+    /// The tracks whose clips the picture of `source` is made of: the track itself, the tracks that the clips of a clip group are on, the tracks of a track group (and those that the clips in
+    /// it are on), each once.
+    pub fn tracks_of_the_source(&self, source: MaskSource) -> Vec<TrackId> {
+        let mut tracks: Vec<TrackId> = Vec::new();
+        let mut add = |track: TrackId| {
+            if !tracks.contains(&track) {
+                tracks.push(track);
+            }
+        };
+        match source {
+            MaskSource::Track(track) => add(track),
+            MaskSource::ClipGroup(group) | MaskSource::TrackGroup(group) => {
+                for track in self.tracks_in(group) {
+                    add(track);
+                }
+                for clip in self.clips_in(group) {
+                    if let Some(track) = self.track_holding(clip) {
+                        add(track.id());
+                    }
+                }
+            }
+        }
+        tracks
+    }
+
+    /// Takes every value of every effect that is read from a group that is not in the project any more off its mask. (What is done when a group is gone: nothing is left that reads a group
+    /// that is not there.)
+    pub(in crate::project) fn let_go_of_the_masks_made_of_groups_that_are_gone(&mut self) {
+        let known: HashSet<super::GroupId> = self.groups().iter().map(|group| group.id()).collect();
+        for member in self.everything_that_has_effects() {
+            if let Some(chain) = self.chain_of_the_member_mut(member) {
+                chain.let_go_of_the_groups_not_among(&known);
+            }
+        }
+    }
+
     /// Takes every value of every effect that is read from the track `track` off its mask: it reads its slider again. (What is done when the track is deleted: nothing is left that reads
     /// a track that is not there.)
     pub(super) fn let_go_of_the_masks_made_of(&mut self, track: TrackId) {
@@ -96,13 +167,18 @@ impl Project {
                 .into_iter()
                 .flat_map(|chain| chain.iter())
             {
-                if let Some(track) = effect
-                    .driven_values()
-                    .tracks()
-                    .into_iter()
-                    .find(|track| !known.contains(track))
-                {
-                    return Some(InconsistentProject::ValueReadFromAnUnknownTrack { track });
+                for source in effect.driven_values().sources() {
+                    match source {
+                        MaskSource::Track(track) if !known.contains(&track) => {
+                            return Some(InconsistentProject::ValueReadFromAnUnknownTrack { track });
+                        }
+                        MaskSource::ClipGroup(group) | MaskSource::TrackGroup(group)
+                            if !self.a_source_is_there(source) =>
+                        {
+                            return Some(InconsistentProject::ValueReadFromAnUnknownGroup { group });
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -172,9 +248,11 @@ impl Project {
                 .into_iter()
                 .flat_map(|chain| chain.iter())
             {
-                for source in effect.driven_values().tracks() {
-                    if !tracks.contains(&source) {
-                        tracks.push(source);
+                for source in effect.driven_values().sources() {
+                    for read in self.tracks_of_the_source(source) {
+                        if !tracks.contains(&read) {
+                            tracks.push(read);
+                        }
                     }
                 }
             }

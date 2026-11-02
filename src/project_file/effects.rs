@@ -25,7 +25,7 @@ use super::{legacy_effects, value_document_of, value_from_document};
 use crate::project::tracks::TrackId;
 use crate::project::{
     ChainEntry, ChoiceOption, DrivenValue, DrivenValues, Effect, EffectDescriptor, EffectDomain, EffectInstanceId,
-    EffectKind, Effects, Graph, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING,
+    EffectKind, Effects, Graph, GroupId, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING,
     MOST_IMAGES_A_SHADER_BRINGS, MOST_POINTS_OF_A_GRAPH, MaskChannel, MaskMap, MaskSource, ParameterControl,
     ParameterDescriptor, Project, ShaderImage, ShaderLanguage, ShaderSource, TailLength, UnknownFields, ValueKind,
     ValueScale,
@@ -206,6 +206,10 @@ fn is_the_real_backdrop_by_default() -> bool {
 pub(super) enum MaskSourceDocument {
     /// A track, by its place in the file's list of tracks.
     Track(u32),
+    /// A clip group, by its place in the file's list of groups (format 27 and after).
+    ClipGroup(u32),
+    /// A track group, by its place in the file's list of groups (format 27 and after).
+    TrackGroup(u32),
 }
 
 /// Which part of the colour of a mask is the value, as a file says it.
@@ -537,7 +541,11 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
                 "the value \"{id}\" of the {kind} effect cannot be read from a mask: {reason}"
             ));
         }
-        let MaskSourceDocument::Track(track) = one.source;
+        let source = match one.source {
+            MaskSourceDocument::Track(track) => MaskSource::Track(TrackId::new(track)),
+            MaskSourceDocument::ClipGroup(group) => MaskSource::ClipGroup(GroupId::new(group)),
+            MaskSourceDocument::TrackGroup(group) => MaskSource::TrackGroup(GroupId::new(group)),
+        };
         let map = match one.graph {
             None => MaskMap::Straight,
             Some(points) => {
@@ -553,7 +561,7 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
         driven.push((
             u8::try_from(slot).map_err(|_| format!("the {kind} effect has too many values"))?,
             DrivenValue {
-                source: MaskSource::Track(TrackId::new(track)),
+                source,
                 channel: one.channel.into(),
                 value_where_nothing: one.where_nothing,
                 map,
@@ -653,12 +661,22 @@ pub(super) fn effect_documents_of(effects: &Effects, project: &Project) -> Vec<E
                     .iter()
                     .filter_map(|(slot, one)| {
                         let id = kind.parameters().get(slot)?.id.to_string();
-                        let MaskSource::Track(track) = one.source;
-                        let place = project.track_position(track)?;
+                        let place_of_a_group = |group| project.groups().iter().position(|found| found.id() == group);
+                        let source = match one.source {
+                            MaskSource::Track(track) => {
+                                MaskSourceDocument::Track(u32::try_from(project.track_position(track)?).ok()?)
+                            }
+                            MaskSource::ClipGroup(group) => {
+                                MaskSourceDocument::ClipGroup(u32::try_from(place_of_a_group(group)?).ok()?)
+                            }
+                            MaskSource::TrackGroup(group) => {
+                                MaskSourceDocument::TrackGroup(u32::try_from(place_of_a_group(group)?).ok()?)
+                            }
+                        };
                         Some((
                             id,
                             DrivenDocument {
-                                source: MaskSourceDocument::Track(u32::try_from(place).ok()?),
+                                source,
                                 channel: one.channel.into(),
                                 where_nothing: one.value_where_nothing,
                                 real_backdrop: one.real_backdrop,

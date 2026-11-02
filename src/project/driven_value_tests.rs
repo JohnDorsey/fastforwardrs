@@ -139,7 +139,10 @@ fn two_numbers_of_one_effect_may_be_read_from_different_tracks() {
         MaskSource::Track(last)
     );
     let effect = project.chain_of_the_member(owner).unwrap().iter().next().unwrap();
-    assert_eq!(effect.driven_values().tracks(), [middle, last]);
+    assert_eq!(
+        effect.driven_values().sources(),
+        [MaskSource::Track(middle), MaskSource::Track(last)]
+    );
 }
 
 #[test]
@@ -567,4 +570,144 @@ fn a_graph_has_room_among_the_numbers_of_a_shader_that_is_not_full_and_not_among
     );
     let allowed = project.set_driven_value(owner, full, 0, from(middle, MaskChannel::Red, 0.5));
     assert_eq!(allowed, Ok(()));
+}
+
+// --- a clip group or a track group as the source
+
+fn read_from_a_source(source: MaskSource) -> Option<DrivenValue> {
+    Some(DrivenValue {
+        source,
+        ..DrivenValue::from_a_track(TrackId::new(0), MaskChannel::Red, 0.5)
+    })
+}
+
+/// Three tracks (the front one first) with a clip each, a clip group of the clips of the middle and the back, and a track group of the middle and the back, one in each of two projects.
+fn a_project_with_a_group_of_the_two_back_tracks(kind: GroupKind) -> (Project, GroupId, [TrackId; 3], [ClipId; 3]) {
+    let (mut project, tracks, clips) = three_tracks();
+    let members = match kind {
+        GroupKind::TrackGroup => vec![Member::Track(tracks[1]), Member::Track(tracks[2])],
+        _ => vec![Member::Clip(clips[1]), Member::Clip(clips[2])],
+    };
+    let group = project.create_group(kind, &members).unwrap();
+    (project, group, tracks, clips)
+}
+
+#[test]
+fn a_number_can_be_read_from_a_clip_group_and_from_a_track_group_and_the_tracks_of_the_source_are_the_tracks_it_is_made_of()
+ {
+    for (kind, source_of) in [
+        (GroupKind::ClipGroup, MaskSource::ClipGroup as fn(GroupId) -> MaskSource),
+        (GroupKind::TrackGroup, MaskSource::TrackGroup),
+    ] {
+        let (mut project, group, [_, middle, back], [host, ..]) = a_project_with_a_group_of_the_two_back_tracks(kind);
+        let (owner, instance) = with_a_shader_on(&mut project, host);
+
+        let result = project.set_driven_value(owner, instance, AMOUNT, read_from_a_source(source_of(group)));
+
+        assert_eq!(result, Ok(()), "{kind:?}");
+        assert_eq!(
+            driven_of(&project, owner, instance, AMOUNT).unwrap().source,
+            source_of(group)
+        );
+        assert_eq!(
+            project.tracks_of_the_source(source_of(group)),
+            [middle, back],
+            "{kind:?}"
+        );
+        assert!(project.a_source_is_there(source_of(group)));
+        assert_eq!(
+            project.name_of_the_source(source_of(group)),
+            project.group(group).unwrap().name()
+        );
+    }
+}
+
+#[test]
+fn a_group_of_the_other_kind_or_a_group_that_is_not_there_is_not_a_source() {
+    let (mut project, group, _, [host, ..]) = a_project_with_a_group_of_the_two_back_tracks(GroupKind::ClipGroup);
+    let (owner, instance) = with_a_shader_on(&mut project, host);
+
+    let wrong_kind = project.set_driven_value(
+        owner,
+        instance,
+        AMOUNT,
+        read_from_a_source(MaskSource::TrackGroup(group)),
+    );
+    let none_there = project.set_driven_value(
+        owner,
+        instance,
+        AMOUNT,
+        read_from_a_source(MaskSource::ClipGroup(GroupId::new(99))),
+    );
+
+    assert!(
+        matches!(wrong_kind, Err(EditError::UnknownGroup { .. })),
+        "{wrong_kind:?}"
+    );
+    assert!(
+        matches!(none_there, Err(EditError::UnknownGroup { .. })),
+        "{none_there:?}"
+    );
+    assert_eq!(driven_of(&project, owner, instance, AMOUNT), None);
+}
+
+#[test]
+fn an_effect_cannot_read_a_group_that_its_own_picture_is_a_part_of() {
+    for kind in [GroupKind::ClipGroup, GroupKind::TrackGroup] {
+        let (mut project, group, _, [_, in_the_group, _]) = a_project_with_a_group_of_the_two_back_tracks(kind);
+        let (owner, instance) = with_a_shader_on(&mut project, in_the_group);
+        let source = match kind {
+            GroupKind::TrackGroup => MaskSource::TrackGroup(group),
+            _ => MaskSource::ClipGroup(group),
+        };
+
+        let result = project.set_driven_value(owner, instance, AMOUNT, read_from_a_source(source));
+
+        assert!(
+            matches!(result, Err(EditError::MaskWouldReadItself { .. })),
+            "{kind:?}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn a_number_that_is_read_from_a_group_reads_its_slider_again_when_the_group_is_taken_apart_or_deleted() {
+    for how in ["disband", "delete"] {
+        let (mut project, group, _, [host, ..]) = a_project_with_a_group_of_the_two_back_tracks(GroupKind::ClipGroup);
+        let (owner, instance) = with_a_shader_on(&mut project, host);
+        project
+            .set_driven_value(
+                owner,
+                instance,
+                AMOUNT,
+                read_from_a_source(MaskSource::ClipGroup(group)),
+            )
+            .unwrap();
+
+        match how {
+            "disband" => project.disband_group(group).unwrap(),
+            _ => project.delete_the_group_and_everything_in_it(group).unwrap(),
+        }
+
+        assert_eq!(driven_of(&project, owner, instance, AMOUNT), None, "{how}");
+    }
+}
+
+#[test]
+fn a_number_that_is_read_from_a_group_is_still_read_from_it_when_a_track_leaves_the_group_and_the_group_is_not_empty() {
+    let (mut project, group, [_, middle, _], [host, ..]) =
+        a_project_with_a_group_of_the_two_back_tracks(GroupKind::TrackGroup);
+    let (owner, instance) = with_a_shader_on(&mut project, host);
+    project
+        .set_driven_value(
+            owner,
+            instance,
+            AMOUNT,
+            read_from_a_source(MaskSource::TrackGroup(group)),
+        )
+        .unwrap();
+
+    project.take_out_of_the_group(group, Member::Track(middle)).unwrap();
+
+    assert!(driven_of(&project, owner, instance, AMOUNT).is_some());
 }

@@ -164,6 +164,8 @@ pub enum InconsistentProject {
     GroupsAreWrong { problem: GroupProblem },
     #[error("a value of an effect is read from {track}, which the project does not have")]
     ValueReadFromAnUnknownTrack { track: TrackId },
+    #[error("a value of an effect is read from {group}, which the project does not have as a group of that kind")]
+    ValueReadFromAnUnknownGroup { group: GroupId },
     #[error("the picture of {track} is made from itself: it is read by a mask that is made from it")]
     TracksAreMadeFromEachOther { track: TrackId },
 }

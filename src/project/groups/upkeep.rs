@@ -101,6 +101,7 @@ impl Project {
                 group.members_mut().retain(|member| *member != Member::Group(empty));
             }
         }
+        self.let_go_of_the_masks_made_of_groups_that_are_gone();
     }
 
     /// Puts the badge of the tag `tag` in the chain of effects of `member` if `member` has one that can have it, last.

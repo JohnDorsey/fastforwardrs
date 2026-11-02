@@ -448,3 +448,118 @@ fn a_file_of_version_25_has_no_setting_and_every_number_sees_the_real_backdrop()
     assert!(effect.driven_values().iter().next().unwrap().1.real_backdrop);
     assert_eq!(saved(&loaded), text);
 }
+
+// ---- version 27: a clip group or a track group as the source
+
+use crate::project::{GroupKind, MaskSource};
+
+/// The project that has groups of every kind, with one value read from a group of the kind `kind`: from the clip group by the text object (track 0), or from the track group by the first video
+/// (track 2). (Both at once would be a ring: the video is in the clip group, and the track group has the text's track.)
+fn project_that_reads_a_group(kind: GroupKind) -> Project {
+    let mut project = super::groups_tests::a_project_with_groups_of_every_kind();
+    let group = project
+        .groups()
+        .iter()
+        .find(|group| group.kind() == kind)
+        .map(|group| group.id())
+        .unwrap();
+    let (clip, source) = match kind {
+        GroupKind::ClipGroup => (project.tracks()[0].entries()[1].id(), MaskSource::ClipGroup(group)),
+        _ => (project.tracks()[2].entries()[0].id(), MaskSource::TrackGroup(group)),
+    };
+    let instance = project
+        .add_effect(crate::project::AnimationTarget::Clip(clip), tint())
+        .unwrap();
+    project
+        .set_driven_value(
+            Member::Clip(clip),
+            instance,
+            0,
+            Some(DrivenValue {
+                source,
+                ..DrivenValue::from_a_track(project.tracks()[0].id(), MaskChannel::Red, 0.25)
+            }),
+        )
+        .unwrap_or_else(|why| panic!("{source:?}: {why:?}"));
+    project
+}
+
+/// Every `driven` object in `document`, wherever it is.
+fn every_driven_object(document: &Value, found: &mut Vec<Value>) {
+    match document {
+        Value::Object(map) => {
+            for (key, value) in map {
+                if key == "driven" {
+                    found.extend(value.as_object().into_iter().flat_map(|one| one.values().cloned()));
+                } else {
+                    every_driven_object(value, found);
+                }
+            }
+        }
+        Value::Array(list) => list.iter().for_each(|value| every_driven_object(value, found)),
+        _ => {}
+    }
+}
+
+#[test]
+fn a_group_as_the_source_is_written_as_its_kind_and_its_place_among_the_groups_and_comes_back_as_it_was() {
+    for (kind, name) in [
+        (GroupKind::ClipGroup, "clip_group"),
+        (GroupKind::TrackGroup, "track_group"),
+    ] {
+        let project = project_that_reads_a_group(kind);
+        let text = saved(&project);
+        let place = project.groups().iter().position(|group| group.kind() == kind).unwrap();
+
+        let mut written = Vec::new();
+        every_driven_object(&as_json(&text), &mut written);
+
+        assert_eq!(written.len(), 1, "{kind:?}");
+        assert_eq!(written[0]["source"], json!({ name: place }), "{kind:?}");
+        let loaded = project_from_json_text(&text).unwrap();
+        assert_eq!(saved(&loaded), text, "{kind:?}: nothing is lost");
+    }
+}
+
+#[test]
+fn a_group_that_the_file_does_not_have_or_that_is_of_the_other_kind_is_refused_as_a_source() {
+    let project = project_that_reads_a_group(GroupKind::ClipGroup);
+    let place = project
+        .groups()
+        .iter()
+        .position(|group| group.kind() == GroupKind::ClipGroup)
+        .unwrap();
+    let other_kind = project
+        .groups()
+        .iter()
+        .position(|group| group.kind() == GroupKind::TrackGroup)
+        .unwrap();
+    let compact = serde_json::to_string(&as_json(&saved(&project))).unwrap();
+    let from = format!("{{\"clip_group\":{place}}}");
+    assert!(compact.contains(&from), "the source is in the file: {compact}");
+    for (why, to) in [
+        ("no such group", "{\"clip_group\":99}".to_owned()),
+        (
+            "a track group named as a clip group",
+            format!("{{\"clip_group\":{other_kind}}}"),
+        ),
+    ] {
+        let reason = project_from_json_text(&compact.replacen(&from, &to, 1))
+            .unwrap_err()
+            .to_string();
+
+        assert!(reason.contains("group"), "{why}: {reason}");
+    }
+}
+
+#[test]
+fn a_file_of_version_26_has_only_tracks_as_sources_and_is_read_as_it_always_was() {
+    let (project, ..) = project_with_a_value_read_from_the_front_track();
+    let text = saved(&project);
+    const { assert!(FILE_FORMAT_VERSION >= 27, "the groups as sources came with format 27") };
+    let twenty_six = text.replace(&version_line(FILE_FORMAT_VERSION), &version_line(26));
+
+    let loaded = project_from_json_text(&twenty_six).unwrap();
+
+    assert_eq!(saved(&loaded), text);
+}

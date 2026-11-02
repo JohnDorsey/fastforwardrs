@@ -21,8 +21,8 @@ use super::mask_thumbnail;
 use crate::application::commands::Command;
 use crate::application::mask_settings_window::WhichValue;
 use crate::project::{
-    AnimationTarget, DrivenValue, Effect, EffectKind, FontSize, GroupId, MaskSource, Member, ParameterControl, Project,
-    PropertyId, PropertyValue, Resource, ValueKind, ValueScale,
+    AnimationTarget, DrivenValue, Effect, EffectKind, FontSize, GroupId, Member, ParameterControl, Project, PropertyId,
+    PropertyValue, Resource, ValueKind, ValueScale,
 };
 
 /// How many lines of words show without scrolling in a box of lines.
@@ -590,10 +590,7 @@ fn control_for(
             let label = ui.label(&*parameter.label);
             // (Read from a mask: the thumbnail of the mask is in the place of the slider, and a click on it asks for the window of the mask.)
             if let Some(driven) = driven {
-                let MaskSource::Track(track) = driven.source;
-                let name = project
-                    .track(track)
-                    .map_or_else(|| "a track".to_owned(), |found| found.title().to_owned());
+                let name = project.name_of_the_source(driven.source);
                 return mask_thumbnail::show(ui, &parameter.name, &name, driven.channel, driven.map)
                     .clicked()
                     .then_some(Change::ShowTheMaskSettings);

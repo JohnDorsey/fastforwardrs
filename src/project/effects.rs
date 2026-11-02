@@ -638,6 +638,21 @@ impl Effects {
         changed
     }
 
+    /// Takes every value that is read from a group that is not among `groups` off its mask (what happens to the effects when the group is gone).
+    pub fn let_go_of_the_groups_not_among(&mut self, groups: &std::collections::HashSet<GroupId>) -> usize {
+        let mut changed = 0;
+        for link in &mut self.links {
+            if let Link::Effect(effect) = link {
+                let without = effect.driven.without_the_groups_not_among(groups);
+                if without != effect.driven {
+                    effect.driven = without;
+                    changed += 1;
+                }
+            }
+        }
+        changed
+    }
+
     /// Gives the effect that is named `instance` the state its plugin saved (or takes it away: `None`). `false` if there is no such effect.
     pub fn set_state(&mut self, instance: EffectInstanceId, state: Option<Arc<[u8]>>) -> bool {
         for link in &mut self.links {

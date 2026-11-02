@@ -8,7 +8,7 @@
 use super::tests::{frame, long_video, plan, text};
 use super::*;
 use crate::composition::test_projects::project_of;
-use crate::project::{ClipMove, DrivenValue, Graph, MaskChannel, MaskMap, Member, NUMBERS_OF_A_GRAPH};
+use crate::project::{ClipMove, DrivenValue, Graph, GroupId, MaskChannel, MaskMap, Member, NUMBERS_OF_A_GRAPH};
 
 /// A shader with two numbers that have a range: `amount` (0 to 1, 0.25 to begin with) and `strength` (2 to 6, 3 to begin with).
 const TINT: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"amount\", \"TYPE\": \"float\", \"DEFAULT\": 0.25 }, { \"NAME\": \"strength\", \"TYPE\": \"float\", \"MIN\": 2.0, \"MAX\": 6.0, \"DEFAULT\": 3.0 } ] }*/\nvoid main() { gl_FragColor = IMG_THIS_PIXEL(inputImage); }\n";
@@ -50,8 +50,10 @@ fn tracks_of_the_masks(section: &PictureSection) -> Vec<TrackId> {
 
 /// The track that a mask is the picture of. (The sources are tracks.)
 fn track_of(which: crate::project::MaskUse) -> TrackId {
-    let crate::project::MaskSource::Track(track) = which.source;
-    track
+    match which.source {
+        crate::project::MaskSource::Track(track) => track,
+        other => panic!("a track was expected: {other:?}"),
+    }
 }
 
 fn the_shader_operation(section: &PictureSection, at: u64) -> (String, Vec<f32>, Vec<TrackId>) {
@@ -601,4 +603,95 @@ fn two_numbers_that_read_one_track_with_another_setting_of_the_backdrop_read_two
     assert!(section.masks[0].which.real_backdrop && !section.masks[1].which.real_backdrop);
     let (_, _, masks) = the_shader_operation(section, 5);
     assert_eq!(masks, [mask_track, mask_track]);
+}
+
+// ---- a clip group or a track group as the source
+
+/// Four tracks with a text on each (the first, in front, is the host); a clip group of the clips on the second and the third, with a turn of the colours of 90 degrees on the group; the
+/// fourth, at the back, is not in the group. The host's number is read from the group.
+fn a_host_that_reads_a_clip_group_of_the_two_middle_tracks() -> (Project, GroupId, [TrackId; 4]) {
+    let mut project = project_of(vec![
+        vec![(0, text(100))],
+        vec![(0, text(100))],
+        vec![(0, text(100))],
+        vec![(0, text(100))],
+    ]);
+    let tracks = [0, 1, 2, 3].map(|place| project.tracks()[place].id());
+    let group = project
+        .create_group(
+            crate::project::GroupKind::ClipGroup,
+            &[
+                Member::Clip(first_clip_of(&project, 1)),
+                Member::Clip(first_clip_of(&project, 2)),
+            ],
+        )
+        .unwrap();
+    project.add_effect_to_the_group(group, EffectKind::HUE_SHIFT).unwrap();
+    project
+        .set_effect_value_of_the_group(
+            group,
+            crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT,
+            &crate::project::PropertyValue::Number(90.0),
+        )
+        .unwrap();
+    let host = first_clip_of(&project, 0);
+    let instance = project.add_effect(AnimationTarget::Clip(host), the_shader()).unwrap();
+    project
+        .set_driven_value(
+            Member::Clip(host),
+            instance,
+            0,
+            Some(DrivenValue {
+                source: crate::project::MaskSource::ClipGroup(group),
+                ..DrivenValue::from_a_track(tracks[1], MaskChannel::Red, 0.5)
+            }),
+        )
+        .unwrap();
+    (project, group, tracks)
+}
+
+#[test]
+fn the_mask_of_a_clip_group_is_the_layers_of_its_clips_with_the_effects_of_the_group_and_none_of_the_others() {
+    let (project, group, tracks) = a_host_that_reads_a_clip_group_of_the_two_middle_tracks();
+
+    let plan = plan(&project);
+
+    let section = &plan.sections[0];
+    assert_eq!(section.masks.len(), 1);
+    let mask = &section.masks[0].section;
+    assert_eq!(
+        mask.layers.iter().map(|layer| layer.track).collect::<Vec<_>>(),
+        [tracks[2], tracks[1]],
+        "the layers of the clips of the group, the back one first; not the host's and not the one outside the group"
+    );
+    assert_eq!(
+        mask.groups.len(),
+        1,
+        "the group is a group of the mask, with its effect"
+    );
+    assert_eq!(
+        mask.groups[0].owner,
+        crate::composition::SpanOwner::Group(group),
+        "the group that the mask is made of"
+    );
+    assert_eq!(
+        section.masks[0].layers_behind, 1,
+        "the one track behind all of the group's: the fourth"
+    );
+}
+
+#[test]
+fn the_group_is_a_group_of_the_mask_with_its_effect_and_the_picture_of_the_project_still_has_it_too() {
+    // The group is a group of the picture of the project, with its effect, and it is a group of the mask too, with the same effect: making the mask of a group does not take it out of the picture.
+    let (project, group, _) = a_host_that_reads_a_clip_group_of_the_two_middle_tracks();
+
+    let plan = plan(&project);
+
+    let in_the_picture = &plan.sections[0].groups;
+    assert_eq!(in_the_picture.len(), 1);
+    assert_eq!(in_the_picture[0].owner, crate::composition::SpanOwner::Group(group));
+    let in_the_mask = &plan.sections[0].masks[0].section.groups;
+    assert_eq!(in_the_mask.len(), 1);
+    assert_eq!(in_the_mask[0].first_layer, 0);
+    assert_eq!(in_the_mask[0].end_layer, 2, "both layers of the mask");
 }

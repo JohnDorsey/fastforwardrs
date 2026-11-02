@@ -302,6 +302,50 @@ fn choosing_a_track_in_the_window_reads_the_number_from_it_as_brightness_and_whe
     );
 }
 
+#[test]
+fn a_clip_group_and_a_track_group_are_offered_as_sources_and_choosing_one_reads_the_number_from_it() {
+    use crate::project::{GroupKind, MaskSource};
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
+    let mut project = super::clip_drag_tests::project_of_tracks(&[&[(0, 20)], &[(0, 20)], &[(0, 20)]]);
+    let clips = [0, 1, 2].map(|place| project.tracks()[place].placement_at_index(0).unwrap().id);
+    let clip_group = project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(clips[1]), Member::Clip(clips[2])])
+        .unwrap();
+    project.rename_group(clip_group, "the two behind").unwrap();
+    let mut window = Window::showing(project);
+    select(&mut window, clips[0]);
+    window.do_this(Command::AddEffect {
+        target: AnimationTarget::Clip(clips[0]),
+        kind: the_shader(),
+    });
+    window.do_this(Command::ShowTheMaskSettings(which(clips[0])));
+    window.settle();
+
+    window.harness.get_by_value(NO_TRACK_CHOSEN_LABEL).click();
+    window.settle();
+    window
+        .harness
+        .get_all_by_label("the two behind (clip group)")
+        .last()
+        .unwrap()
+        .click();
+    window.settle();
+
+    assert_eq!(
+        driven_now(&window, clips[0]).map(|driven| driven.source),
+        Some(MaskSource::ClipGroup(clip_group))
+    );
+    // (The name of the source is on the list's button now, and the thumbnail says it too.)
+    assert!(is_shown(&window, &label_of_the_thumbnail("how much")));
+    assert_eq!(
+        window
+            .application()
+            .project()
+            .name_of_the_source(MaskSource::ClipGroup(clip_group)),
+        "the two behind"
+    );
+}
+
 // ---- the graph that maps the value of the mask (docs/shader-masks-design.md, 8)
 
 /// The square of the graph in the window.

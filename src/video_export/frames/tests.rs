@@ -1390,7 +1390,8 @@ fn rendered_on(
     }
     for flat in described.description.flatten().layers {
         for effect in &flat.layer.effects {
-            if installed.insert(effect.key.clone()) {
+            // (The effects that the engine has of its own, a turn of the colours among them, are not shaders and are not given.)
+            if effect.key.starts_with("isf:") && installed.insert(effect.key.clone()) {
                 let (source, structure) = published_effect_shader_with_structure(&effect.key)
                     .expect("the shader was put on the shelf when the plan was made");
                 renderer
@@ -1730,4 +1731,84 @@ fn a_transition_in_a_mask_is_done_over_the_tracks_behind_it_when_it_sees_the_rea
             );
         });
     }
+}
+
+/// Two red picture files that are the whole frame, in a clip group that has a turn of the colours of 180 degrees if `with_the_turn`, and in front of them a narrow picture file with the shader that
+/// shows its number as a grey, read from the **red** of the picture of the clip group.
+fn a_narrow_picture_that_reads_a_clip_group_of_two_red_pictures(with_the_turn: bool) -> Project {
+    use crate::project::{DrivenValue, EffectKind, GroupKind, MaskChannel, MaskSource, Member, PropertyValue};
+    let mut project = Project::empty();
+    for (identifier, width) in [(2, 320), (3, 320), (4, 100)] {
+        project
+            .import_source(picture_source(identifier, width, 180), frame(0))
+            .expect("the picture file goes on a track in front of the others");
+    }
+    let clip_on = |project: &Project, place: usize| project.tracks()[place].placement_at_index(0).unwrap().id;
+    let (host_clip, second, first) = (clip_on(&project, 0), clip_on(&project, 1), clip_on(&project, 2));
+    let group = project
+        .create_group(GroupKind::ClipGroup, &[Member::Clip(first), Member::Clip(second)])
+        .unwrap();
+    if with_the_turn {
+        project.add_effect_to_the_group(group, EffectKind::HUE_SHIFT).unwrap();
+        project
+            .set_effect_value_of_the_group(
+                group,
+                crate::test_support::HUE_SHIFT_AS_THE_FIRST_EFFECT,
+                &PropertyValue::Number(180.0),
+            )
+            .unwrap();
+    }
+    let file = crate::isf::read(SHOW_THE_LEVEL).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "level.fs", SHOW_THE_LEVEL)).unwrap();
+    let instance = project.add_effect(AnimationTarget::Clip(host_clip), kind).unwrap();
+    project
+        .set_driven_value(
+            Member::Clip(host_clip),
+            instance,
+            0,
+            Some(DrivenValue {
+                source: MaskSource::ClipGroup(group),
+                ..DrivenValue::from_a_track(project.tracks()[1].id(), MaskChannel::Red, 0.0)
+            }),
+        )
+        .unwrap();
+    project
+}
+
+#[test]
+fn the_mask_of_a_clip_group_has_the_effect_of_the_group_and_the_number_is_read_from_what_the_group_makes() {
+    use crate::engine::FrameRenderer;
+    let picture = |colour: [u8; 4]| RgbaPicture {
+        width_in_pixels: 2,
+        height_in_pixels: 2,
+        rgba_pixels: colour.repeat(4),
+    };
+    crate::engine::testing::with_software_graphics!(graphics, {
+        let mut greys = Vec::new();
+        for with_the_turn in [false, true] {
+            let project = a_narrow_picture_that_reads_a_clip_group_of_two_red_pictures(with_the_turn);
+            let plan = plan_of(&project);
+            let images = HashMap::from([
+                (SourceMediaIdentifier::new(2), picture([200, 40, 40, 255])),
+                (SourceMediaIdentifier::new(3), picture([200, 40, 40, 255])),
+                (SourceMediaIdentifier::new(4), picture([10, 10, 10, 255])),
+            ]);
+            let mut describer = describer_of(&plan, &script_of_pictures(1), images, Box::new(NoFontsYet));
+            let (described, sent) = describe(&mut describer, 10);
+            let mut renderer = FrameRenderer::new(graphics.device.clone());
+            let (finished, statistics) =
+                rendered_on(&mut renderer, &mut std::collections::HashSet::new(), &described, &sent);
+            assert_eq!(statistics.effects_not_run, 0, "with the turn: {with_the_turn}");
+            greys.push(finished.pixel(finished.width_in_pixels / 2, finished.height_in_pixels / 2)[0]);
+        }
+
+        let [plain, turned] = greys[..] else {
+            panic!("two frames were made");
+        };
+        assert!(plain.abs_diff(200) <= 3, "the red of the pictures, 200: {plain}");
+        assert!(
+            turned < 120,
+            "the colours of the group turned half way round make the red of the mask much less than the red of the pictures: {turned}"
+        );
+    });
 }
