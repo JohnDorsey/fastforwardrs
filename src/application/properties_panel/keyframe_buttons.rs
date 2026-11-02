@@ -191,6 +191,34 @@ pub(super) fn show_the_mask_button(
         pos2(before.left() - GAP_BETWEEN_BUTTONS - BUTTON_SIZE, before.top()),
         vec2(BUTTON_SIZE, BUTTON_SIZE),
     );
+    show_the_mask_button_in(ui, rectangle, mask, name, shown, commands);
+}
+
+/// The same for a row that has **no buttons of keyframes** (a value of the effect of a group is not animated): the mask button is at the right end of `row`, in [`ROOM_FOR_THE_MASK_BUTTON`].
+pub(super) fn show_the_mask_button_at_the_end(
+    ui: &mut Ui,
+    row: Rect,
+    mask: MaskButton,
+    name: &str,
+    shown: bool,
+    commands: &mut Vec<Command>,
+) {
+    let rectangle = Rect::from_min_size(
+        pos2(row.right() - BUTTON_SIZE, row.top() + 2.0),
+        vec2(BUTTON_SIZE, BUTTON_SIZE),
+    );
+    show_the_mask_button_in(ui, rectangle, mask, name, shown, commands);
+}
+
+/// The mask button of `mask` in `rectangle`.
+fn show_the_mask_button_in(
+    ui: &mut Ui,
+    rectangle: Rect,
+    mask: MaskButton,
+    name: &str,
+    shown: bool,
+    commands: &mut Vec<Command>,
+) {
     let can_be_used = mask.cannot_because.is_none() && ui.is_enabled();
     let label = mask_button_label(name);
     let id = ui

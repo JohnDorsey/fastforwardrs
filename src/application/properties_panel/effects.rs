@@ -11,12 +11,12 @@
 //! like any other, so it is an edit that is undone with one step, and a value that has keyframes is changed at the playhead. (The values of
 //! the effect of a group have no keyframes: they are not animated.)
 
-use egui::{ComboBox, DragValue, RichText, Slider, SliderClamping, TextEdit, Ui};
+use egui::{ComboBox, DragValue, Rect, RichText, Slider, SliderClamping, TextEdit, Ui, pos2};
 
 use super::PropertiesContent;
-use super::animatable::{self, Animatable};
+use super::animatable::{self, Animatable, NARROWEST_CONTROL};
 use super::controls::labelled_row;
-use super::keyframe_buttons::MaskButton;
+use super::keyframe_buttons::{self, MaskButton, ROOM_FOR_THE_MASK_BUTTON};
 use super::mask_thumbnail;
 use crate::application::commands::Command;
 use crate::application::mask_settings_window::WhichValue;
@@ -404,9 +404,53 @@ pub(super) fn show_the_control_of_a_group_effect(
     let Some(shown) = effect.value_of(property) else {
         return;
     };
-    if let Some(change) = labelled_row(ui, |ui| {
-        control_for(ui, project, None, effect.kind(), property, shown, None)
-    }) && let Some(command) = command_for(Member::Group(group), property, change)
+    let PropertyId::EffectValue { slot, .. } = property else {
+        return;
+    };
+    let slot = usize::from(slot);
+    let kind = effect.kind();
+    let driven = effect.driven_values().of(slot).copied();
+    // The number of a shader that has a range can be read from a mask, here as on a clip: the button is at the right end of the row, where the buttons of keyframes are on a clip's.
+    let parameter = kind.parameters().get(slot);
+    let mask = parameter
+        .filter(|parameter| {
+            driven.is_none()
+                && kind.shader_source().is_some()
+                && parameter.value_kind() == ValueKind::Number
+                && parameter.range.is_some()
+        })
+        .map(|_| MaskButton {
+            which: WhichValue {
+                owner: Member::Group(group),
+                instance: effect.instance(),
+                slot,
+            },
+            cannot_because: effect.why_a_value_cannot_be_driven(slot),
+        });
+    let row_left = ui.available_rect_before_wrap().left();
+    let row_width = ui.available_width();
+    let control = ui.horizontal(|ui| {
+        ui.scope(|ui| {
+            if mask.is_some() {
+                ui.set_max_width((row_width - ROOM_FOR_THE_MASK_BUTTON).max(NARROWEST_CONTROL));
+            }
+            labelled_row(ui, |ui| {
+                control_for(ui, project, None, kind, property, shown, driven.as_ref())
+            })
+        })
+        .inner
+    });
+    if let Some(mask) = mask {
+        let row = Rect::from_min_max(
+            pos2(row_left, control.response.rect.top()),
+            pos2(row_left + row_width, control.response.rect.bottom()),
+        );
+        let name = parameter.map_or_else(String::new, |parameter| parameter.label.to_lowercase());
+        let is_hovered = ui.rect_contains_pointer(row);
+        keyframe_buttons::show_the_mask_button_at_the_end(ui, row, mask, &name, is_hovered, commands);
+    }
+    if let Some(change) = control.inner
+        && let Some(command) = command_for(Member::Group(group), property, change)
     {
         commands.push(command);
     }

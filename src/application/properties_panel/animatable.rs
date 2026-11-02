@@ -19,7 +19,7 @@ use crate::application::naming::name_of_a_property_of;
 use crate::project::{AnimationTarget, PropertyId, PropertyValue};
 
 /// The narrowest a control is made to make room for the buttons, in points.
-const NARROWEST_CONTROL: f32 = 80.0;
+pub(super) const NARROWEST_CONTROL: f32 = 80.0;
 
 /// Which property of what a row is for.
 #[derive(Clone, Copy)]

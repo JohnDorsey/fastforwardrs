@@ -239,6 +239,54 @@ fn a_video_that_is_seen_and_is_a_mask_shows_the_same_frame_of_its_source_in_the_
 }
 
 #[test]
+fn a_number_of_the_effect_of_a_clip_group_that_is_read_from_a_mask_puts_the_mask_in_the_section_and_is_in_the_operation_of_the_group()
+ {
+    // The front track is a text, which is the mask; the group is of the clips on the two tracks behind it, and has the shader.
+    let mut project = project_of(vec![
+        vec![(0, text(100))],
+        vec![(0, long_video(0, 100, 1))],
+        vec![(0, long_video(0, 100, 1))],
+    ]);
+    let (mask_track, first, second) = (
+        project.tracks()[0].id(),
+        first_clip_of(&project, 1),
+        first_clip_of(&project, 2),
+    );
+    let group = project
+        .create_group(
+            crate::project::GroupKind::ClipGroup,
+            &[Member::Clip(first), Member::Clip(second)],
+        )
+        .unwrap();
+    let instance = project.add_effect_to_the_group(group, the_shader()).unwrap();
+    project
+        .set_driven_value(
+            Member::Group(group),
+            instance,
+            0,
+            Some(DrivenValue::from_a_track(mask_track, MaskChannel::Red, 0.5)),
+        )
+        .unwrap();
+
+    let plan = plan(&project);
+
+    let section = &plan.sections[0];
+    assert_eq!(tracks_of_the_masks(section), [mask_track]);
+    let operations = section.groups[0].operations_at(frame(10));
+    let [
+        PictureOperation::Shader {
+            key, masks, numbers, ..
+        },
+    ] = operations.as_slice()
+    else {
+        panic!("one operation of a shader was expected: {operations:?}");
+    };
+    assert!(key.contains("+masks["), "{key}");
+    assert_eq!(masks, &[mask_track]);
+    assert_eq!(numbers[4], 0.5, "where the mask has nothing");
+}
+
+#[test]
 fn a_mask_is_made_of_masks_when_the_effects_of_its_track_read_one() {
     // Three tracks: the front one is the mask of the middle one, which is the mask of the back one (a video).
     let mut project = project_of(vec![

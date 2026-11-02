@@ -21,7 +21,7 @@ use crate::application::properties_panel::{
     KeyframeButton, keyframe_button_label, label_of_the_thumbnail, mask_button_label,
 };
 use crate::project::{
-    AnimationTarget, ClipId, DrivenValue, EffectInstanceId, EffectKind, MaskChannel, MaskMap, Member, TrackId,
+    AnimationTarget, ClipId, DrivenValue, EffectInstanceId, EffectKind, GroupId, MaskChannel, MaskMap, Member, TrackId,
 };
 
 /// A shader with a number that has a range (called *how much*), a colour and a switch.
@@ -512,6 +512,97 @@ fn while_no_track_is_chosen_the_graph_is_shown_and_cannot_be_changed() {
         None,
         "nothing is read from a mask by touching the graph"
     );
+}
+
+// ---- the rows of the effects of a group
+
+/// A window with a tag of the first two clips selected, and the shader on it: the window, the tag, and a track that its number can be read from.
+fn window_with_the_shader_on_a_selected_group() -> (Window, GroupId, TrackId) {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
+    let (mut window, group, _) = super::group_box_tests::window_with_a_tag_of_the_first_two_clips_selected();
+    window.do_this(Command::AddGroupEffect {
+        group,
+        kind: the_shader(),
+    });
+    // (A track of its own: the one that the clips of the group are on would be a ring.)
+    let a_track = window.application_mut().document.project.add_track_in_front();
+    window.settle();
+    (window, group, a_track)
+}
+
+fn the_group_s_value(group: GroupId) -> WhichValue {
+    WhichValue {
+        owner: Member::Group(group),
+        instance: EffectInstanceId::FIRST,
+        slot: HOW_MUCH,
+    }
+}
+
+#[test]
+fn the_number_of_a_shader_on_a_group_has_the_mask_button_and_no_buttons_of_keyframes() {
+    let (window, ..) = window_with_the_shader_on_a_selected_group();
+
+    assert!(is_shown(&window, &mask_button_label("how much")));
+    assert!(
+        window.harness.query_all_by_label_contains("stopwatch").next().is_none(),
+        "the values of the effects of a group have no keyframes"
+    );
+    for name in ["tint colour", "invert it"] {
+        assert!(!is_shown(&window, &mask_button_label(name)), "{name}");
+    }
+}
+
+#[test]
+fn the_mask_button_of_a_group_opens_the_window_of_the_number_of_that_group() {
+    let (mut window, group, _) = window_with_the_shader_on_a_selected_group();
+
+    let button = window.rectangle_of(&mask_button_label("how much")).center();
+    window.click(button);
+
+    assert_eq!(
+        window.application().interface.mask_settings_window_open_for,
+        Some(the_group_s_value(group))
+    );
+    assert!(is_shown(&window, TRACK_LABEL));
+}
+
+#[test]
+fn a_number_of_a_group_that_is_read_from_a_mask_has_the_thumbnail_and_the_thumbnail_opens_the_window() {
+    let (mut window, group, a_track) = window_with_the_shader_on_a_selected_group();
+    window.do_this(Command::SetDrivenValue {
+        owner: Member::Group(group),
+        instance: EffectInstanceId::FIRST,
+        slot: HOW_MUCH,
+        driven: Some(DrivenValue::from_a_track(a_track, MaskChannel::Red, 0.25)),
+    });
+    window.settle();
+
+    assert!(is_shown(&window, &label_of_the_thumbnail("how much")));
+    assert!(
+        !is_shown(&window, &mask_button_label("how much")),
+        "the thumbnail is in its place"
+    );
+    let thumbnail = window.rectangle_of(&label_of_the_thumbnail("how much")).center();
+    window.click(thumbnail);
+
+    assert_eq!(
+        window.application().interface.mask_settings_window_open_for,
+        Some(the_group_s_value(group))
+    );
+}
+
+#[test]
+fn an_effect_of_a_group_that_is_not_a_shader_has_no_mask_button() {
+    let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
+    let (mut window, group, _) = super::group_box_tests::window_with_a_tag_of_the_first_two_clips_selected();
+    window.do_this(Command::AddGroupEffect {
+        group,
+        kind: EffectKind::HUE_SHIFT,
+    });
+    window.settle();
+
+    assert!(is_shown(&window, "Turn"));
+    assert!(!is_shown(&window, &mask_button_label("turn")));
 }
 
 /// Makes pictures for looking at: `cargo test --lib --release write_pictures_of_the_mask -- --ignored` with `FASTFORWARDRS_SCREENSHOT_FOLDER` set to the folder they go in.
