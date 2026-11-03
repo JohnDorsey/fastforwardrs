@@ -312,19 +312,33 @@ fn a_project_with_the_gain_plugin_at_half(
     video: &support::TestVideo,
     library: &Path,
 ) -> (fastforwardrs::project::Project, fastforwardrs::project::Project) {
-    // (The list of the plugins that are installed is for the whole program, and the tests of this file run at the same time.)
-    static THE_LIST: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _alone = THE_LIST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let scan = ladspa_host::scan_library(library, |_| {}).unwrap();
-    set_installed_plugins(
+    a_project_with_a_plugin_at_half(
+        toolchain,
+        video,
         scan.plugins
             .iter()
             .filter_map(|plugin| effect_of_a_plugin(library, plugin).ok())
             .collect(),
-    );
+        |kind| kind.key().ends_with(":ffrs_test_gain"),
+    )
+}
+
+/// The project of `video` as it is, and the same with the plugin that `is_the_gain` picks among `installed` on its clip, its first value at 0.5 (the plugins are installed in this
+/// program for as long as it takes to make it, and not after).
+fn a_project_with_a_plugin_at_half(
+    toolchain: &fastforwardrs::media::FfmpegToolchain,
+    video: &support::TestVideo,
+    installed: Vec<fastforwardrs::project::InstalledPlugin>,
+    is_the_gain: impl Fn(&EffectKind) -> bool,
+) -> (fastforwardrs::project::Project, fastforwardrs::project::Project) {
+    // (The list of the plugins that are installed is for the whole program, and the tests of this file run at the same time.)
+    static THE_LIST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _alone = THE_LIST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    set_installed_plugins(installed);
     let kind = EffectKind::installed_plugin_kinds()
         .into_iter()
-        .find(|kind| kind.key().ends_with(":ffrs_test_gain"))
+        .find(|kind| is_the_gain(kind))
         .expect("the gain plugin");
     let plain = project_for(toolchain, video);
     let mut project = plain.clone();
@@ -389,6 +403,91 @@ fn a_project_with_a_plugin_on_a_clip_is_refused_until_its_folder_is_approved_and
     assert!(!destination.exists());
 
     // The folder is approved (as the editor does it, in the file): the plugin is found, run, and heard.
+    ApprovalStore::at(approvals.clone()).approve_folder(&plugins);
+    let allowed = run_with_plugin_folders(
+        &project_file,
+        &destination,
+        &settings_file,
+        &[Path::new("--plugin-approvals"), &approvals],
+    );
+    let words = said(&allowed);
+    assert_eq!(allowed.status.code(), Some(0), "{words}");
+    assert!(!words.contains("warning"), "nothing was left out: {words}");
+    let plain_destination = scratch.path().join("plain.mp4");
+    let unchanged = run_with_plugin_folders(&plain_file, &plain_destination, &settings_file, &[]);
+    assert_eq!(unchanged.status.code(), Some(0), "{}", said(&unchanged));
+
+    let with = loudness(&decoded_sound(&toolchain, &destination, 2, 48_000));
+    let without = loudness(&decoded_sound(&toolchain, &plain_destination, 2, 48_000));
+    assert!(without > 0.02, "the test video has a tone to be changed: {without}");
+    let ratio = with / without;
+    assert!(
+        (ratio - 0.5).abs() < 0.03,
+        "the plugin halves the sound: {with} against {without} is {ratio}"
+    );
+}
+
+#[test]
+fn a_project_with_a_vst3_plugin_on_a_clip_is_refused_until_its_folder_is_approved_and_then_the_sound_of_the_video_has_the_plugin_in_it_from_a_program_of_its_own()
+ {
+    let toolchain = toolchain_and_graphics_or_skip!();
+    let video = test_video(&toolchain, &COUNTER_3_SECONDS);
+    let scratch = scratch_directory();
+    let _one_export_at_a_time = support::one_export_at_a_time();
+
+    // The test module is a folder of its own, which the file beside the settings says to look in.
+    let plugins = scratch.path().join("plugins");
+    std::fs::create_dir_all(&plugins).unwrap();
+    let module = vst3_test_plugins::write_module(&plugins);
+    let settings_file = scratch.path().join("settings.json");
+    PluginSearchSettings {
+        folders: vec![plugins.clone()],
+        ..PluginSearchSettings::default()
+    }
+    .write(&settings_file.with_file_name("plugin_search.json"))
+    .unwrap();
+
+    // A project with the gain plugin at 0.5 on its clip, made here and written to its file (the plugin is installed in this program for that).
+    let scan = vst3_host::scan_module(&module, &mut |_| {}).unwrap();
+    let gain_key = fastforwardrs::plugin_scan::key_of_a_vst3_plugin(vst3_host::ClassId::from_numbers(
+        vst3_test_plugins::GAIN[0],
+        vst3_test_plugins::GAIN[1],
+        vst3_test_plugins::GAIN[2],
+        vst3_test_plugins::GAIN[3],
+    ));
+    let (plain, project) = a_project_with_a_plugin_at_half(
+        &toolchain,
+        &video,
+        scan.classes
+            .iter()
+            .filter_map(|class| fastforwardrs::plugin_scan::effect_of_a_vst3_plugin(&module, class).ok())
+            .collect(),
+        |kind| kind.key() == gain_key,
+    );
+    let project_file = scratch.path().join("with_a_vst3_plugin.fastforwardrs.json");
+    write_project_file(&project, &project_file).unwrap();
+    let plain_file = scratch.path().join("plain.fastforwardrs.json");
+    write_project_file(&plain, &plain_file).unwrap();
+    let approvals = scratch.path().join("plugin_approvals.json");
+
+    // Nobody has approved the folder: refused, and nothing is exported.
+    let destination = scratch.path().join("with_a_vst3_plugin.mp4");
+    let refused = run_with_plugin_folders(
+        &project_file,
+        &destination,
+        &settings_file,
+        &[Path::new("--plugin-approvals"), &approvals],
+    );
+    let words = said(&refused);
+    assert_eq!(refused.status.code(), Some(1), "{words}");
+    assert!(
+        words.contains("a command line cannot ask") && words.contains("has not been approved"),
+        "{words}"
+    );
+    assert!(words.contains("test gain"), "{words}");
+    assert!(!destination.exists());
+
+    // The folder is approved (as the editor does it, in the file): the module is found, the plugin is run in a program of its own, and heard.
     ApprovalStore::at(approvals.clone()).approve_folder(&plugins);
     let allowed = run_with_plugin_folders(
         &project_file,

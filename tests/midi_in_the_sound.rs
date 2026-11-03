@@ -17,7 +17,11 @@ use clap_test_plugins::{INSTRUMENT, library_file_for_tests};
 use fastforwardrs::composition::plan_sound;
 use fastforwardrs::media::export::sound_graph_specification;
 use fastforwardrs::plugin_host::PluginHost;
-use fastforwardrs::plugin_scan::{effect_of_a_clap_plugin, effect_of_an_lv2_plugin, key_of_an_lv2_plugin};
+use fastforwardrs::plugin_process::remote::Limits;
+use fastforwardrs::plugin_scan::{
+    effect_of_a_clap_plugin, effect_of_a_vst3_plugin, effect_of_an_lv2_plugin, key_of_a_vst3_plugin,
+    key_of_an_lv2_plugin,
+};
 use fastforwardrs::project::{
     AnimationTarget, EffectKind, FrameRate, GroupKind, Member, MidiClip, Project, ResourceKind, SourceFrameIndex,
     SourceMediaLink, SpedUpClipSound, SpeedFactor, TimelineFrameIndex, set_installed_plugins,
@@ -68,6 +72,25 @@ fn the_lv2_kind_of(folder: &Path, uri: &str) -> EffectKind {
         .into_iter()
         .find(|kind| kind.key() == key)
         .unwrap_or_else(|| panic!("no plugin called {uri}"))
+}
+
+/// The kinds of effect of the VST3 test plugins that are effects (the instrument among them), installed; and the kind of the plugin of the class `numbers`.
+fn the_vst3_kind_of(numbers: [u32; 4]) -> EffectKind {
+    let path = vst3_test_plugins::library_file_for_tests();
+    let scan = vst3_host::scan_module(&path, &mut |_| {}).expect("the test module is scanned");
+    set_installed_plugins(
+        scan.classes
+            .iter()
+            .filter_map(|class| effect_of_a_vst3_plugin(&path, class).ok())
+            .collect(),
+    );
+    let key = key_of_a_vst3_plugin(vst3_host::ClassId::from_numbers(
+        numbers[0], numbers[1], numbers[2], numbers[3],
+    ));
+    EffectKind::installed_plugin_kinds()
+        .into_iter()
+        .find(|kind| kind.key() == key)
+        .unwrap_or_else(|| panic!("no plugin called {key}"))
 }
 
 /// A Standard MIDI File of one track with these notes, each `(start in milliseconds, end in milliseconds, key)`, at the velocity 100 on the first channel: a tick is a millisecond.
@@ -151,17 +174,31 @@ impl ClipSpawner for NoFile {
     }
 }
 
+/// The program that runs plugins, which a VST3 plugin is always run in.
+fn the_program() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_fastforwardrs-plugin-process"))
+}
+
 /// The left channel of the sound of the project from the frame `from`, made by the graph with the plugin host, in blocks of `block` samples.
 fn heard_from(project: &Project, from: u64, block: usize) -> Vec<f32> {
+    let host = PluginHost::new().with_the_program_that_runs_plugins(the_program());
+    host.allow_everything();
+    heard_from_with(project, from, block, host).0
+}
+
+/// The same with the host `host`, and what the plugins said while it was made.
+fn heard_from_with(project: &Project, from: u64, block: usize, host: PluginHost) -> (Vec<f32>, Vec<String>) {
     let plan = plan_sound(project, TimelineFrameIndex::new(from), |_| true);
     let specification = sound_graph_specification(&plan, &[], SpedUpClipSound::MaintainPitch);
-    let host = PluginHost::new();
-    host.allow_everything();
     let runner: Arc<dyn PluginRunner> = Arc::new(host);
-    let insertions = PluginInsertions::new(runner, specification.frame_rate, Notes::default(), false);
+    let notes = Notes::default();
+    let insertions = PluginInsertions::new(runner, specification.frame_rate, Arc::clone(&notes), false);
     let feeds = LookAheadFeeds::new(specification.clone(), NoFile);
     let mut graph = SoundGraph::new(specification, Box::new(feeds), Box::new(insertions));
-    graph.render_to_the_end(block).0
+    let sound = graph.render_to_the_end(block).0;
+    drop(graph);
+    let said = notes.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    (sound, said)
 }
 
 /// What the sound is where a note of the key `key` is held from `start` to `end` (in samples from the start of the sound): the number that the test instrument makes of it, 60 / 127 for the
@@ -458,4 +495,91 @@ fn an_lv2_instrument_plays_the_notes_of_a_midi_clip_too() {
     let whole = sound;
     let from_there = heard_from(&project, 30, 1000);
     close(&from_there, &whole[48_000..], "from frame 30, a note held through LV2");
+}
+
+#[test]
+fn a_vst3_instrument_among_the_effects_of_a_midi_clip_plays_its_notes_in_a_program_of_its_own() {
+    let _alone = the_installed_plugins_to_myself();
+    let instrument = the_vst3_kind_of(vst3_test_plugins::INSTRUMENT);
+    let mut project = project_with_music(&[0]);
+    project.add_effect(the_clip_of(&project, 0), instrument).unwrap();
+
+    let sound = heard_from(&project, 0, 4096);
+
+    // (The VST3 instrument makes the same arithmetic as the others: while a note is held, velocity * key / 100, and the velocity of the file is 100 / 127.)
+    close(
+        &sound,
+        &the_sound_of_the_tune(144_000, 0),
+        "the notes of the file, through VST3",
+    );
+    // The sound made from a seek is what the whole sound has from there, a note that is held included.
+    for from in [8, 20, 30, 55, 70] {
+        let from_there = heard_from(&project, from, 1000);
+
+        let samples_before = (from * 1600) as usize;
+        close(
+            &from_there,
+            &sound[samples_before..],
+            &format!("from frame {from}, through VST3"),
+        );
+    }
+}
+
+#[test]
+fn an_effect_after_a_vst3_instrument_is_done_to_what_the_instrument_makes() {
+    let _alone = the_installed_plugins_to_myself();
+    let instrument = the_vst3_kind_of(vst3_test_plugins::INSTRUMENT);
+    let gain = the_vst3_kind_of(vst3_test_plugins::GAIN);
+    let mut project = project_with_music(&[0]);
+    let clip = the_clip_of(&project, 0);
+    project.add_effect(clip, instrument).unwrap();
+    let doubled = project.add_effect(clip, gain).unwrap();
+    project
+        .set_property_at(
+            clip,
+            fastforwardrs::project::PropertyId::effect_value(gain, doubled, 0),
+            fastforwardrs::project::PropertyValue::Number(2.0),
+            TimelineFrameIndex::new(0),
+        )
+        .unwrap();
+
+    let sound = heard_from(&project, 0, 4096);
+
+    let wanted: Vec<f32> = the_sound_of_the_tune(144_000, 0)
+        .into_iter()
+        .map(|made| made * 2.0)
+        .collect();
+    close(&sound, &wanted, "twice what the VST3 instrument makes");
+}
+
+#[test]
+fn a_vst3_instrument_whose_program_crashes_is_left_out_and_said_and_the_sound_is_silence_and_the_editor_goes_on() {
+    let _alone = the_installed_plugins_to_myself();
+    let instrument = the_vst3_kind_of(vst3_test_plugins::INSTRUMENT);
+    let mut project = project_with_music(&[0]);
+    project.add_effect(the_clip_of(&project, 0), instrument).unwrap();
+    let host = PluginHost::new()
+        .with_the_program_that_runs_plugins(the_program())
+        .with_the_program_given(
+            vec![("FFRS_TEST_PLUGIN".to_owned(), "crash_when_run".to_owned())],
+            Limits {
+                to_connect: std::time::Duration::from_secs(60),
+                to_make: std::time::Duration::from_secs(60),
+                to_run: std::time::Duration::from_secs(60),
+            },
+        );
+    host.allow_everything();
+
+    let (sound, said) = heard_from_with(&project, 0, 4096, host);
+
+    close(
+        &sound,
+        &vec![0.0; 144_000],
+        "an instrument that is left out adds nothing",
+    );
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].contains("the program that runs the plugin ended") && said[0].to_lowercase().contains("unchanged"),
+        "{said:?}"
+    );
 }
