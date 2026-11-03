@@ -53,12 +53,29 @@ fn the_manifest_in_the_program_is_read_and_is_fit_and_has_a_build_for_this_syste
             "CycleShifter",
             "Kars",
             "Nekobi",
-            "Wolf Shaper"
+            "Wolf Shaper",
+            "Dragonfly Early Reflections",
+            "Dragonfly Hall Reverb",
+            "Dragonfly Plate Reverb",
+            "Dragonfly Room Reverb",
+            "MVerb",
+            "MaGigaverb",
+            "Surge XT Effects",
+            "Surge XT",
+            "Kars",
+            "Nekobi"
         ]
     );
     // (Every set has a build for each system, except Wolf Shaper, whose file for macOS is a zip that holds a disk image: one more layer than the program opens.)
     for set in &manifest.only(SetKind::Plugins).sets {
-        let is_lv2 = set.id.ends_with("-lv2");
+        // (The sets of one format are called after it: `-lv2` for LV2 bundles, `-vst3` for VST3 modules; the others are CLAP files.)
+        let ending = if set.id.ends_with("-lv2") {
+            ".lv2"
+        } else if set.id.ends_with("-vst3") {
+            ".vst3"
+        } else {
+            ".clap"
+        };
         for platform in ["windows-x86_64", "linux-x86_64"] {
             assert!(set.platforms.contains_key(platform), "{} for {platform}", set.id);
         }
@@ -71,7 +88,7 @@ fn the_manifest_in_the_program_is_read_and_is_fit_and_has_a_build_for_this_syste
         for build in set.platforms.values() {
             assert_eq!(build.members.len(), set.plugins.len(), "{}", set.id);
             for member in &build.members {
-                assert_eq!(member.to.ends_with(".lv2"), is_lv2, "{}: {}", set.id, member.to);
+                assert!(member.to.ends_with(ending), "{}: {}", set.id, member.to);
             }
         }
     }
@@ -1020,6 +1037,10 @@ fn fetch_the_real_plugins_from_the_network_and_find_every_file_the_manifest_name
             } else if member.to.ends_with(".lv2") {
                 assert!(file.join("manifest.ttl").is_file(), "{file:?} is a bundle");
                 assert!(size_of_a_file_or_a_folder(&file) > 10_000, "{file:?}");
+            } else if member.to.ends_with(".vst3") {
+                // (A VST3 module of this system: a folder with `Contents` in it, or, for an old plugin on Windows, the library itself.)
+                assert!(file.join("Contents").is_dir() || file.is_file(), "{file:?} is a module");
+                assert!(size_of_a_file_or_a_folder(&file) > 100_000, "{file:?}");
             } else {
                 assert!(size_of_a_file_or_a_folder(&file) > 100_000, "{file:?}");
             }
@@ -1253,6 +1274,43 @@ fn a_folder_that_is_not_in_a_tar_is_said_and_nothing_of_the_set_is_left() {
 }
 
 #[test]
+fn a_vst3_member_is_a_name_of_a_folder_as_an_lv2_one_is_and_what_is_not_is_said() {
+    let with_the_member = |platform: &'static str, from: &'static str, to: &'static str| {
+        a_manifest_that_is_wrong_in(move |m| {
+            m.sets[0].platforms.get_mut(platform).unwrap().members[0] = Member {
+                from: from.to_owned(),
+                to: to.to_owned(),
+                leave_out: Vec::new(),
+            };
+        })
+    };
+    let problems = with_the_member("windows-x86_64", "pack/Thing.vst3", "Thing.vst3");
+    assert!(
+        problems.contains("is a folder (a .vst3 module) and its name inside the archive must end with /"),
+        "{problems}"
+    );
+    assert_eq!(
+        with_the_member("windows-x86_64", "pack/Thing.vst3/", "Thing.VST3"),
+        "",
+        "a folder with its name ending in / and any case of .vst3 is fit"
+    );
+    let problems = with_the_member("windows-x86_64", "pack/Thing.vst3/", "Thing.dll");
+    assert!(
+        problems.contains("is not a plain name of a .clap file, an .lv2 folder or a .vst3 folder"),
+        "{problems}"
+    );
+    assert_eq!(
+        with_the_member(
+            "macos-universal",
+            "dpf-x-vst3bundles.pkg/Payload/Thing.vst3",
+            "Thing.vst3"
+        ),
+        "",
+        "out of the installer of a disk image the member is a path in what the installer holds, with no / at the end"
+    );
+}
+
+#[test]
 fn an_lv2_member_is_a_name_of_a_folder_and_what_is_not_is_said() {
     let with_the_member = |platform: &'static str, from: &'static str, to: &'static str| {
         a_manifest_that_is_wrong_in(move |m| {
@@ -1273,9 +1331,9 @@ fn an_lv2_member_is_a_name_of_a_folder_and_what_is_not_is_said() {
         "",
         "a folder with its name ending in / and any case of .lv2 is fit"
     );
-    let problems = with_the_member("windows-x86_64", "pack/Thing.lv2/", "Thing.vst3");
+    let problems = with_the_member("windows-x86_64", "pack/Thing.lv2/", "Thing.dll");
     assert!(
-        problems.contains("is not a plain name of a .clap file or an .lv2 folder"),
+        problems.contains("is not a plain name of a .clap file, an .lv2 folder or a .vst3 folder"),
         "{problems}"
     );
     assert_eq!(

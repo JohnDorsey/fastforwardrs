@@ -1097,6 +1097,508 @@
       }
     },
     {
+      "id": "dragonfly-reverb-vst3",
+      "name": "Dragonfly Reverb (VST3)",
+      "version": "3.2.10",
+      "authors": [
+        "Michael Willis",
+        "Rob van den Berg"
+      ],
+      "licence": "GPL-3.0-or-later",
+      "licence_note": "VST3: the VST3 build of a plugin made with DPF has the interface of VST3 from DPF's own header files, \"travesty\" (pure C, ISC licence, \"Copyright (C) 2021-2022 Filipe Coelho\"), and not Steinberg's SDK, so the VST3 file has the licence of the plugin and nothing more. Read in the source: dpf/distrho/src/travesty/base.h of the tag v1.7 of DPF-Plugins and of the DPF (commit dc6557a) that Dragonfly Reverb 3.2.10 holds; the binaries were not taken apart.",
+      "homepage": "https://github.com/michaelwillis/dragonfly-reverb",
+      "plugins": [
+        "Dragonfly Early Reflections",
+        "Dragonfly Hall Reverb",
+        "Dragonfly Plate Reverb",
+        "Dragonfly Room Reverb"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/michaelwillis/dragonfly-reverb/3.2.10/LICENSE",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/michaelwillis/dragonfly-reverb/releases/download/3.2.10/dragonfly-reverb-3.2.10-src.tar.xz",
+        "sha256": "18af55a9592c9f50c4d5f86c9d5159132735d9ba53d49e9cfe7169b3109f7743"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/michaelwillis/dragonfly-reverb/releases/download/3.2.10/dragonfly-reverb-3.2.10-win64.zip",
+          "sha256": "ca5f35f9dcd9a33f06490d3c92f04061a1a798cb81257d5ca5851bdda0824c66",
+          "size": 22447365,
+          "members": [
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyEarlyReflections.vst3/",
+              "to": "DragonflyEarlyReflections.vst3"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyHallReverb.vst3/",
+              "to": "DragonflyHallReverb.vst3"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyPlateReverb.vst3/",
+              "to": "DragonflyPlateReverb.vst3"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyRoomReverb.vst3/",
+              "to": "DragonflyRoomReverb.vst3"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/michaelwillis/dragonfly-reverb/releases/download/3.2.10/dragonfly-reverb-3.2.10-linux-x86_64.tar.xz",
+          "sha256": "59f1593120de82e31dd194e2ab1536af14fec2b3ec6ec45abf6d9c8ac02ef430",
+          "size": 2267368,
+          "members": [
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyEarlyReflections.vst3/",
+              "to": "DragonflyEarlyReflections.vst3"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyHallReverb.vst3/",
+              "to": "DragonflyHallReverb.vst3"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyPlateReverb.vst3/",
+              "to": "DragonflyPlateReverb.vst3"
+            },
+            {
+              "from": "dragonfly-reverb-3.2.10/DragonflyRoomReverb.vst3/",
+              "to": "DragonflyRoomReverb.vst3"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/michaelwillis/dragonfly-reverb/releases/download/3.2.10/dragonfly-reverb-3.2.10-macos-universal.dmg",
+          "sha256": "e0b854b92a4e51ce5851320fb1a9f91ab1a4309f997de070e175b3e5cab4adaf",
+          "size": 24954281,
+          "installer": "dragonfly-reverb-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-dragonfly-reverb-vst3bundles.pkg/Payload/DragonflyEarlyReflections.vst3",
+              "to": "DragonflyEarlyReflections.vst3"
+            },
+            {
+              "from": "dpf-dragonfly-reverb-vst3bundles.pkg/Payload/DragonflyHallReverb.vst3",
+              "to": "DragonflyHallReverb.vst3"
+            },
+            {
+              "from": "dpf-dragonfly-reverb-vst3bundles.pkg/Payload/DragonflyPlateReverb.vst3",
+              "to": "DragonflyPlateReverb.vst3"
+            },
+            {
+              "from": "dpf-dragonfly-reverb-vst3bundles.pkg/Payload/DragonflyRoomReverb.vst3",
+              "to": "DragonflyRoomReverb.vst3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mverb-vst3",
+      "name": "MVerb (VST3)",
+      "version": "1.7 (of DPF-Plugins)",
+      "authors": [
+        "Martin Eastwood",
+        "Filipe Coelho (DISTRHO)"
+      ],
+      "licence": "GPL-3.0-or-later",
+      "licence_note": "VST3: the VST3 build of a plugin made with DPF has the interface of VST3 from DPF's own header files, \"travesty\" (pure C, ISC licence, \"Copyright (C) 2021-2022 Filipe Coelho\"), and not Steinberg's SDK, so the VST3 file has the licence of the plugin and nothing more. Read in the source: dpf/distrho/src/travesty/base.h of the tag v1.7 of DPF-Plugins and of the DPF (commit dc6557a) that Dragonfly Reverb 3.2.10 holds; the binaries were not taken apart.",
+      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
+      "plugins": [
+        "MVerb"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/MVerb/LICENSE",
+          "sha256": "c61f12da7cdad526bdcbed47a4c0a603e60dbbfdaf8b66933cd088e9132c303f"
+        },
+        {
+          "name": "LICENSE-DPF-Plugins.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
+          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
+        "sha256": null,
+        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
+          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
+          "size": 74524341,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/MVerb.vst3/",
+              "to": "MVerb.vst3"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
+          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
+          "size": 9827340,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/MVerb.vst3/",
+              "to": "MVerb.vst3"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
+          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
+          "size": 57933584,
+          "installer": "DPF-Plugins-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/MVerb.vst3",
+              "to": "MVerb.vst3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "magigaverb-vst3",
+      "name": "MaGigaverb (VST3)",
+      "version": "1.7 (of DPF-Plugins)",
+      "authors": [
+        "Cycling '74 (the Gen~ export)",
+        "Filipe Coelho (DISTRHO)"
+      ],
+      "licence": "LGPL-3.0-only AND ISC",
+      "licence_note": "the licence table of DPF-Plugins says LGPL-3.0 for the Max-Gen plugins; the files of the wrapper that make the plugin (its own LICENSE) are ISC VST3: the VST3 build of a plugin made with DPF has the interface of VST3 from DPF's own header files, \"travesty\" (pure C, ISC licence, \"Copyright (C) 2021-2022 Filipe Coelho\"), and not Steinberg's SDK, so the VST3 file has the licence of the plugin and nothing more. Read in the source: dpf/distrho/src/travesty/base.h of the tag v1.7 of DPF-Plugins and of the DPF (commit dc6557a) that Dragonfly Reverb 3.2.10 holds; the binaries were not taken apart.",
+      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
+      "plugins": [
+        "MaGigaverb"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE-LGPL-3.0.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/3BandEQ/LICENSE",
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+        },
+        {
+          "name": "LICENSE-ISC-wrapper.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/gigaverb/LICENSE",
+          "sha256": "eea569f3336a0555d089df54a263edfc04ab52ff103ca9f8b25508d9f8491699"
+        },
+        {
+          "name": "LICENSE-DPF-Plugins.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
+          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
+        "sha256": null,
+        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
+          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
+          "size": 74524341,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/MaGigaverb.vst3/",
+              "to": "MaGigaverb.vst3"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
+          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
+          "size": 9827340,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/MaGigaverb.vst3/",
+              "to": "MaGigaverb.vst3"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
+          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
+          "size": 57933584,
+          "installer": "DPF-Plugins-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/MaGigaverb.vst3",
+              "to": "MaGigaverb.vst3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "surge-xt-effects-vst3",
+      "name": "Surge XT Effects (VST3)",
+      "version": "1.3.4",
+      "authors": [
+        "Surge Synth Team and the authors of Surge"
+      ],
+      "licence": "GPL-3.0-or-later",
+      "licence_note": "VST3: the VST3 build of Surge XT 1.3.4 is made through the JUCE that the Surge team holds (surge-synthesizer/JUCE, commit cf5754b), which carries Steinberg's VST3 SDK \"under the terms of the Steinberg VST3 License, or alternatively under the terms of the General Public License (GPL) Version 3\" (its VST3_SDK/LICENSE.txt); Surge XT is GPL-3.0-or-later, so the second applies. Read in the source; the binaries were not taken apart.",
+      "homepage": "https://surge-synthesizer.github.io/",
+      "plugins": [
+        "Surge XT Effects"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/surge-synthesizer/surge/release_xt_1.3.4/LICENSE",
+          "sha256": "d4c0fe570b3750d909691ce5f494c9cd11ee047bbbedda9a5d75cc548e4df06b"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-src-1.3.4.tar.gz",
+        "sha256": null,
+        "md5": "b2eff6a09829756bcb48d193313e445e",
+        "note": "the md5 is the one the Surge project publishes in md5sum.txt of the release"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-win64-1.3.4-pluginsonly.zip",
+          "sha256": "564e162c560af07ad4ed47fe1bfcd827cf97a575de30d06c48249aad2e7c35e6",
+          "size": 49093875,
+          "members": [
+            {
+              "from": "Surge XT Effects.vst3/",
+              "to": "Surge XT Effects.vst3"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-linux-1.3.4-pluginsonly.tar.gz",
+          "sha256": "dd431b75f5fa197c4bffa6ca27ca46970f0a94c834119bb1db7decdeec4c28db",
+          "size": 97294804,
+          "members": [
+            {
+              "from": "Surge XT Effects.vst3/",
+              "to": "Surge XT Effects.vst3"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-macos-1.3.4-pluginsonly.zip",
+          "sha256": "37d8d809693adc86587b7bc75a2384fc4e905f259aa9b9a21777749d36fbf8aa",
+          "size": 186958216,
+          "members": [
+            {
+              "from": "Surge XT Effects.vst3/",
+              "to": "Surge XT Effects.vst3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "surge-xt-synthesizer-vst3",
+      "name": "Surge XT (synthesizer, VST3)",
+      "version": "1.3.4",
+      "authors": [
+        "Surge Synth Team and the authors of Surge"
+      ],
+      "licence": "GPL-3.0-or-later",
+      "licence_note": "VST3: the VST3 build of Surge XT 1.3.4 is made through the JUCE that the Surge team holds (surge-synthesizer/JUCE, commit cf5754b), which carries Steinberg's VST3 SDK \"under the terms of the Steinberg VST3 License, or alternatively under the terms of the General Public License (GPL) Version 3\" (its VST3_SDK/LICENSE.txt); Surge XT is GPL-3.0-or-later, so the second applies. Read in the source; the binaries were not taken apart.",
+      "homepage": "https://surge-synthesizer.github.io/",
+      "plugins": [
+        "Surge XT"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/surge-synthesizer/surge/release_xt_1.3.4/LICENSE",
+          "sha256": "d4c0fe570b3750d909691ce5f494c9cd11ee047bbbedda9a5d75cc548e4df06b"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-src-1.3.4.tar.gz",
+        "sha256": null,
+        "md5": "b2eff6a09829756bcb48d193313e445e",
+        "note": "the md5 is the one the Surge project publishes in md5sum.txt of the release"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-win64-1.3.4-pluginsonly.zip",
+          "sha256": "564e162c560af07ad4ed47fe1bfcd827cf97a575de30d06c48249aad2e7c35e6",
+          "size": 49093875,
+          "members": [
+            {
+              "from": "Surge XT.vst3/",
+              "to": "Surge XT.vst3"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-linux-1.3.4-pluginsonly.tar.gz",
+          "sha256": "dd431b75f5fa197c4bffa6ca27ca46970f0a94c834119bb1db7decdeec4c28db",
+          "size": 97294804,
+          "members": [
+            {
+              "from": "Surge XT.vst3/",
+              "to": "Surge XT.vst3"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/surge-xt-macos-1.3.4-pluginsonly.zip",
+          "sha256": "37d8d809693adc86587b7bc75a2384fc4e905f259aa9b9a21777749d36fbf8aa",
+          "size": 186958216,
+          "members": [
+            {
+              "from": "Surge XT.vst3/",
+              "to": "Surge XT.vst3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "kars-vst3",
+      "name": "Kars (synthesizer, VST3)",
+      "version": "1.7 (of DPF-Plugins)",
+      "authors": [
+        "Chris Cannam (karplong, which it is based on)",
+        "Filipe Coelho (DISTRHO)"
+      ],
+      "licence": "ISC",
+      "licence_note": "VST3: the VST3 build of a plugin made with DPF has the interface of VST3 from DPF's own header files, \"travesty\" (pure C, ISC licence, \"Copyright (C) 2021-2022 Filipe Coelho\"), and not Steinberg's SDK, so the VST3 file has the licence of the plugin and nothing more. Read in the source: dpf/distrho/src/travesty/base.h of the tag v1.7 of DPF-Plugins and of the DPF (commit dc6557a) that Dragonfly Reverb 3.2.10 holds; the binaries were not taken apart.",
+      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
+      "plugins": [
+        "Kars"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE-ISC.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/Kars/LICENSE",
+          "sha256": "00ab86489f959d0148f04c99cafc8324e132f51c6a91c0d130f2fd5b1bed3eee"
+        },
+        {
+          "name": "LICENSE-DPF-Plugins.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
+          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
+        "sha256": null,
+        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
+          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
+          "size": 74524341,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/Kars.vst3/",
+              "to": "Kars.vst3"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
+          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
+          "size": 9827340,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/Kars.vst3/",
+              "to": "Kars.vst3"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
+          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
+          "size": 57933584,
+          "installer": "DPF-Plugins-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/Kars.vst3",
+              "to": "Kars.vst3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "nekobi-vst3",
+      "name": "Nekobi (synthesizer, VST3)",
+      "version": "1.7 (of DPF-Plugins)",
+      "authors": [
+        "Sean Bolton and others (Nekobee, which it is based on)",
+        "Filipe Coelho (DISTRHO)"
+      ],
+      "licence": "GPL-2.0-or-later",
+      "licence_note": "The source files of Nekobi say \"version 2 of the License, or (at your option) any later version\" (GPL-2.0-or-later); the table of the DPF-Plugins pack says only \"GPL-2.0\", and the licence text kept in the plugin's folder is the text of version 2. Read as GPL-2.0-or-later, it is compatible with GPLv3 (LG-02); if it were only version 2, it would not be. VST3: the VST3 build of a plugin made with DPF has the interface of VST3 from DPF's own header files, \"travesty\" (pure C, ISC licence, \"Copyright (C) 2021-2022 Filipe Coelho\"), and not Steinberg's SDK, so the VST3 file has the licence of the plugin and nothing more. Read in the source: dpf/distrho/src/travesty/base.h of the tag v1.7 of DPF-Plugins and of the DPF (commit dc6557a) that Dragonfly Reverb 3.2.10 holds; the binaries were not taken apart.",
+      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
+      "plugins": [
+        "Nekobi"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE-GPL-2.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/Nekobi/LICENSE",
+          "sha256": "d8c320ffc0030d1b096ae4732b50d2b811cf95e9a9b7377c1127b2563e0a0388"
+        },
+        {
+          "name": "LICENSE-DPF-Plugins.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
+          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
+        "sha256": null,
+        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
+          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
+          "size": 74524341,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/Nekobi.vst3/",
+              "to": "Nekobi.vst3"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
+          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
+          "size": 9827340,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/Nekobi.vst3/",
+              "to": "Nekobi.vst3"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
+          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
+          "size": 57933584,
+          "installer": "DPF-Plugins-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/Nekobi.vst3",
+              "to": "Nekobi.vst3"
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": "surge-xt-data",
       "name": "Surge XT patches and wavetables",
       "version": "1.3.4",

@@ -114,7 +114,7 @@ pub struct Build {
 pub struct Member {
     /// Its name inside the archive.
     pub from: String,
-    /// The name it is given in the set's folder: a plain name of a `.clap` file, or of an `.lv2` bundle (a folder). **For data it is `.`**: what is in the folder `from` is the set's folder.
+    /// The name it is given in the set's folder: a plain name of a `.clap` file, of an `.lv2` bundle (a folder) or of a `.vst3` module (a folder). **For data it is `.`**: what is in the folder `from` is the set's folder.
     pub to: String,
     /// For data: paths inside the folder that are **not** kept (each a path with `/` between its parts, relative to the folder, and a folder ends with `/`), because they may not ship (what the
     /// licence policy does not allow, or whose licence is not known). One that is not in the archive is an error: the manifest would be out of date.
@@ -259,16 +259,24 @@ impl Manifest {
                         problems.push(format!("{there}: only data leaves anything out"));
                     }
                     let lower = member.to.to_ascii_lowercase();
-                    if !(is_a_plain_file_name(&member.to) && (lower.ends_with(".clap") || lower.ends_with(".lv2"))) {
+                    if !(is_a_plain_file_name(&member.to)
+                        && (lower.ends_with(".clap") || lower.ends_with(".lv2") || lower.ends_with(".vst3")))
+                    {
                         problems.push(format!(
-                            "{there}: {:?} is not a plain name of a .clap file or an .lv2 folder",
+                            "{there}: {:?} is not a plain name of a .clap file, an .lv2 folder or a .vst3 folder",
                             member.to
                         ));
                     }
-                    // (An LV2 bundle is a folder: out of a zip or a tar it is taken by the name of the folder with a `/` at the end, and without it only one file would be taken.)
+                    // (An LV2 bundle and a VST3 module are folders: out of a zip or a tar they are taken by the name of the folder with a `/` at the end, and without it only one file would be taken.)
                     if lower.ends_with(".lv2") && build.installer.is_none() && !member.from.ends_with('/') {
                         problems.push(format!(
                             "{there}: {:?} is a folder (an .lv2 bundle) and its name inside the archive must end with /",
+                            member.from
+                        ));
+                    }
+                    if lower.ends_with(".vst3") && build.installer.is_none() && !member.from.ends_with('/') {
+                        problems.push(format!(
+                            "{there}: {:?} is a folder (a .vst3 module) and its name inside the archive must end with /",
                             member.from
                         ));
                     }

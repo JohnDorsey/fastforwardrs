@@ -62,7 +62,7 @@
 | **15.2** | **Done 2026-11-02 (section 9).** Scan and installation: the scan program learns VST3, cache (format 10), `PluginAddress::Vst3`, `InstalledPlugin` and its descriptor, folders and trust, the plugin manager and the add-effect menu list them under *VST3*, a library that fails says why. | scan tests (also with a library that crashes); screenshots |
 | **15.3** | **Done 2026-11-02 (section 10).** Sound: `Vst3Copy`, the protocol's `Address::Vst3`, the program makes it, `PluginHost` makes only remote VST3 copies, restart with replay, state in (state out is 15.6), notes. | the same differential idea as phase 14: the program's bits equal a copy made in the test's own process; a crash does not take the test down; the restart is bit-identical to a copy that never crashes; real plugins on this PC |
 | **15.4** | **Done 2026-11-03 (section 12).** End to end: an effect on a clip, an instrument played by a MIDI clip, a project file with VST3 effects saved and loaded (**no new file-format version was needed**), a plugin missing from the machine, a crash during a play. | the existing sound journeys with a VST3 plugin: export and preview, the command-line exporter, the editor's export; MIDI clips |
-| **15.5** | Real plugins: VST3 sets in the Bundles tab (licence read first; the Windows build must exist), tried on this PC. Whatever breaks becomes a test. | `tests/bundled_*_real.rs`-style tests (ignored by default; they need the downloaded set) |
+| **15.5** | **Done 2026-11-03 (section 13).** Real plugins: VST3 sets in the Bundles tab (licence read first; the Windows build must exist), tried on this PC. Whatever breaks becomes a test. | `tests/bundled_*_real.rs`-style tests (ignored by default; they need the downloaded set) |
 | **15.6** | **Windows** (the second half): `--kind vst3` in the editor program, `IPlugView` attached to the program's window, resize both ways, edits (`performEdit`) flowing back into the effect, controller state saved. Windows first; macOS and Linux code written for; Linux needs `IRunLoop`. | tests like the LV2 window tests with a test view; a real window by eye on Windows |
 | **15.7** | Planted-mistake campaign over the new tests, documents (`using-the-editor-in-detail.md`, `developer-readme.md`, `project-file-format.md`, `THIRD_PARTY.md`), the report `engine-phase-15-report.md`. | mutation results, CI green on three systems |
 
@@ -319,4 +319,27 @@ The cost is **linear, about 31 microseconds a value in a release build** (0.14 m
 * **A reverb's tail after the end of a clip** with a VST3 plugin is not tried: the test plugins have no echo (CLAP's has), and the code that plays a tail is the same for every format (its tests are in `sound_plugins_clap_in_the_sound.rs`). Dragonfly Reverb would show it; that is 15.5.
 * **The question the editor asks about a folder** (the dialog that says "may I run plugins from here?") is tried with VST3 only as far as the host asks it (`take_wanted` gives the folder that holds the `.vst3` module, the module's name and the plugin's); the dialog itself is the same for every format.
 * **A crash during a play in the editor's window with sound coming out of the speakers** is the stream of the preview, tried above; the speakers are not.
+
+## 13. 15.5 as built (2026-11-03)
+
+**What it is.** Seven VST3 sets in the Bundles tab (the manifest has 23 sets now), made from the CLAP sets and fetched from **the same release files, so the download is exactly as big as it was** (404,310,339 bytes for Windows with the data of Surge XT). The account, with the licence reading, is `bundleable-vst3-plugins.md`; here is what bears on the plan.
+
+| Where | What |
+|---|---|
+| `bundled-plugins/manifest.json` | `dragonfly-reverb-vst3` (with Early Reflections, which the CLAP set does not have), `mverb-vst3`, `magigaverb-vst3`, `surge-xt-effects-vst3`, `surge-xt-synthesizer-vst3`, `kars-vst3`, `nekobi-vst3`. Names say *(VST3)*, and *synthesizer* where the plugin is one, since the real synthesizer tests find the sets by that word. Each set's `licence_note` says what was read about the VST3 interface in the build. |
+| `plugin_bundles::manifest`, `fetch_bundled_plugins.py` | `.vst3` is accepted as a name of a member, a folder like an `.lv2` bundle (its name inside a zip or a tar must end with `/`; inside an installer of a disk image it is a path). The extraction itself needed no change: it did not know the names. |
+| `tests/bundled_plugins_real.rs` (ignored, by hand) | the scan test knows `ScannedVst3`; **new** `every_real_vst3_effect_makes_finite_sound_that_is_not_silent_and_changes_the_sound_it_is_given`. The synthesizer test (`bundled_synthesizers_real.rs`) took the three VST3 instruments without a change. |
+
+**Licence, the new question** [V from the sources; the binaries were not taken apart]: a VST3 build carries the VST3 interface. DPF-based plugins have DPF's own ISC headers ("travesty", read in the tags the releases were built from); Surge XT's JUCE carries Steinberg's SDK "under the terms of the Steinberg VST3 License, or alternatively ... the GPL Version 3", and Surge is GPL-3.0-or-later.
+
+**Tried on this PC** [V]: the program's own downloader fetched all 23 sets on **Windows (97.9 s) and on Linux (95.6 s)**; the real scan test, the effect test and the synthesizer tests pass **on both**. All seven VST3 effects make finite, not silent sound and change what they are given (Surge XT Effects, with no effect in its slots, changes nothing); the three VST3 instruments play a note, a MIDI clip through the whole chain, silence before it, a quiet tail, and a note held across a seek. **Kars as VST3 is the Kars of CLAP and LV2** to the five digits printed.
+
+**"Whatever breaks becomes a test": nothing in the host broke.** The two faults that real plugins found came earlier (section 10, with Dragonfly and Surge XT); the plugins of the other vendors here (MVerb, MaGigaverb, Kars, Nekobi) met the host and passed. What the work did find was the manifest's rule, which refused `.vst3` by design, and which two old tests pinned (they now say `.vst3` is fit): a test of the rule in Rust and one in Python.
+
+**Not done, said plainly.**
+
+* **macOS is not verified by hand**: the members for the Mac follow the names of the CLAP and LV2 ones (**[B]**; I cannot open a disk image here). The CI job of a Mac fetches every set (its failures are warnings): *(read after the push: see below)*.
+* **The other VST3 modules of the same release files** (3BandEQ, PingPongPan, MaBitcrush, MaFreeverb, MaPitchshift, CycleShifter) were left out to keep a second copy of every plugin out of the menu; Wolf Shaper's release was not looked at.
+* **A reverb's tail after a clip** was not tried with the real Dragonfly through a project (the reverb tails of a project are the same code for every format).
+* **Nobody has listened to them in the editor**; no window of a VST3 plugin is shown (15.6).
 

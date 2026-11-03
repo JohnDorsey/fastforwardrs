@@ -9,8 +9,8 @@
 //! FFRS_BUNDLED_PLUGINS=target/bundled/plugins cargo test --release --test bundled_plugins_real -- --ignored
 //! ```
 //!
-//! What it checks is what a person is promised: every plugin of the manifest (a CLAP file, or an LV2 bundle) is found by the scan program, loads, can be an effect, and no CLAP plugin is
-//! unreliable at its start.
+//! What it checks is what a person is promised: every plugin of the manifest (a CLAP file, an LV2 bundle or a VST3 module) is found by the scan program, loads, can be an effect, and no CLAP
+//! plugin is unreliable at its start; and that every VST3 effect makes sound that is finite and not silent, and changes the sound it is given.
 
 use std::path::PathBuf;
 
@@ -87,7 +87,19 @@ fn every_plugin_of_the_manifest_is_found_loads_can_be_an_effect_and_starts_stead
                     assert!(plugin.problem.is_none(), "{file}: {:?}", plugin.problem);
                 }
             }
-            other => panic!("{file} was not scanned as a plugin library or bundle: {other:?}"),
+            LibraryOutcome::ScannedVst3(module) => {
+                assert!(file.ends_with(".vst3"), "{file} was scanned as a VST3 module");
+                assert!(!module.classes.is_empty(), "{file} has no plugins");
+                for class in &module.classes {
+                    assert!(
+                        class.problem.is_none(),
+                        "{file}: {}: {:?}",
+                        class.class.name,
+                        class.problem
+                    );
+                }
+            }
+            other => panic!("{file} was not scanned as a plugin library, bundle or module: {other:?}"),
         }
     }
     let found = plugins_found_in(&scan.libraries);
@@ -328,6 +340,164 @@ fn every_real_lv2_plugin_makes_finite_sound_that_is_not_silent_and_is_changed_by
             "{name}: {:?}",
             made.outputs_of_control
         );
+    }
+}
+
+/// Runs the VST3 plugin `class` of `module` for `blocks` blocks of 512 frames at 48 kHz with the sound of two tones and a little noise in each channel, with every value at its
+/// default (as the effect gives them), and says what came out of the last half.
+fn run_a_vst3_plugin(module: &std::path::Path, class: vst3_host::ClassId, blocks: usize) -> Result<WhatItMade, String> {
+    const FRAMES: usize = 512;
+    let opened = vst3_host::Module::open(module).map_err(|error| error.to_string())?;
+    let (mut instance, _) =
+        vst3_host::Instance::new(&opened, class, 48_000.0, FRAMES, None).map_err(|error| error.to_string())?;
+    let (inputs, outputs) = instance.channels();
+    // (The values as the effect gives them at its first block: the defaults of the descriptor.)
+    for parameter in &instance.facts().parameters.clone() {
+        if !parameter.is_hidden && !parameter.is_read_only && parameter.can_automate && !parameter.is_a_program_change {
+            instance.set_value(parameter.id, parameter.default_plain, 0);
+        }
+    }
+    let mut seed = 0x9E37_79B9_u32;
+    let mut noise = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed as f32 / u32::MAX as f32 - 0.5) * 0.05
+    };
+    let mut made = WhatItMade {
+        all_finite: true,
+        peak: 0.0,
+        rms_out: 0.0,
+        rms_of_the_change: 0.0,
+        latency: instance.latency(),
+        outputs_of_control: Vec::new(),
+    };
+    let (mut summed_out, mut summed_change, mut counted) = (0.0_f64, 0.0_f64, 0_u64);
+    for block in 0..blocks {
+        let mut ins: Vec<Vec<f32>> = (0..inputs)
+            .map(|channel| {
+                (0..FRAMES)
+                    .map(|frame| {
+                        let at = (block * FRAMES + frame) as f32 / 48_000.0;
+                        let tone = if channel == 0 { 220.0 } else { 330.0 };
+                        0.25 * (std::f32::consts::TAU * tone * at).sin() + noise()
+                    })
+                    .collect()
+            })
+            .collect();
+        let heard = ins.clone();
+        let mut outs: Vec<Vec<f32>> = (0..outputs).map(|_| vec![0.0; FRAMES]).collect();
+        {
+            let mut in_slices: Vec<&mut [f32]> = ins.iter_mut().map(Vec::as_mut_slice).collect();
+            let mut out_slices: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
+            instance
+                .run(&mut in_slices, &mut out_slices, FRAMES)
+                .map_err(|error| error.to_string())?;
+        }
+        for (channel, out) in outs.iter().enumerate() {
+            for (frame, sample) in out.iter().enumerate() {
+                made.all_finite &= sample.is_finite();
+                made.peak = made.peak.max(sample.abs());
+                if block >= blocks / 2 {
+                    let same_place = heard.get(channel).map_or(0.0, |input| input[frame]);
+                    summed_out += f64::from(*sample).powi(2);
+                    summed_change += f64::from(sample - same_place).powi(2);
+                    counted += 1;
+                }
+            }
+        }
+    }
+    made.rms_out = (summed_out / counted.max(1) as f64).sqrt();
+    made.rms_of_the_change = (summed_change / counted.max(1) as f64).sqrt();
+    made.outputs_of_control = instance
+        .control_outputs()
+        .into_iter()
+        .map(|(id, value)| (id, value as f32))
+        .collect();
+    Ok(made)
+}
+
+#[test]
+#[ignore = "needs the folder of bundled plugins that tools/bundled_plugins/fetch_bundled_plugins.py makes (FFRS_BUNDLED_PLUGINS)"]
+fn every_real_vst3_effect_makes_finite_sound_that_is_not_silent_and_changes_the_sound_it_is_given() {
+    let folder = bundled_plugins_folder().expect("FFRS_BUNDLED_PLUGINS names the folder that the script made");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(manifest_file()).expect("the manifest is read"))
+            .expect("the manifest is JSON");
+    let platform = fastforwardrs::plugin_bundles::this_platform().expect("builds for this system");
+    // (The modules of the manifest for this system, with whether the set is of synthesizers, which the name of a set says.)
+    let wanted: Vec<(String, bool)> = manifest["sets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|set| {
+            let is_a_synthesizer = set["name"].as_str().is_some_and(|name| name.contains("synthesizer"));
+            Some((set["platforms"][platform]["members"].as_array()?, is_a_synthesizer))
+        })
+        .flat_map(|(members, is_a_synthesizer)| {
+            members
+                .iter()
+                .map(|member| member["to"].as_str().unwrap().to_owned())
+                .filter(|to| to.ends_with(".vst3"))
+                .map(move |to| (to, is_a_synthesizer))
+        })
+        .collect();
+    assert!(!wanted.is_empty(), "the manifest has VST3 modules for {platform}");
+    let mut scanner = PluginScanner::new(PathBuf::from(SCANNER), ScanCache::in_memory())
+        .with_time_limit(std::time::Duration::from_secs(60));
+    let scan = scanner.scan_folders(std::slice::from_ref(&folder));
+    let mut table = Vec::new();
+    for (file, is_a_synthesizer) in &wanted {
+        let report = scan
+            .libraries
+            .iter()
+            .find(|report| {
+                report
+                    .path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy() == file.as_str())
+            })
+            .unwrap_or_else(|| panic!("{file} was not found in {folder:?}"));
+        let LibraryOutcome::ScannedVst3(module) = &report.outcome else {
+            panic!("{file} was not scanned as a VST3 module: {:?}", report.outcome);
+        };
+        for class in &module.classes {
+            // (An instrument is played by notes and is tried by the test of the synthesizers.)
+            if *is_a_synthesizer {
+                continue;
+            }
+            let made = run_a_vst3_plugin(&report.path, class.class.id, 200)
+                .unwrap_or_else(|error| panic!("{}: {error}", class.class.name));
+            println!(
+                "{:<28} latency {:>5}  peak {:>7.4}  rms {:>8.5}  change {:>8.5}  values {:>4}",
+                class.class.name,
+                made.latency,
+                made.peak,
+                made.rms_out,
+                made.rms_of_the_change,
+                class.facts.as_ref().map_or(0, |facts| facts.parameters.len())
+            );
+            table.push((class.class.name.clone(), file.clone(), made));
+        }
+    }
+    // (The effects of the sets: the four of Dragonfly, MVerb, MaGigaverb and Surge XT Effects.)
+    assert!(table.len() >= 7, "only {} VST3 effects were tried", table.len());
+    for (name, file, made) in &table {
+        assert!(made.all_finite, "{name} ({file}) made a sample that is not a number");
+        assert!(made.peak < 8.0, "{name} ({file}) made a peak of {}", made.peak);
+        assert!(
+            made.outputs_of_control.iter().all(|(_, value)| value.is_finite()),
+            "{name}: {:?}",
+            made.outputs_of_control
+        );
+        assert!(made.rms_out > 1e-5, "{name} ({file}) made silence from a steady sound");
+        // (Surge XT Effects has no effect in its slots until a patch puts one there, I believe, and passes the sound as it is: it is not silent, and it may change nothing.)
+        if !name.to_lowercase().contains("surge") {
+            assert!(
+                made.rms_of_the_change > 1e-5,
+                "{name} ({file}) did not change the sound"
+            );
+        }
     }
 }
 

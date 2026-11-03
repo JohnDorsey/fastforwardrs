@@ -123,7 +123,7 @@ class TheRealManifest(unittest.TestCase):
         self.assertEqual(fetcher.check_manifest(THE_REAL_MANIFEST), [])
 
     def test_it_has_what_the_maintainer_chose_and_not_what_the_maintainer_did_not(self):
-        clap_sets = [s for s in THE_REAL_MANIFEST["sets"] if not s["id"].endswith("-lv2") and s.get("kind", "plugins") == "plugins"]
+        clap_sets = [s for s in THE_REAL_MANIFEST["sets"] if not s["id"].endswith(("-lv2", "-vst3")) and s.get("kind", "plugins") == "plugins"]
         names = [plugin for plugin_set in clap_sets for plugin in plugin_set["plugins"]]
         self.assertEqual(
             names,
@@ -161,10 +161,13 @@ class TheRealManifest(unittest.TestCase):
                 "nekobi": (["Nekobi"], "GPL-2.0-or-later"),
                 "kars-lv2": (["Kars"], "ISC"),
                 "nekobi-lv2": (["Nekobi"], "GPL-2.0-or-later"),
+                "surge-xt-synthesizer-vst3": (["Surge XT"], "GPL-3.0-or-later"),
+                "kars-vst3": (["Kars"], "ISC"),
+                "nekobi-vst3": (["Nekobi"], "GPL-2.0-or-later"),
             },
         )
         # (Nekobi's licence is a reading of its source files, and the set says so, with the reason, where a person reads about the licence.)
-        for set_id in ("nekobi", "nekobi-lv2"):
+        for set_id in ("nekobi", "nekobi-lv2", "nekobi-vst3"):
             self.assertIn("any later version", synthesizers[set_id]["licence_note"])
         # (Surge XT's synthesizer and its effects are in one release file, which the Bundles tab downloads once. Its LV2 bundle, in the file for Linux, is not offered: it has 2 audio inputs and 6
         # outputs, which the scan lists as "not used".)
@@ -226,6 +229,48 @@ class TheRealManifest(unittest.TestCase):
                     by_id[lv2_id]["platforms"][platform_name]["sha256"], by_id[clap_id]["platforms"][platform_name]["sha256"], (lv2_id, platform_name)
                 )
 
+    def test_the_vst3_sets_are_these_and_hold_what_their_authors_release_as_vst3_modules_from_the_release_files_of_the_clap_sets(self):
+        vst3_sets = {s["id"]: s for s in THE_REAL_MANIFEST["sets"] if s["id"].endswith("-vst3")}
+        self.assertEqual(
+            {set_id: plugin_set["plugins"] for set_id, plugin_set in vst3_sets.items()},
+            {
+                "dragonfly-reverb-vst3": ["Dragonfly Early Reflections", "Dragonfly Hall Reverb", "Dragonfly Plate Reverb", "Dragonfly Room Reverb"],
+                "mverb-vst3": ["MVerb"],
+                "magigaverb-vst3": ["MaGigaverb"],
+                "surge-xt-effects-vst3": ["Surge XT Effects"],
+                "surge-xt-synthesizer-vst3": ["Surge XT"],
+                "kars-vst3": ["Kars"],
+                "nekobi-vst3": ["Nekobi"],
+            },
+        )
+        by_id = {s["id"]: s for s in THE_REAL_MANIFEST["sets"]}
+        for vst3_id, plugin_set in vst3_sets.items():
+            clap_id = vst3_id[: -len("-vst3")]
+            clap_set = by_id[clap_id]
+            # (Everything but what the plugins are is the CLAP set's: the same authors, licence, licence texts, source and the same release files, which the Bundles tab downloads once.)
+            for field in ("version", "authors", "licence", "homepage", "licence_texts", "source"):
+                self.assertEqual(plugin_set[field], clap_set[field], (vst3_id, field))
+            # (The note of the VST3 set is the CLAP set's, if it has one, and says what was read about the VST3 interface in the build: see below.)
+            if clap_set.get("licence_note"):
+                self.assertIn(clap_set["licence_note"], plugin_set["licence_note"], vst3_id)
+            self.assertEqual(set(plugin_set["platforms"]), set(clap_set["platforms"]), vst3_id)
+            for platform_name, build in plugin_set["platforms"].items():
+                for field in ("url", "sha256", "size", "installer"):
+                    self.assertEqual(build.get(field), clap_set["platforms"][platform_name].get(field), (vst3_id, platform_name, field))
+                for member in build["members"]:
+                    self.assertTrue(member["to"].endswith(".vst3"), member)
+                    if not build.get("installer"):
+                        self.assertTrue(member["from"].endswith(".vst3/"), member)
+                    else:
+                        self.assertIn("-vst3bundles.pkg/Payload/", member["from"])
+                self.assertEqual(len(build["members"]), len(plugin_set["plugins"]), (vst3_id, platform_name))
+        # (The VST3 builds of DPF's plugins use DPF's own headers for the interface of VST3 ("travesty", ISC), and the VST3 build of Surge XT uses the GPL-3.0 licence of the SDK that its JUCE
+        # carries: the sets say where that was read.)
+        for set_id in ("dragonfly-reverb-vst3", "mverb-vst3", "magigaverb-vst3", "kars-vst3", "nekobi-vst3"):
+            self.assertIn("travesty", by_id[set_id]["licence_note"], set_id)
+        for set_id in ("surge-xt-effects-vst3", "surge-xt-synthesizer-vst3"):
+            self.assertIn("General Public License", by_id[set_id]["licence_note"], set_id)
+
     def test_every_set_has_a_build_for_windows_linux_and_macos_and_the_files_it_takes_are_the_plugins_it_names(self):
         for plugin_set in THE_REAL_MANIFEST["sets"]:
             # (Every set has a build for each system, except Wolf Shaper, whose file for macOS is a zip that holds a disk image: one more layer than the program opens.)
@@ -249,12 +294,12 @@ class TheRealManifest(unittest.TestCase):
             if build["url"].endswith(".dmg"):
                 self.assertTrue(build["installer"].endswith(".pkg"), plugin_set["id"])
                 for member in build["members"]:
-                    self.assertTrue(member["from"].endswith((".clap", ".lv2")) and "/Payload/" in member["from"], member["from"])
+                    self.assertTrue(member["from"].endswith((".clap", ".lv2", ".vst3")) and "/Payload/" in member["from"], member["from"])
                     self.assertEqual(member["to"].rsplit(".", 1)[1], member["from"].rsplit(".", 1)[1], "a bundle keeps its kind")
             else:
                 self.assertTrue(build["url"].endswith(".zip"), plugin_set["id"])
                 for member in build["members"]:
-                    self.assertTrue(member["from"].endswith(".clap/"), member["from"])
+                    self.assertTrue(member["from"].endswith((".clap/", ".vst3/")), member["from"])
 
     def test_the_source_of_every_set_is_named_with_a_checksum_or_the_reason_there_is_none(self):
         for plugin_set in THE_REAL_MANIFEST["sets"]:
@@ -310,7 +355,7 @@ class WhatIsWrongWithAManifest(unittest.TestCase):
         build["members"] = [{"from": "a/x.clap", "to": "x.clap"}, {"from": "b/x.clap", "to": "x.clap"}, {"from": "c/y.dll", "to": "y.dll"}]
         problems = self.problems()
         self.assertIn("'x.clap' is taken twice", problems)
-        self.assertIn("'y.dll' is not a plain name of a .clap file or an .lv2 folder", problems)
+        self.assertIn("'y.dll' is not a plain name of a .clap file, an .lv2 folder or a .vst3 folder", problems)
 
     def test_an_lv2_member_is_a_name_of_a_folder_and_what_is_not_is_said(self):
         build = self.first["platforms"]["windows-x86_64"]
@@ -318,12 +363,26 @@ class WhatIsWrongWithAManifest(unittest.TestCase):
         self.assertIn("is a folder (an .lv2 bundle) and its name inside the archive must end with /", self.problems())
         build["members"] = [{"from": "pack/Thing.lv2/", "to": "Thing.LV2"}]
         self.assertEqual(self.problems(), "", "a folder with its name ending in / and any case of .lv2 is fit")
-        build["members"] = [{"from": "pack/Thing.lv2/", "to": "Thing.vst3"}]
-        self.assertIn("is not a plain name of a .clap file or an .lv2 folder", self.problems())
+        build["members"] = [{"from": "pack/Thing.lv2/", "to": "Thing.dll"}]
+        self.assertIn("is not a plain name of a .clap file, an .lv2 folder or a .vst3 folder", self.problems())
         # (Out of the installer of a disk image the member is a path in what the installer holds, with no / at the end.)
         self.setUp()
         mac = self.first["platforms"]["macos-universal"]
         mac["members"] = [{"from": "dpf-x-lv2bundles.pkg/Payload/Thing.lv2", "to": "Thing.lv2"}]
+        self.assertEqual(self.problems(), "")
+
+    def test_a_vst3_member_is_a_name_of_a_folder_as_an_lv2_one_is_and_what_is_not_is_said(self):
+        build = self.first["platforms"]["windows-x86_64"]
+        build["members"] = [{"from": "pack/Thing.vst3", "to": "Thing.vst3"}]
+        self.assertIn("is a folder (a .vst3 module) and its name inside the archive must end with /", self.problems())
+        build["members"] = [{"from": "pack/Thing.vst3/", "to": "Thing.VST3"}]
+        self.assertEqual(self.problems(), "", "a folder with its name ending in / and any case of .vst3 is fit")
+        build["members"] = [{"from": "pack/Thing.vst3/", "to": "Thing.dll"}]
+        self.assertIn("is not a plain name of a .clap file, an .lv2 folder or a .vst3 folder", self.problems())
+        # (Out of the installer of a disk image the member is a path in what the installer holds, with no / at the end.)
+        self.setUp()
+        mac = self.first["platforms"]["macos-universal"]
+        mac["members"] = [{"from": "dpf-x-vst3bundles.pkg/Payload/Thing.vst3", "to": "Thing.vst3"}]
         self.assertEqual(self.problems(), "")
 
     def test_a_platform_that_is_not_known_and_a_set_with_no_plugins_and_an_id_used_twice_are_said(self):
