@@ -109,4 +109,9 @@ MUTATIONS = [
     # --- the scan ---
     ("scan: a sound that is not numbers is no problem", SCAN, "(!is_made_of_numbers(&outputs)).then(", "(false && !is_made_of_numbers(&outputs)).then(", TESTS),
     ("scan: every plugin is said to have a state", SCAN, "let has_state = instance.save_state().is_ok();", "let has_state = true;", TESTS),
+    # --- the texts that another system writes for a class (section 17) ---
+    ("class id: the layout of a GUID is not put on or taken off the first number", CLASS_ID,
+     "        swapped[0..4].reverse();\n", "", TESTS),
+    ("class id: the class's own text is one of the other systems' texts", CLASS_ID,
+     "            if text != own && !texts.contains(&text) {", "            if !texts.contains(&text) {", TESTS),
 ]

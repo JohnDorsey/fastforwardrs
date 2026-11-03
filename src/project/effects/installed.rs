@@ -86,6 +86,26 @@ pub struct InstalledPlugin {
     pub presets: Vec<EffectPreset>,
 }
 
+impl InstalledPlugin {
+    /// Whether this is a VST3 plugin that `snapshot` names by **the text that another system writes for its class** (`vst3:` and 32 digits that are not this system's text of the class
+    /// but the bytes of the class written as they are, or with the layout of a `GUID` put on or taken off: see `ClassId::texts_that_other_systems_write`), and fits in all else (the
+    /// major version, the domain, the values). A plugin built with DPF gives the same bytes everywhere and Windows reads them as a `GUID`, so Dragonfly has one text on Windows and another on
+    /// the other systems; without this a project of one would not find its plugin on the other.
+    pub fn is_a_vst3_plugin_that_another_system_names(&self, snapshot: &EffectDescriptor) -> bool {
+        let PluginAddress::Vst3 { class_id } = self.address else {
+            return false;
+        };
+        let Some(named) = snapshot.key.strip_prefix("vst3:") else {
+            return false;
+        };
+        class_id
+            .texts_that_other_systems_write()
+            .iter()
+            .any(|text| text.eq_ignore_ascii_case(named))
+            && self.descriptor.fits_but_for_the_key(snapshot)
+    }
+}
+
 /// The plugins that are installed now, in the order of the folders they were found in.
 static INSTALLED: RwLock<Vec<&'static InstalledPlugin>> = RwLock::new(Vec::new());
 
@@ -121,14 +141,20 @@ pub fn installed_plugins() -> Vec<&'static InstalledPlugin> {
 }
 
 /// The installed plugin that can stand in for the type of effect `descriptor` describes (the same key and major version, and every value of `descriptor` is one of the plugin's
-/// of the same kind), if there is one: the first in the list, which is the one of the folder that comes first.
+/// of the same kind), if there is one: the first in the list, which is the one of the folder that comes first. **A VST3 plugin is also found by the text that another system writes
+/// for its class** (see [`InstalledPlugin::is_a_vst3_plugin_that_another_system_names`]): a project made on Windows with Dragonfly finds it on Linux, and the other way round.
 pub fn installed_plugin_for(descriptor: &EffectDescriptor) -> Option<&'static InstalledPlugin> {
-    INSTALLED
-        .read()
-        .unwrap_or_else(PoisonError::into_inner)
+    let installed = INSTALLED.read().unwrap_or_else(PoisonError::into_inner);
+    installed
         .iter()
         .copied()
         .find(|plugin| plugin.descriptor.can_stand_in_for(descriptor))
+        .or_else(|| {
+            installed
+                .iter()
+                .copied()
+                .find(|plugin| plugin.is_a_vst3_plugin_that_another_system_names(descriptor))
+        })
 }
 
 /// The shaders that are installed now: the kinds of effect that the shader files found in the folders of the plugin manager are (phase 6.8), the usable ones, in the order of the

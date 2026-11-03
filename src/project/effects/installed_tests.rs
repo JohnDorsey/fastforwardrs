@@ -162,3 +162,91 @@ fn a_sound_plugin_can_be_put_on_a_sound_and_on_a_video_and_on_nothing_seen() {
     assert!(!kind.applies_to_a_clip_of_kind(ClipKind::Text));
     assert!(kind.applies_to_a_track());
 }
+
+// --- a VST3 plugin that a project of another system names by the text that system writes for it (docs/engine-phase-15-vst3-design.md, section 17) ---
+
+/// Dragonfly Hall as this system writes its class id, and as the other writes it (the same 16 bytes, read in another order by Windows).
+fn dragonfly_hall_here_and_there() -> (&'static str, &'static str) {
+    let (windows, others) = ("445046206173636C3172666400000000", "2046504473616C633172666400000000");
+    if cfg!(target_os = "windows") {
+        (windows, others)
+    } else {
+        (others, windows)
+    }
+}
+
+/// An installed VST3 plugin of this class, with a value `decay`.
+fn a_vst3_plugin_called(class_text: &str) -> InstalledPlugin {
+    let mut plugin = an_installed_sound_plugin(
+        &format!("vst3:{class_text}"),
+        "Maker",
+        &[("param1", 1.0, Some((0.0, 10.0)))],
+    );
+    plugin.address = PluginAddress::Vst3 {
+        class_id: vst3_host::ClassId::from_text(class_text).unwrap(),
+    };
+    plugin
+}
+
+#[test]
+fn a_project_of_the_other_system_names_a_vst3_plugin_by_the_text_that_system_writes_and_finds_it_here() {
+    let _alone = the_installed_plugins_to_myself();
+    let (here, there) = dragonfly_hall_here_and_there();
+    let plugin = a_vst3_plugin_called(here);
+    set_installed_plugins(vec![plugin.clone()]);
+
+    // The snapshot a file of the other system keeps: its key is the other's text.
+    let mut snapshot = snapshot_of(&plugin);
+    snapshot.key = format!("vst3:{there}").into();
+
+    let kind = EffectKind::from_snapshot(snapshot.clone()).unwrap();
+    assert!(kind.is_installed(), "found by the other system's text");
+    assert_eq!(
+        kind.installed_plugin().map(|found| found.descriptor.key.to_string()),
+        Some(format!("vst3:{here}")),
+        "and it is the plugin of this system, with this system's key"
+    );
+    assert_eq!(
+        installed_plugin_for(&snapshot).map(|found| &found.address),
+        Some(&plugin.address)
+    );
+}
+
+#[test]
+fn a_vst3_plugin_is_found_by_another_systems_text_only_when_all_else_fits_and_only_by_the_texts_of_its_own_bytes() {
+    let _alone = the_installed_plugins_to_myself();
+    let (here, there) = dragonfly_hall_here_and_there();
+    let plugin = a_vst3_plugin_called(here);
+    set_installed_plugins(vec![plugin.clone()]);
+    let named_by = |text: &str| {
+        let mut snapshot = snapshot_of(&plugin);
+        snapshot.key = format!("vst3:{text}").into();
+        snapshot
+    };
+
+    assert!(installed_plugin_for(&named_by(there)).is_some());
+    assert!(
+        installed_plugin_for(&named_by("00000000000000000000000000000001")).is_none(),
+        "another class is another plugin"
+    );
+    let mut other_major = named_by(there);
+    other_major.version = (plugin.descriptor.version.0 + 1, 0);
+    assert!(
+        installed_plugin_for(&other_major).is_none(),
+        "a major version that is not this one"
+    );
+    let mut a_value_it_has_not = named_by(there);
+    a_value_it_has_not.parameters.to_mut().push(
+        the_descriptor_of_an_effect_the_program_does_not_have("vst3:x", &[("param99", PropertyValue::Number(0.0))])
+            .parameters[0]
+            .clone(),
+    );
+    assert!(
+        installed_plugin_for(&a_value_it_has_not).is_none(),
+        "a value that the plugin has not"
+    );
+    // A key of another format that happens to be the text of the class is not a VST3 plugin's.
+    let mut other_format = named_by(there);
+    other_format.key = format!("clap:{there}").into();
+    assert!(installed_plugin_for(&other_format).is_none());
+}

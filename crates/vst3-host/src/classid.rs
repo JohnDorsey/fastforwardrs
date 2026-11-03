@@ -52,6 +52,28 @@ impl ClassId {
         format!("{:08X}{:08X}{:08X}{:08X}", self.0[0], self.0[1], self.0[2], self.0[3])
     }
 
+    /// The texts that **another system** writes for this class, besides [`Self::text`]: a plugin built with DPF gives the same 16 bytes on every system and Windows reads them as the
+    /// numbers of a `GUID`, so that the text of the class is not the same on Windows as on the others; a plugin built with the SDK's `INLINE_UID` has the same numbers on every system
+    /// and other bytes. **A project that names a plugin by the text of the other system finds it by these** (see `installed_plugin_for` in the editor): the bytes as this system has them
+    /// written as they are, and the bytes with the layout of a `GUID` taken away or put on (that swap is its own inverse). Never this class's own text.
+    pub fn texts_that_other_systems_write(self) -> Vec<String> {
+        let bytes: [u8; 16] = self.to_tuid().map(|byte| byte as u8);
+        let mut swapped = bytes;
+        // (The layout of a GUID: the first number and each half of the second are little-endian.)
+        swapped[0..4].reverse();
+        swapped[4..6].reverse();
+        swapped[6..8].reverse();
+        let own = self.text();
+        let mut texts: Vec<String> = Vec::new();
+        for candidate in [bytes, swapped] {
+            let text: String = candidate.iter().map(|byte| format!("{byte:02X}")).collect();
+            if text != own && !texts.contains(&text) {
+                texts.push(text);
+            }
+        }
+        texts
+    }
+
     /// The id that [`Self::text`] wrote (`None` if the text is not 32 hexadecimal digits).
     pub fn from_text(text: &str) -> Option<Self> {
         if text.len() != 32 || !text.is_ascii() {

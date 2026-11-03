@@ -112,4 +112,11 @@ MUTATIONS = [
     ("editor: a VST3 plugin that is gone is not explained", FLOW, 'namespace != "lv2" && namespace != "vst3"', 'namespace != "lv2"', TESTS),
     ("editor: the modules that failed are told for any kind of library", FLOW, '"vst3" => is_a_vst3_module(path),', '"vst3" => true,', TESTS),
     ("editor: a module is counted as a plugin", MANAGER, "let count = scan.classes.len();", "let count = 1;", TESTS),
+    # --- a project of the other system finds its VST3 plugin (section 17) ---
+    ("installed: any VST3 key finds any VST3 plugin", "src/project/effects/installed.rs",
+     "            .any(|text| text.eq_ignore_ascii_case(named))", "            .any(|_| true)", TESTS),
+    ("installed: another system's text finds a plugin that does not fit in the rest", "src/project/effects/installed.rs",
+     "            && self.descriptor.fits_but_for_the_key(snapshot)\n", "", TESTS),
+    ("installed: a key of another format that has the text of a class finds a VST3 plugin", "src/project/effects/installed.rs",
+     "        let Some(named) = snapshot.key.strip_prefix(\"vst3:\") else {", "        let Some(named) = snapshot.key.split(':').next_back() else {", TESTS),
 ]

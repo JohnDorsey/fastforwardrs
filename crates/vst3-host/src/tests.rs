@@ -1241,3 +1241,44 @@ fn every_unsafe_block_of_this_crate_says_why_it_is_fine() {
         "the audit found only {blocks} blocks: it is looking in the wrong place"
     );
 }
+
+/// Dragonfly Hall Reverb's class, as this host writes it on Windows and as on the other systems: the same 16 bytes, read as four numbers in another order (DPF writes the bytes it means, and
+/// Windows reads them as a `GUID`). (Written down from the real module on each system, 2026-11-03.)
+const DRAGONFLY_HALL_ON_WINDOWS: &str = "445046206173636C3172666400000000";
+const DRAGONFLY_HALL_ON_THE_OTHERS: &str = "2046504473616C633172666400000000";
+
+#[test]
+fn a_class_id_is_also_known_by_the_texts_that_other_systems_write_for_the_same_bytes() {
+    // The class as this system writes it, and as the other writes it: each is known by the other's text.
+    let (own, other) = if cfg!(target_os = "windows") {
+        (DRAGONFLY_HALL_ON_WINDOWS, DRAGONFLY_HALL_ON_THE_OTHERS)
+    } else {
+        (DRAGONFLY_HALL_ON_THE_OTHERS, DRAGONFLY_HALL_ON_WINDOWS)
+    };
+    let class = ClassId::from_text(own).unwrap();
+    let known_by = class.texts_that_other_systems_write();
+    assert!(known_by.contains(&other.to_owned()), "{known_by:?}");
+    assert!(
+        !known_by.contains(&own.to_owned()),
+        "its own text is not an other's: {known_by:?}"
+    );
+    assert_eq!(known_by.len(), 1, "one other text: {known_by:?}");
+    assert!(ClassId::from_text(&known_by[0]).is_some(), "{known_by:?}");
+}
+
+#[test]
+fn a_class_id_that_was_written_with_the_sdk_macro_is_the_same_text_everywhere_and_is_known_by_the_bytes_of_the_other_system()
+ {
+    // INLINE_UID plugins (Surge XT) have the same four numbers on every system, and other bytes: the text that another system writes for *its bytes* is a different one, which is only
+    // an alias, and the id's own text is the one that is written.
+    let class = id([0x1234_5678, 0x9ABC_DEF0, 0x1357_9BDF, 0x0246_8ACE]);
+    assert_eq!(class.text(), "123456789ABCDEF013579BDF02468ACE");
+    let known_by = class.texts_that_other_systems_write();
+    assert!(!known_by.contains(&class.text()));
+    assert_eq!(known_by.len(), 1, "the bytes of the other system: {known_by:?}");
+    // (And the alias, read as an id of this system, is known by the text of the class: the swap of the bytes is its own inverse.)
+    let back = ClassId::from_text(&known_by[0])
+        .unwrap()
+        .texts_that_other_systems_write();
+    assert!(back.contains(&class.text()), "{back:?}");
+}

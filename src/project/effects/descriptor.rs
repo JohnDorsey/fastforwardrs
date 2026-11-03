@@ -368,8 +368,12 @@ impl EffectDescriptor {
     /// the same key and major number, the same domain, and every value that the snapshot has is a value of this one of the same kind. (What
     /// this has more than the snapshot does has what it begins as.)
     pub fn can_stand_in_for(&self, snapshot: &EffectDescriptor) -> bool {
-        self.key == snapshot.key
-            && self.version.0 == snapshot.version.0
+        self.key == snapshot.key && self.fits_but_for_the_key(snapshot)
+    }
+
+    /// Everything [`Self::can_stand_in_for`] asks but the key: the same major number and domain, and every value the snapshot has is a value of this of the same kind.
+    pub(super) fn fits_but_for_the_key(&self, snapshot: &EffectDescriptor) -> bool {
+        self.version.0 == snapshot.version.0
             && self.domain == snapshot.domain
             && self.makes_sound_from_notes == snapshot.makes_sound_from_notes
             && snapshot.parameters.iter().all(|wanted| {
