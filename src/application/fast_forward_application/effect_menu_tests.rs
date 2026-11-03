@@ -278,7 +278,7 @@ fn put_a_look_up_table_on(window: &mut Window, clip: ClipId) {
     });
 }
 
-fn value_of_the_look_up_table(window: &Window, clip: ClipId, slot: u8) -> PropertyValue {
+fn value_of_the_look_up_table(window: &Window, clip: ClipId, slot: u16) -> PropertyValue {
     let property = PropertyId::effect_value(EffectKind::LUT, EffectInstanceId::FIRST, slot);
     window
         .application()

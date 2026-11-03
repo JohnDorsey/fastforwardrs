@@ -26,11 +26,11 @@ fn values_that_are_not_the_defaults(kind: EffectKind) -> Vec<PropertyValue> {
 }
 
 /// The place of the first value of `kind` that is a number with a range, which is the one that the tests animate, and its range.
-fn the_first_number_with_a_range(kind: EffectKind) -> (u8, (f32, f32)) {
+fn the_first_number_with_a_range(kind: EffectKind) -> (u16, (f32, f32)) {
     kind.parameters()
         .iter()
         .enumerate()
-        .find_map(|(place, parameter)| parameter.range.map(|range| (u8::try_from(place).unwrap(), range)))
+        .find_map(|(place, parameter)| parameter.range.map(|range| (u16::try_from(place).unwrap(), range)))
         .expect("every effect of the program has a number with a range")
 }
 

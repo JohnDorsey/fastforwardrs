@@ -15,9 +15,10 @@ use serde_json::Value;
 use crate::project::animation::{PropertyValue, ValueKind};
 use crate::rgba_picture::RgbaPicture;
 
-/// The most values that an effect can have (a value is named in the code by a small number, its *slot*: see
-/// [`PropertyId::EffectValue`](crate::project::PropertyId::EffectValue)).
-pub const MOST_VALUES_OF_AN_EFFECT: usize = 255;
+/// The most values that an effect can have: 65,535 (a value is named in the code by a number, its *slot*, which is a `u16`: see
+/// [`PropertyId::EffectValue`](crate::project::PropertyId::EffectValue)). **No plugin has that many** (the most that was met is the 2,855 parameters of Surge XT as a VST3 plugin, 774 of
+/// which can be automated); this is the bound that a descriptor from a file or a plugin that says more is refused at, so that it cannot ask for the memory of a computer. Until 2026-11-03 it was 255.
+pub const MOST_VALUES_OF_AN_EFFECT: usize = u16::MAX as usize;
 
 /// What a type of effect works on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -326,6 +327,8 @@ impl EffectDescriptor {
                 self.parameters.len()
             ));
         }
+        // (Each id is looked up in the ids met before it: checked in pairs, the most values would be two thousand million comparisons.)
+        let mut ids_met = std::collections::HashSet::with_capacity(self.parameters.len());
         for (place, parameter) in self.parameters.iter().enumerate() {
             if parameter.id.is_empty() || parameter.name.is_empty() {
                 return Some(format!(
@@ -334,7 +337,7 @@ impl EffectDescriptor {
                     self.key
                 ));
             }
-            if self.parameters[..place].iter().any(|other| other.id == parameter.id) {
+            if !ids_met.insert(&*parameter.id) {
                 return Some(format!(
                     "the effect \"{}\" has two values with the id \"{}\"",
                     self.key, parameter.id

@@ -241,7 +241,7 @@ impl FastForwardApplication {
                 }
             }
         };
-        let property = PropertyId::effect_value(kind, instance, u8::try_from(slot).unwrap_or(0));
+        let property = PropertyId::effect_value(kind, instance, u16::try_from(slot).unwrap_or(0));
         let value = PropertyValue::Words(name);
         match owner {
             Member::Clip(clip) => {

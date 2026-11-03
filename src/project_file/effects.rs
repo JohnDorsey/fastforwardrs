@@ -531,7 +531,7 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
                 .with_state(state)
         })
         .ok_or_else(|| format!("the values of the {kind} effect are not the kind it has"))?;
-    let mut driven: Vec<(u8, DrivenValue)> = Vec::with_capacity(document.driven.len());
+    let mut driven: Vec<(u16, DrivenValue)> = Vec::with_capacity(document.driven.len());
     for (id, one) in document.driven {
         let slot = kind
             .slot_of_the_value_with_id(&id)
@@ -559,7 +559,7 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
             }
         };
         driven.push((
-            u8::try_from(slot).map_err(|_| format!("the {kind} effect has too many values"))?,
+            u16::try_from(slot).map_err(|_| format!("the {kind} effect has too many values"))?,
             DrivenValue {
                 source,
                 channel: one.channel.into(),

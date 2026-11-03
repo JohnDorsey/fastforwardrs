@@ -385,10 +385,12 @@ fn real_modules_are_scanned_and_become_the_effects_a_person_is_offered() {
         surge.descriptor.makes_sound_from_notes,
         "its only input is a side chain"
     );
+    // (774 of its 2,855 parameters can be automated; they were cut to the first 255 until 2026-11-03.)
     assert_eq!(
         surge.descriptor.parameters.len(),
-        fastforwardrs::project::MOST_VALUES_OF_AN_EFFECT,
-        "Surge XT has more automatable parameters than an effect can have"
+        774,
+        "every parameter of Surge XT that a person can automate is a value"
     );
+    assert_eq!(surge.value_handles.len(), 774);
     assert!(named("surge xt effects").is_some());
 }

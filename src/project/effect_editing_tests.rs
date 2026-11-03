@@ -1121,7 +1121,7 @@ fn the_values_of_a_preset_are_given_to_the_effect_in_one_call_and_a_value_that_h
     let _alone = crate::test_support::the_installed_plugins_to_myself();
     let mut each = one_of_each();
     let (kind, instance) = an_effect_with_three_values_on_the_sound(&mut each);
-    let property = move |slot: usize| PropertyId::effect_value(kind, instance, slot as u8);
+    let property = move |slot: usize| PropertyId::effect_value(kind, instance, slot as u16);
     make_a_keyframe(&mut each.project, clip(each.sound), property(1), 5, turn(7.0));
     make_a_keyframe(&mut each.project, clip(each.sound), property(1), 50, turn(9.0));
 
@@ -1152,6 +1152,69 @@ fn the_values_of_a_preset_are_given_to_the_effect_in_one_call_and_a_value_that_h
         each.project.property_value_at(clip(each.sound), property(1), frame(50)),
         Some(turn(9.0))
     );
+}
+
+#[test]
+fn the_values_of_an_effect_of_a_thousand_values_are_set_animated_and_given_by_a_preset_each_in_its_own_place() {
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let mut each = one_of_each();
+    let names: Vec<String> = (0..1000).map(|number| format!("value {number:04}")).collect();
+    let values: Vec<crate::test_support::ValueOfAPlugin<'_>> =
+        names.iter().map(|name| (name.as_str(), 0.0, None)).collect();
+    crate::project::set_installed_plugins(vec![crate::test_support::an_installed_sound_plugin(
+        "ladspa:presets:big",
+        "Presets",
+        &values,
+    )]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let instance = each.project.add_effect(clip(each.sound), kind).unwrap();
+    let property = move |slot: u16| PropertyId::effect_value(kind, instance, slot);
+
+    // A value in place 300 (which is 44 and 256), and keyframes in place 700.
+    each.project
+        .set_property_at(clip(each.sound), property(300), turn(3.0), frame(0))
+        .unwrap();
+    make_a_keyframe(&mut each.project, clip(each.sound), property(700), 5, turn(7.0));
+    make_a_keyframe(&mut each.project, clip(each.sound), property(700), 50, turn(9.0));
+
+    let values = the_values_of(&each.project, clip(each.sound), instance);
+    assert_eq!(values.len(), 1000);
+    assert_eq!(values[300], turn(3.0));
+    assert_eq!(values[44], turn(0.0), "the place 256 before it is as it was");
+    assert!(each.project.is_animated(clip(each.sound), property(700)));
+    assert!(
+        !each.project.is_animated(clip(each.sound), property(188)),
+        "700 less 512"
+    );
+    assert_eq!(
+        each.project
+            .property_value_at(clip(each.sound), property(700), frame(5)),
+        Some(turn(7.0))
+    );
+    assert_eq!(
+        each.project
+            .property_value_at(clip(each.sound), property(700), frame(50)),
+        Some(turn(9.0))
+    );
+
+    // A preset gives values far along the list, and a place past the end is ignored.
+    let kept = each
+        .project
+        .apply_values_to_an_effect(
+            clip(each.sound),
+            instance,
+            &[
+                (300, turn(1.0)),
+                (999, turn(2.0)),
+                (1000, turn(5.0)),
+                (700, turn(100.0)),
+            ],
+            frame(20),
+        )
+        .unwrap();
+    let values = the_values_of(&each.project, clip(each.sound), instance);
+    assert_eq!((values[300].clone(), values[999].clone()), (turn(1.0), turn(2.0)));
+    assert_eq!(kept, 1, "the value with keyframes is left as it is, and counted");
 }
 
 #[test]

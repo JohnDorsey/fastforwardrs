@@ -81,7 +81,7 @@ Each piece is committed and pushed after the usual checks (fmt, clippy `-D warni
 9. **Plugins that cannot start without a person** are refused (V11).
 10. **Parameters that are hidden, read-only or not automatable are not values** (D8); their numbers still count against the limit of numbers an effect can hold only if they are exposed.
 11. **VST3 builds in the Bundles tab are the plugins we can legally ship that I can find** (D6): the maintainer owns none. CI never loads one; the real-plugin tests are ignored by default and run on this PC.
-12. **An effect holds at most 255 values** (`MOST_VALUES_OF_AN_EFFECT`): a plugin with more has its first 255 exposed values kept and the rest left out, as with CLAP. For Surge XT's 774 automatable parameters those are not the ones a person would choose (the first are modulation slots). A better choice (a list of the parameters a person picks, or the plugin's own ordering by unit) is not planned.
+12. **(Changed 2026-11-03, section 11: the limit is now 65,535, and Surge XT's 774 are all values.) An effect holds at most 255 values** (`MOST_VALUES_OF_AN_EFFECT`): a plugin with more has its first 255 exposed values kept and the rest left out, as with CLAP. For Surge XT's 774 automatable parameters those are not the ones a person would choose (the first are modulation slots). A better choice (a list of the parameters a person picks, or the plugin's own ordering by unit) is not planned.
 
 ## 6. What the spike (15.0) found, 2026-11-02
 
@@ -162,7 +162,7 @@ Asked on 2026-11-02 ("test whether Surge as a VST3 has the same bug, and don't i
 
 * **One process shared by the copies of one library** (asked 2026-11-02 as a "later, if it hurts"). Phase 14 starts a process for each copy; a project with a heavy VST3 sampler on ten clips would load it ten times. Not planned; to be looked at only if it is measured to hurt. Sharing means one plugin instance per copy inside one process, which gives up some of the crash isolation (a crash takes every copy of that library), so it would need a decision on that too.
 * **VST2** (D1): a later phase, with its own decision about the headers.
-* **The 255 values of an effect** (asked 2026-11-02: why is there a limit, and can it be removed?). *Why* [V, read in the code]: a value is named in the code by its **slot**, a `u8` in `PropertyId::EffectValue { effect, instance, slot }` (`src/project/animation/property.rs`), which is the key of every animation, edit and history entry, and a mask source reads its value by it too; `MOST_VALUES_OF_AN_EFFECT = 255` (`src/project/effects/descriptor.rs`) is the size of that number, chosen to keep `PropertyId` small and `Copy`. Nothing deeper makes it 255. *Can it be removed* [B for the cost]: yes. The slot would become a `u16` (65,535 values); the compiler finds the 16 places that turn a slot into a `u8` (`u8::try_from(slot)` in `project`, `project_file`, `composition`, the editor's flows and the properties panel) and the tests that pin 255 (`project/effects/kind_tests.rs`, the CLAP and LV2 scan tests). What that does not settle: how the effect panel shows hundreds of sliders (it has no search or grouping, and I have not looked at how it copes with 255), how big a project file gets with a snapshot of 2,855 values (Surge XT as VST3), and which values should come first (the first 255 of Surge XT's 774 automatable ones are modulation slots). Not started.
+* **The 255 values of an effect — DONE 2026-11-03, see section 11.** (asked 2026-11-02: why is there a limit, and can it be removed?). *Why* [V, read in the code]: a value is named in the code by its **slot**, a `u8` in `PropertyId::EffectValue { effect, instance, slot }` (`src/project/animation/property.rs`), which is the key of every animation, edit and history entry, and a mask source reads its value by it too; `MOST_VALUES_OF_AN_EFFECT = 255` (`src/project/effects/descriptor.rs`) is the size of that number, chosen to keep `PropertyId` small and `Copy`. Nothing deeper makes it 255. *Can it be removed* [B for the cost]: yes. The slot would become a `u16` (65,535 values); the compiler finds the 16 places that turn a slot into a `u8` (`u8::try_from(slot)` in `project`, `project_file`, `composition`, the editor's flows and the properties panel) and the tests that pin 255 (`project/effects/kind_tests.rs`, the CLAP and LV2 scan tests). What that does not settle: how the effect panel shows hundreds of sliders (it has no search or grouping, and I have not looked at how it copes with 255), how big a project file gets with a snapshot of 2,855 values (Surge XT as VST3), and which values should come first (the first 255 of Surge XT's 774 automatable ones are modulation slots). Not started.
 
 ## 8. 15.1 as built (2026-11-02)
 
@@ -264,3 +264,36 @@ Both have a regression test that fails without the fix (checked by breaking the 
 * **macOS** is unrun; Linux ran the same tests.
 * **Surge XT Effects with an effect loaded** was not tried (its default patch has none; with it the sound passes unchanged, which I believe is the plugin and not the host [B]); **a real project state of a real VST3 plugin** (a Surge patch) was not given through the project; both are 15.5.
 * No plugin window (15.6); no VST3 sets in the Bundles tab (15.5). **Surge XT as a VST3 is not a good candidate for the Bundles tab as it is: its parameter list is 2,855 long, and the 255 an effect holds are the first, which are modulation slots.** (Its CLAP build has the same problem and is bundled.)
+
+## 11. The limit of 255 values removed (2026-11-03)
+
+Asked 2026-11-03: "Get rid of the 255-value limit." Done, and measured.
+
+**What changed.**
+
+* The slot of a value is a `u16` (`PropertyId::EffectValue { slot }`, `PropertyId::effect_value`, and the places of `DrivenValues`), where it was a `u8`; the 17 places that turned a number into a slot, in `project`, `project_file`, `composition`, the editor's flows and the tests, say `u16`.
+* **`MOST_VALUES_OF_AN_EFFECT` is 65,535** (`u16::MAX`), where it was 255. It is not nothing, and it is not meant to be reached: no plugin has a tenth as many (the most met is the 2,855 parameters of Surge XT as a VST3 plugin, of which 774 can be automated). It is the bound at which a descriptor from a file, or from a plugin that says more, is refused, so that it cannot ask for the memory of the computer. The CLAP, LV2 and VST3 scans keep the first 65,535 of a plugin that has more.
+* **The check for two values with one id was a comparison of each value with every earlier one**: 14.6 seconds for 65,535 values in a debug build, 2,000 million comparisons. It looks the id up in the ids met before it now (a few hundredths of a second), and a test fails if it is quadratic again (the bound is 3 seconds).
+* **The file format has no new version**: nothing in the layout changed (the values of an effect are an object by id, and a descriptor's `params` a list); only how many are accepted. A program from before refuses a file that has an effect with more than 255 values, saying so (`docs/project-file-format.md`).
+
+**What it means for the plugins** [V, real plugins on this PC]: Surge XT as a VST3 plugin is an instrument of **774 values** (255 before), through the real scan; all 774 are given to the plugin at the first block, as the effect does, and it sounds (peak 0.577) at 0.31 ms a block. The CLAP and LV2 builds of plugins with many parameters are the same.
+
+**What it costs** [V, measured; `what_the_panel_costs_for_an_effect_of_many_values`, an ignored report]. The panel draws a row for each value of each effect of the selected clip at every frame, and an effect's box cannot be folded. Time of one frame of the test window (kittest, which also builds the accessibility tree) with one effect of many values on the selected clip:
+
+| values | release build | debug build |
+|---|---|---|
+| 0 | 11.7 ms | 14.5 ms |
+| 10 | 11.8 ms | 16.1 ms |
+| 255 | 15.3 ms | 47.9 ms |
+| 774 | 27.0 ms | 122 ms |
+| 2,855 | 101.6 ms | 501 ms |
+
+The cost is **linear, about 31 microseconds a value in a release build** (0.14 ms in a debug one); nothing in it is quadratic. At 774 values the frame is 2.3 times as long as with none; at 2,855 it is ten frames a second. Nothing else was found to grow faster than the number of values: the picture and the sound ask for all the values of an effect once for each look (every 32 samples when one is animated), 774 numbers.
+
+**Not done, said plainly; these are for you to decide.**
+
+* **The panel draws every row, seen or not.** Leaving out the rows that are outside the window needs the height of each row (a number, a choice, a colour and a box of lines are not equally tall), and the heights of the rows that were not drawn have to be remembered from when they were, or the scroll bar jumps. I think it is worth doing for an effect of hundreds of values, and I have not done it: it changes how the panel is laid out.
+* **A person who faces 774 sliders has no way to find one**: no search, no folding, no grouping (VST3 has *units*, groups of parameters, which the scan does not read yet; Surge XT's are "Scene A", "Osc", ...). That is a change of what the person sees, so I have not made it. A plugin with that many values is mostly edited in its own window (15.6) and automated in a few of them.
+* **The order of the values no longer decides which ones a person gets**: all of them are there (before, the first 255 of Surge XT's were modulation slots).
+
+**Tests.** New: 3,000 values as 3,000 properties, each its own (a number and a switch far along, so that a byte of the place is wrong), the check of 65,535 values in a moment, driven values at places 44, 300 and 60,000, values set, animated and given by a preset at places 300, 700 and 999 of a thousand, an effect of a thousand values in a project file and back with its keyframes (the file says them by id), 3,000 parameters kept whole by the CLAP, LV2 and VST3 scans (and the bound cut as before), the panel of 800 values in order down to the last. **11 planted mistakes (`tools/mutation_testing/mutations_many_values.py`), all noticed** (one was not at first: the test only had numbers; one did not compile and was written again). The whole workspace on Windows: **6,976 passed, 0 failed, 64 ignored**; on Linux fmt, clippy, and the 307 tests of the effects, the scan and the project file. The ignored real-plugin tests of the scan and of the host pass with Surge XT's 774.

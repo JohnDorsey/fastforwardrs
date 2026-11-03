@@ -104,6 +104,75 @@ fn the_menu_of_the_plus_button_offers_an_installed_plugin_under_the_heading_of_i
     assert!(!is_shown(&window, "Tom Szilagyi"));
 }
 
+/// A plugin installed with `count` values, named `value 0000`, `value 0001` and so on, each from 0 to 4.
+fn a_plugin_with_values(count: usize) -> crate::project::InstalledPlugin {
+    let names: Vec<String> = (0..count).map(|number| format!("value {number:04}")).collect();
+    let values: Vec<crate::test_support::ValueOfAPlugin<'_>> = names
+        .iter()
+        .map(|name| (name.as_str(), 1.0, Some((0.0, 4.0))))
+        .collect();
+    let mut plugin = an_installed_sound_plugin("ladspa:big:big", "Big", &values);
+    plugin.descriptor.name = "big plugin".into();
+    plugin
+}
+
+#[test]
+fn a_plugin_with_hundreds_of_values_has_a_control_for_each_in_the_panel_down_to_the_last() {
+    // (There was a limit of 255 values until 2026-11-03; Surge XT as a VST3 plugin has 774 that can be automated.)
+    let _alone = the_installed_plugins_to_myself();
+    set_installed_plugins(vec![a_plugin_with_values(800)]);
+    let (mut window, clip) = window_with_the_video_selected();
+    open_the_menu(&mut window);
+    window.harness.get_by_label("Big plugin").click();
+    window.settle();
+
+    let values = window
+        .application()
+        .project()
+        .effects_of(AnimationTarget::Clip(clip))
+        .unwrap()
+        .iter()
+        .map(|effect| effect.values().len())
+        .collect::<Vec<_>>();
+    assert_eq!(values, [800], "the effect has all its values");
+    // (The panel scrolls: the controls that are not in the window are below it, and are there.)
+    let window_bottom = window.harness.ctx.content_rect().bottom();
+    let first = window.rectangle_of("Value 0000");
+    let middle = window.rectangle_of("Value 0300");
+    let last = window.rectangle_of("Value 0799");
+    assert!(first.bottom() <= window_bottom, "the first control is in the window");
+    assert!(
+        first.top() < middle.top() && middle.top() < last.top(),
+        "one below the other, in the order of the values: {first:?} {middle:?} {last:?}"
+    );
+    assert!(
+        last.top() > window_bottom,
+        "the last is far below the window, to be scrolled to"
+    );
+}
+
+/// How long a frame of the window takes with an effect of many values on the selected clip, for 0 to 2,855 values (the 2,855 are the parameters of Surge XT as a VST3 plugin). A report,
+/// not a check: the cost of the panel grows with the number of values, each of which is a row that is drawn at every frame. Run with
+/// `cargo test --release --lib what_the_panel_costs -- --ignored --nocapture` (a debug build is ten times slower).
+#[test]
+#[ignore = "a report of times, not a check"]
+fn what_the_panel_costs_for_an_effect_of_many_values() {
+    let _alone = the_installed_plugins_to_myself();
+    for count in [0_usize, 10, 255, 774, 2855] {
+        set_installed_plugins(vec![a_plugin_with_values(count)]);
+        let (mut window, _) = window_with_the_video_selected();
+        open_the_menu(&mut window);
+        window.harness.get_by_label("Big plugin").click();
+        window.settle();
+        let began = std::time::Instant::now();
+        let frames = 20;
+        for _ in 0..frames {
+            window.harness.step();
+        }
+        println!("{count} values: {:?} a frame", began.elapsed() / frames);
+    }
+}
+
 #[test]
 fn a_smaller_menu_that_is_taller_than_the_window_has_a_scroll_bar_and_a_shorter_one_is_not_cut() {
     let _alone = the_installed_plugins_to_myself();

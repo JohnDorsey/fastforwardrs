@@ -53,7 +53,7 @@ made absolute differently on Windows (short names) and macOS (links): mended in 
 
 No window of a plugin, no state, no presets, no instruments, no notes: only effects, with their parameters (C11, C12). Plugins run in the editor's own process: one that crashes ends the editor, and the breadcrumb says which file. A CLAP plugin that needs the real main thread of the
 process is not served by the thread of its own that the host starts [B]. A clip that is sped up has no pre-roll. A plugin that says nothing of its tail costs a clip half a second of sound read before it. A latency that changes when a plugin is made again is not made up for until the next play
-(a note says so; untested [B]). An effect has at most 255 values: a plugin with more keeps its first 255. Embedded plugins' effects (CLAP and LADSPA) still do not run (AU-13, later, as you said). A scan program is refused after any change to `src` or `crates` until everything is built again.
+(a note says so; untested [B]). An effect has at most 255 values: a plugin with more keeps its first 255. (**Changed 2026-11-03: 65,535; a plugin that has more keeps its first 65,535.** See `engine-phase-15-vst3-design.md`, section 11.) Embedded plugins' effects (CLAP and LADSPA) still do not run (AU-13, later, as you said). A scan program is refused after any change to `src` or `crates` until everything is built again.
 
 ## 6. Mistakes (mine)
 

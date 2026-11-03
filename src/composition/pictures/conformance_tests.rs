@@ -183,7 +183,7 @@ fn every_number_of_every_effect_follows_its_keyframes_at_every_frame() {
             let (mut project, clip) = a_video();
             let target = AnimationTarget::Clip(clip);
             let instance = project.add_effect(target, kind).unwrap();
-            let property = PropertyId::effect_value(kind, instance, u8::try_from(slot).unwrap());
+            let property = PropertyId::effect_value(kind, instance, u16::try_from(slot).unwrap());
             make_a_keyframe(&mut project, target, property, 10, number(least));
             make_a_keyframe(&mut project, target, property, 40, number(most));
             for timeline_frame in 0..60_u64 {

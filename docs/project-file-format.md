@@ -65,7 +65,7 @@ track that the keyframes are of). **What an effect is** is in `plugins`, a list 
 descriptor of each type of effect that it uses (once for each key and version): the `key`, the `version`, the `name`, the `description`,
 whether it works on the `picture` or the `sound`, whether it `changes_each_pixel_by_itself`, and its `params`, each with an `id`, a `name`
 (what its keyframes are called), a `label` (what its control says), a `type` (`number`, `pair`, `colour`, `flag` or `words`), what it
-begins as (`default`) and, for a number, the `range` of its control, its `unit` and its `decimals`. So a project can be read, shown and
+begins as (`default`) and, for a number, the `range` of its control, its `unit` and its `decimals` (**an effect has at most 65,535 `params`; a snapshot with more is refused with the reason. There was a limit of 255 until 2026-11-03, with no change of the version of the file: a file with more than 255 values in an effect is refused by a program from before, with that reason**). So a project can be read, shown and
 edited without its effects being installed. An effect with the same key and major number as one that the program has, whose snapshot has no
 value that the program's has not, **is** the program's; any other is an effect that the program does not have: it is kept with all its values
 and keyframes, does nothing to a picture or to the export, and is saved again as it was. **Whatever an effect, a type of effect or one of its

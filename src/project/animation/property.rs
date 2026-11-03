@@ -34,7 +34,7 @@ pub enum PropertyId {
     EffectValue {
         effect: EffectKind,
         instance: EffectInstanceId,
-        slot: u8,
+        slot: u16,
     },
 }
 
@@ -59,7 +59,7 @@ impl PropertyId {
     pub const OWN: [PropertyId; 5] = [Self::Gain, Self::Muted, Self::Position, Self::Size, Self::Rotation];
 
     /// The property that is the value in place `slot` of the effect `instance`, which is of the kind `effect`.
-    pub const fn effect_value(effect: EffectKind, instance: EffectInstanceId, slot: u8) -> Self {
+    pub const fn effect_value(effect: EffectKind, instance: EffectInstanceId, slot: u16) -> Self {
         Self::EffectValue { effect, instance, slot }
     }
 

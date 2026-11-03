@@ -383,6 +383,20 @@ fn what_is_not_a_value_a_meter_a_port_of_sound_a_port_of_messages_or_one_that_th
 }
 
 #[test]
+fn a_plugin_with_hundreds_of_values_has_them_all() {
+    let controls: Vec<PortDescription> = (0..3000)
+        .map(|place| a_control(2 + place as u32, &format!("c{place}")))
+        .collect();
+
+    let effect = effect_of(&a_plugin_with(controls)).unwrap();
+
+    assert_eq!(effect.descriptor.parameters.len(), 3000);
+    assert_eq!(effect.descriptor.parameters[2999].id, "c2999");
+    assert_eq!(effect.value_handles.len(), 3000);
+    assert_eq!(effect.value_handles[2999], 2 + 2999);
+}
+
+#[test]
 fn a_plugin_with_more_values_than_an_effect_can_have_keeps_the_first_and_is_still_an_effect() {
     let controls: Vec<PortDescription> = (0..MOST_VALUES_OF_AN_EFFECT + 5)
         .map(|place| a_control(2 + place as u32, &format!("c{place}")))

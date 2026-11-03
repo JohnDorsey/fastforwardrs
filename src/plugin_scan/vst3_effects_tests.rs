@@ -382,6 +382,19 @@ fn a_parameter_without_a_title_is_called_by_its_number() {
 }
 
 #[test]
+fn a_plugin_with_hundreds_of_values_has_them_all() {
+    // (Surge XT has 774 automatable parameters; a limit of 255 left out three of every four until 2026-11-03.)
+    let parameters: Vec<ParameterDescription> = (0..3000).map(|id| a_parameter(id + 1000, &format!("P{id}"))).collect();
+
+    let effect = the_effect(&a_stereo_effect_with(parameters)).expect("an effect");
+
+    assert_eq!(effect.descriptor.parameters.len(), 3000);
+    assert_eq!(effect.value_handles.len(), 3000);
+    assert_eq!(effect.value_handles[2999], 1000 + 2999);
+    assert_eq!(effect.descriptor.parameters[2999].label, "P2999");
+}
+
+#[test]
 fn a_plugin_with_more_values_than_an_effect_can_have_keeps_the_first_ones() {
     let parameters: Vec<ParameterDescription> = (0..MOST_VALUES_OF_AN_EFFECT as u32 + 40)
         .map(|id| a_parameter(id + 1000, &format!("P{id}")))

@@ -216,7 +216,7 @@ mod tests {
         for (slot, property) in of_the_effect.into_iter().enumerate() {
             assert_eq!(
                 property,
-                PropertyId::effect_value(EffectKind::TEXT, content, u8::try_from(slot).unwrap())
+                PropertyId::effect_value(EffectKind::TEXT, content, u16::try_from(slot).unwrap())
             );
             assert_eq!(property.kind(), values[slot].kind(), "slot {slot}");
         }

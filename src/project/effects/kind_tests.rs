@@ -341,7 +341,7 @@ fn a_snapshot_that_the_program_cannot_rely_on_is_refused_and_the_reason_says_wha
             })
             .collect(),
     );
-    cases.push((too_many, "255 are the most there can be"));
+    cases.push((too_many, "65535 are the most there can be"));
 
     for (snapshot, wanted) in cases {
         let reason = EffectKind::from_snapshot(snapshot.clone()).unwrap_err();
@@ -371,9 +371,75 @@ fn the_most_values_an_effect_can_have_is_still_a_descriptor_that_is_made_and_has
     assert_eq!(effect.properties().count(), MOST_VALUES_OF_AN_EFFECT);
     assert_eq!(
         effect.property(MOST_VALUES_OF_AN_EFFECT - 1),
-        Some(PropertyId::effect_value(kind, EffectInstanceId::FIRST, 254))
+        Some(PropertyId::effect_value(
+            kind,
+            EffectInstanceId::FIRST,
+            u16::try_from(MOST_VALUES_OF_AN_EFFECT - 1).unwrap()
+        ))
     );
     assert_eq!(effect.property(MOST_VALUES_OF_AN_EFFECT), None);
+}
+
+#[test]
+fn an_effect_can_have_as_many_values_as_the_biggest_plugins_have_and_each_value_is_a_property_of_its_own() {
+    // (Surge XT as a VST3 plugin has 774 values that can be automated, and as a CLAP plugin about as many; with 255 as the most, three of every four were left out.)
+    let mut big = made_up("isf:thousands_of_values");
+    let (number, switch) = (big.parameters[0].clone(), big.parameters[1].clone());
+    // (Numbers, and a switch at the end: in place 2999, which is 183 and 11 times 256, a byte of the place would find a number.)
+    big.parameters = Cow::Owned(
+        (0..3000)
+            .map(|place| ParameterDescriptor {
+                id: Cow::Owned(format!("value_{place}")),
+                name: Cow::Owned(format!("value {place}")),
+                ..if place == 2999 { switch.clone() } else { number.clone() }
+            })
+            .collect(),
+    );
+
+    let kind = EffectKind::from_snapshot(big).expect("an effect of three thousand values is one");
+
+    let effect = Effect::new(kind);
+    assert_eq!(effect.properties().count(), 3000);
+    let last = effect.property(2999).expect("the last value is a property");
+    assert_eq!(last, PropertyId::effect_value(kind, EffectInstanceId::FIRST, 2999));
+    assert_eq!((last.name(), last.name_in_a_file()), ("value 2999", "value_2999"));
+    assert_eq!(last.kind(), ValueKind::Flag);
+    assert_eq!(effect.property(2998).unwrap().kind(), ValueKind::Number);
+    // The value in place 300 is not the one in place 44 (300 less 256): a place is not kept in a byte.
+    assert_ne!(effect.property(300), effect.property(44));
+    assert_eq!(effect.property(300).unwrap().name(), "value 300");
+    assert_eq!(effect.property(3000), None);
+}
+
+#[test]
+fn a_descriptor_with_the_most_values_is_checked_in_a_moment_and_not_in_the_time_it_takes_to_compare_every_value_with_every_other()
+ {
+    let mut most = made_up("isf:the_most_values_checked");
+    let one = most.parameters[0].clone();
+    most.parameters = Cow::Owned(
+        (0..MOST_VALUES_OF_AN_EFFECT)
+            .map(|number| ParameterDescriptor {
+                id: Cow::Owned(format!("value_{number}")),
+                name: Cow::Owned(format!("value {number}")),
+                ..one.clone()
+            })
+            .collect(),
+    );
+
+    let began = std::time::Instant::now();
+    let problem = most.problem();
+    let took = began.elapsed();
+
+    assert_eq!(problem, None);
+    // (Compared in pairs, 65,535 values are two thousand million comparisons: many seconds. Checked once each, a few thousandths of a second. The bound is generous.)
+    assert!(took < std::time::Duration::from_secs(3), "{took:?}");
+    // And two values with one id are found among all of them, at the far end too.
+    let last = most.parameters.len() - 1;
+    most.parameters.to_mut()[last].id = Cow::Borrowed("value_0");
+    assert!(
+        most.problem()
+            .is_some_and(|problem| problem.contains("two values with the id \"value_0\""))
+    );
 }
 
 // --- a kind of effect that the program does not have ---

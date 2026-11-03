@@ -268,7 +268,7 @@ pub fn put_an_effect_on(
         project
             .set_property_at(
                 target,
-                PropertyId::effect_value(kind, instance, u8::try_from(slot).expect("few values")),
+                PropertyId::effect_value(kind, instance, u16::try_from(slot).expect("few values")),
                 value.clone(),
                 TimelineFrameIndex::new(0),
             )
@@ -292,7 +292,7 @@ pub fn put_an_effect_on_a_group(
         project
             .set_effect_value_of_the_group(
                 group,
-                PropertyId::effect_value(kind, instance, u8::try_from(slot).expect("few values")),
+                PropertyId::effect_value(kind, instance, u16::try_from(slot).expect("few values")),
                 value,
             )
             .expect("the effect was just put on");

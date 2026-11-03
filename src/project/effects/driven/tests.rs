@@ -163,3 +163,42 @@ fn a_value_sees_the_real_backdrop_until_it_is_said_otherwise_and_two_settings_of
     );
     assert_eq!(values.sources(), [MaskSource::Track(track(3))], "and it is one source");
 }
+
+#[test]
+fn a_value_far_along_a_long_list_is_driven_and_told_apart_from_the_one_256_places_before_it() {
+    let values = DrivenValues::from_places(vec![
+        (60_000, from(5, MaskChannel::Blue, 1.0)),
+        (300, from(2, MaskChannel::Red, 0.0)),
+        (44, from(3, MaskChannel::Green, 0.5)),
+    ])
+    .expect("three different places, though 300 is 44 and 256");
+
+    let places: Vec<usize> = values.iter().map(|(place, _)| place).collect();
+    assert_eq!(places, [44, 300, 60_000]);
+    assert_eq!(
+        values.of(300).map(|driven| driven.source),
+        Some(MaskSource::Track(track(2)))
+    );
+    assert_eq!(
+        values.of(44).map(|driven| driven.source),
+        Some(MaskSource::Track(track(3)))
+    );
+    assert_eq!(values.of(556), None, "300 and 256");
+    assert_eq!(
+        DrivenValues::from_places(vec![
+            (300, from(1, MaskChannel::Red, 0.0)),
+            (300, from(2, MaskChannel::Red, 0.0))
+        ]),
+        None,
+        "a place cannot be driven twice, far along as well"
+    );
+
+    let without_300 = values.with(300, None).unwrap();
+    assert_eq!(
+        without_300.iter().map(|(place, _)| place).collect::<Vec<_>>(),
+        [44, 60_000],
+        "letting go of one place leaves the one 256 before it"
+    );
+    let moved = values.with(65_535, Some(from(9, MaskChannel::Red, 0.0))).unwrap();
+    assert_eq!(moved.iter().map(|(place, _)| place).last(), Some(65_535));
+}

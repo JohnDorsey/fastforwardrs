@@ -12,7 +12,7 @@ use crate::project::EffectInstanceId;
 
 /// The row of the value in place `slot` of the text effect, shown as `shown`, drawn alone; `interact` is done to it, and what it asked for after that is given (`None` for nothing).
 fn the_row_of_the_text_effect(
-    slot: u8,
+    slot: u16,
     shown: PropertyValue,
     fonts: Option<&[String]>,
     interact: impl FnOnce(&mut egui_kittest::Harness<'_>),

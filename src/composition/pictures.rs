@@ -158,7 +158,7 @@ impl LayerEffect {
                 let property = PropertyId::effect_value(
                     self.kind,
                     self.instance,
-                    u8::try_from(slot).expect("an effect has fewer than 256 values"),
+                    u16::try_from(slot).expect("an effect has fewer than 65,536 values"),
                 );
                 self.animation
                     .value_at(property, timeline_frame)

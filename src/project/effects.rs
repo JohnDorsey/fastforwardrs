@@ -235,7 +235,7 @@ impl Effect {
         if driven.is_some() && self.why_a_value_cannot_be_driven(slot).is_some() {
             return None;
         }
-        let driven_values = self.driven.with(u8::try_from(slot).ok()?, driven)?;
+        let driven_values = self.driven.with(u16::try_from(slot).ok()?, driven)?;
         Some(self.clone().with_driven_values(driven_values))
     }
 
@@ -319,7 +319,7 @@ impl Effect {
         Some(PropertyId::effect_value(
             self.kind,
             self.instance,
-            u8::try_from(slot).ok()?,
+            u16::try_from(slot).ok()?,
         ))
     }
 

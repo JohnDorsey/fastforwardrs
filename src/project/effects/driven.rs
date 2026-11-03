@@ -149,7 +149,7 @@ impl DrivenValue {
 /// The values of an effect that are read from masks, by the place of each among the effect's values, in the order of the places. At most one for a value.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DrivenValues {
-    values: Vec<(u8, DrivenValue)>,
+    values: Vec<(u16, DrivenValue)>,
 }
 
 impl DrivenValues {
@@ -158,7 +158,7 @@ impl DrivenValues {
     }
 
     /// The values `values` give, if no place is there twice and every number is one.
-    pub fn from_places(mut values: Vec<(u8, DrivenValue)>) -> Option<Self> {
+    pub fn from_places(mut values: Vec<(u16, DrivenValue)>) -> Option<Self> {
         values.sort_by_key(|(place, _)| *place);
         let twice = values.windows(2).any(|pair| pair[0].0 == pair[1].0);
         (!twice && values.iter().all(|(_, driven)| driven.is_well_formed())).then_some(Self { values })
@@ -183,11 +183,11 @@ impl DrivenValues {
 
     /// The same, with the value in place `place` read as `driven` says (or from its slider again, for `None`). `None` if `driven` is a number that is not one.
     #[must_use]
-    pub fn with(&self, place: u8, driven: Option<DrivenValue>) -> Option<Self> {
+    pub fn with(&self, place: u16, driven: Option<DrivenValue>) -> Option<Self> {
         if driven.as_ref().is_some_and(|driven| !driven.is_well_formed()) {
             return None;
         }
-        let mut values: Vec<(u8, DrivenValue)> = self
+        let mut values: Vec<(u16, DrivenValue)> = self
             .values
             .iter()
             .copied()

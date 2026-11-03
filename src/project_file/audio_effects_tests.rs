@@ -84,6 +84,84 @@ fn an_effect_on_a_clip_made_from_a_sound_file_is_in_the_file_and_is_there_when_t
 }
 
 #[test]
+fn an_effect_of_a_thousand_values_is_in_the_file_each_by_its_id_and_is_there_when_the_file_is_loaded_with_its_keyframes()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let names: Vec<String> = (0..1000).map(|number| format!("value {number:04}")).collect();
+    let values: Vec<crate::test_support::ValueOfAPlugin<'_>> = names
+        .iter()
+        .map(|name| (name.as_str(), 0.5, Some((0.0, 1.0))))
+        .collect();
+    crate::project::set_installed_plugins(vec![an_installed_sound_plugin("clap:test.big", "Maker", &values)]);
+    let kind = EffectKind::installed_plugin_kinds()[0];
+    let mut project = project_with_everything();
+    let clip = the_sound_clip_of(&project);
+    let target = AnimationTarget::Clip(clip);
+    let instance = project.add_effect(target, kind).unwrap();
+    for (slot, value) in [(44_u16, 0.1_f32), (300, 0.8), (999, 0.9)] {
+        project
+            .set_property_at(
+                target,
+                PropertyId::effect_value(kind, instance, slot),
+                PropertyValue::Number(value),
+                crate::project::TimelineFrameIndex::new(0),
+            )
+            .unwrap();
+    }
+    // (The sound clip begins at the frame 450 of the timeline.)
+    for (frame, value) in [(460, 0.2_f32), (500, 0.4)] {
+        crate::test_support::make_a_keyframe(
+            &mut project,
+            target,
+            PropertyId::effect_value(kind, instance, 700),
+            frame,
+            PropertyValue::Number(value),
+        );
+    }
+
+    let text = saved(&project);
+    let loaded = project_from_json_text(&text).expect("the file is read");
+
+    let effects = loaded.effects_of(target).expect("the clip is there");
+    let effect = effects.iter().next().expect("the effect is there");
+    assert_eq!(effect.kind(), kind);
+    let values = effect.values();
+    assert_eq!(values.len(), 1000);
+    assert_eq!(
+        (values[44].clone(), values[300].clone(), values[999].clone()),
+        (
+            PropertyValue::Number(0.1),
+            PropertyValue::Number(0.8),
+            PropertyValue::Number(0.9)
+        ),
+        "each value is in its own place, 300 and 44 too"
+    );
+    assert_eq!(values[188], PropertyValue::Number(0.5), "700 less 512 is as it was");
+    let property = PropertyId::effect_value(kind, effect.instance(), 700);
+    assert!(loaded.is_animated(target, property));
+    assert_eq!(
+        loaded.property_value_at(target, property, crate::project::TimelineFrameIndex::new(500)),
+        Some(PropertyValue::Number(0.4))
+    );
+    // And the file says them by their ids, and writing it again gives it again.
+    let file: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let in_the_file = file["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|track| track["clips"].as_array().unwrap())
+        .find(|clip| clip["kind"] == "audio")
+        .unwrap()["effects"][0]["values"]
+        .clone();
+    assert!(
+        in_the_file["value 0300"]
+            .as_f64()
+            .is_some_and(|number| (number - 0.8).abs() < 1e-6)
+    );
+    assert_eq!(saved(&loaded), text);
+}
+
+#[test]
 fn a_sound_clip_that_has_no_effects_has_no_effects_in_the_file_and_a_file_of_before_reads_as_before() {
     let _alone = the_installed_plugins_to_myself();
     let project = project_with_everything();

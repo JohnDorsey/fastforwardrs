@@ -207,7 +207,7 @@ impl FastForwardApplication {
             .iter()
             .enumerate()
             .filter_map(|(slot, id)| {
-                let property = PropertyId::effect_value(kind, instance, u8::try_from(slot).ok()?);
+                let property = PropertyId::effect_value(kind, instance, u16::try_from(slot).ok()?);
                 let value = self.document.project.property_value_at(target, property, frame)?;
                 Some((*id, f64::from(number_for_a_plugin(&value))))
             })
@@ -487,7 +487,7 @@ impl FastForwardApplication {
         let Some(value) = value_for_a_plugin_number(&plugin.descriptor, slot, number) else {
             return;
         };
-        let Ok(slot) = u8::try_from(slot) else {
+        let Ok(slot) = u16::try_from(slot) else {
             return;
         };
         let command = Command::SetEffectValue {

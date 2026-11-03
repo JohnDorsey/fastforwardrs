@@ -1028,17 +1028,34 @@ fn a_plugin_that_keeps_a_state_and_shows_few_parameters_says_that_only_its_windo
 }
 
 #[test]
-fn a_plugin_with_more_parameters_than_an_effect_can_have_values_keeps_the_first_ones() {
-    let parameters: Vec<Parameter> = (0..300)
+fn a_plugin_with_hundreds_of_parameters_has_them_all_as_values() {
+    // (Surge XT has 774 that can be automated; there was a limit of 255 until 2026-11-03.)
+    let parameters: Vec<Parameter> = (0..3000)
         .map(|number| a_parameter(number, "P", 0.0, 1.0, 0.0, 0))
         .collect();
     let plugin = a_clap_plugin("com.example.big", parameters);
 
     let effect = the_effect(&plugin);
 
-    assert_eq!(effect.value_handles.len(), crate::project::MOST_VALUES_OF_AN_EFFECT);
+    assert_eq!(effect.value_handles.len(), 3000);
+    assert_eq!(effect.descriptor.parameters.len(), 3000);
     assert_eq!(effect.value_handles[0], 0);
-    assert_eq!(*effect.value_handles.last().unwrap(), 254);
+    assert_eq!(*effect.value_handles.last().unwrap(), 2999);
+}
+
+#[test]
+fn a_plugin_with_more_parameters_than_an_effect_can_have_values_keeps_the_first_ones() {
+    let most = crate::project::MOST_VALUES_OF_AN_EFFECT;
+    let parameters: Vec<Parameter> = (0..most as u32 + 10)
+        .map(|number| a_parameter(number, "P", 0.0, 1.0, 0.0, 0))
+        .collect();
+    let plugin = a_clap_plugin("com.example.big", parameters);
+
+    let effect = the_effect(&plugin);
+
+    assert_eq!(effect.value_handles.len(), most);
+    assert_eq!(effect.value_handles[0], 0);
+    assert_eq!(*effect.value_handles.last().unwrap(), most as u32 - 1);
 }
 
 #[test]
