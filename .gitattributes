@@ -1,0 +1,4 @@
+# The shaders that come with the program are put in it as they are (include_str!), and the key of a shader is the digest of its text: it must be the same text on every system, so these
+# files have the line ends of Unix in the working tree of every system, whatever core.autocrlf says.
+assets/shaders/**/*.fs text eol=lf
+assets/shaders/**/*.glsl text eol=lf

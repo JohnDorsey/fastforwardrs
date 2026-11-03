@@ -379,7 +379,7 @@ fn show_shaders(ui: &mut Ui, view: &PluginManagerView<'_>) {
             .show(ui, |ui| {
                 for shader in usable {
                     ui.label(line_of_a_shader_that_can_be_used(shader))
-                        .on_hover_text(shader.path.display().to_string());
+                        .on_hover_text(shader.place());
                 }
             });
     }
@@ -390,7 +390,7 @@ fn show_shaders(ui: &mut Ui, view: &PluginManagerView<'_>) {
             .show(ui, |ui| {
                 for shader in unusable {
                     ui.colored_label(ui.visuals().warn_fg_color, line_of_a_shader_that_cannot_be_used(shader))
-                        .on_hover_text(shader.path.display().to_string());
+                        .on_hover_text(shader.place());
                 }
             });
     }

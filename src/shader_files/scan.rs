@@ -36,12 +36,23 @@ pub struct FoundShader {
     pub kind: Option<EffectKind>,
     /// Why it cannot be used: what is wrong with the file, or what this version cannot give it yet. `None` for one that can be used.
     pub why_not_usable: Option<String>,
+    /// Whether it is one of the shaders that come with the program (it is inside the program, and `path` is only its name).
+    pub built_into_the_program: bool,
 }
 
 impl FoundShader {
     /// Whether it can be put on a clip, or made into one.
     pub fn can_be_used(&self) -> bool {
         self.kind.is_some() && self.why_not_usable.is_none()
+    }
+
+    /// Where it is, in words: the file it was found in, or that it is built into the program.
+    pub fn place(&self) -> String {
+        if self.built_into_the_program {
+            "built into the program".to_owned()
+        } else {
+            self.path.display().to_string()
+        }
     }
 }
 
@@ -55,6 +66,15 @@ pub struct ShaderScan {
 }
 
 impl ShaderScan {
+    /// This scan, and then what `later` found: the shaders of `later` come after these, and the first of two files that make one kind is the one that counts (see
+    /// [`Self::usable_kinds`]), so what comes with the program is the one that is installed when a folder has a copy of it.
+    #[must_use]
+    pub fn followed_by(mut self, later: Self) -> Self {
+        self.shaders.extend(later.shaders);
+        self.problems.extend(later.problems);
+        self
+    }
+
     /// The kinds of the shaders that can be used, each once, in the order they were found in: **the first of two files that make one kind is the one that counts** (the folder that comes
     /// first wins, as it does for plugins).
     pub fn usable_kinds(&self) -> Vec<EffectKind> {
@@ -194,6 +214,7 @@ impl Search {
             shape,
             kind,
             why_not_usable: why,
+            built_into_the_program: false,
         };
         let shader = match content {
             Content::TooLong { length, .. } => found(

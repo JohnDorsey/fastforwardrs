@@ -169,6 +169,8 @@ mod shader_flow;
 #[cfg(test)]
 mod shader_tests;
 #[cfg(test)]
+mod shaders_of_the_program_tests;
+#[cfg(test)]
 mod sound_plugin_folder_tests;
 mod sound_plugins_flow;
 #[cfg(test)]

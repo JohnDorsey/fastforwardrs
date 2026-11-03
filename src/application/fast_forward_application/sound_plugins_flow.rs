@@ -27,7 +27,8 @@ use crate::plugin_scan::{is_a_clap_file, is_a_vst3_module, is_an_lv2_bundle};
 use crate::plugin_trust::{FolderStanding, folder_for_a_person, folder_of};
 use crate::project::{EffectKind, set_installed_plugins, set_installed_shaders};
 use crate::shader_files::{
-    ShaderScan, scan_folders as scan_the_folders_for_shaders, usual_folders as usual_folders_of_shaders,
+    ShaderScan, scan_folders as scan_the_folders_for_shaders, scan_of_the_shaders_of_the_program,
+    usual_folders as usual_folders_of_shaders,
 };
 
 /// How many of the plugins that can be put on a clip are synthesizers (phase 13): the plugin manager says so.
@@ -76,6 +77,9 @@ pub(super) struct PluginSearch {
     /// Whether this editor put shaders in the list of the installed ones (so that it takes them out again when they are gone, and never writes the list when it has put nothing in it:
     /// the list is one for the whole program).
     shaders_installed: bool,
+    /// Whether the shaders that come with the program (`shader_files::SHADERS_OF_THE_PROGRAM`) are installed with the ones that are found in folders. (They are, for the program a person
+    /// uses; the tests ask for them where they mean to, so that what a test finds in a folder is all that it finds.)
+    with_the_shaders_of_the_program: bool,
     /// A scan was asked for while another was going on: another is started when that one is taken.
     another_wanted: bool,
     pub(super) has_scanned: bool,
@@ -90,6 +94,36 @@ pub(super) struct PluginSearch {
     pub(super) embedded_not_loaded: Vec<String>,
     /// The *Bundles* tab: the plugins that can be fetched from their authors.
     pub(super) bundles: super::plugin_bundles_flow::Bundles,
+}
+
+/// Where the editor that a person uses keeps its files of plugins and finds its scan program (see `find_plugins_in`).
+pub(super) struct PlacesOfAPersonsPlugins {
+    /// The file that says where the person asked to look.
+    pub(super) settings_file: Option<PathBuf>,
+    /// The folders of the plugins that come with the program, and of those that the *Bundles* tab fetches: trusted without the question that other folders are asked.
+    pub(super) bundled_folders: Vec<PathBuf>,
+    /// The scan program, if it is beside the editor.
+    pub(super) scanner_program: Option<PathBuf>,
+    /// The file that keeps what the scans found.
+    pub(super) cache_file: Option<PathBuf>,
+    /// The file that says which plugin libraries the editor was using when it ended badly.
+    pub(super) breadcrumb_file: Option<PathBuf>,
+}
+
+impl PlacesOfAPersonsPlugins {
+    /// The places on this computer, where the editor of a person has them.
+    fn the_usual() -> Self {
+        Self {
+            settings_file: PluginSearchSettings::default_file(),
+            bundled_folders: bundled_plugins_folder()
+                .into_iter()
+                .chain(crate::plugin_bundles::fetched_plugins_folder())
+                .collect(),
+            scanner_program: scanner_program_beside_this_program(),
+            cache_file: ScanCache::default_file(),
+            breadcrumb_file: Breadcrumb::default_file(),
+        }
+    }
 }
 
 impl PluginSearch {
@@ -323,22 +357,32 @@ impl FastForwardApplication {
         search.look_in_the_usual_places = look_in_the_usual_places;
     }
 
-    /// For the editor that a person uses: the scan program beside this program, the cache beside the settings, the usual places; and a scan now.
+    /// Installs the shaders that come with the program along with the ones that are found in folders (the editor of a person has them, as it finds its plugins), and scans now.
+    pub fn install_the_shaders_of_the_program(&mut self) {
+        self.environment.plugin_search.with_the_shaders_of_the_program = true;
+        self.start_scanning_plugins();
+    }
+
+    /// For the editor that a person uses: the scan program beside this program, the cache beside the settings, the usual places, the shaders that come with the program; and a scan now.
     pub(super) fn find_plugins_the_way_a_person_uses_the_editor(&mut self) {
-        if let Some(file) = PluginSearchSettings::default_file() {
+        self.find_plugins_in(PlacesOfAPersonsPlugins::the_usual());
+    }
+
+    /// What [`Self::find_plugins_the_way_a_person_uses_the_editor`] does, with the places that it keeps its files in and finds its scan program in given: the editor of a person is made
+    /// with a window, which a test has not, so this is what a test can do of it (with no file and no program).
+    pub(super) fn find_plugins_in(&mut self, places: PlacesOfAPersonsPlugins) {
+        self.environment.plugin_search.with_the_shaders_of_the_program = true;
+        if let Some(file) = places.settings_file {
             self.keep_plugin_search_settings_in(file);
         }
         // (The folder that the Bundles tab fetches into is trusted before it is there: what is put in it is checked against the checksums of the program.)
-        for folder in bundled_plugins_folder()
-            .into_iter()
-            .chain(crate::plugin_bundles::fetched_plugins_folder())
-        {
-            self.trust_the_plugins_bundled_in(&folder);
+        for folder in &places.bundled_folders {
+            self.trust_the_plugins_bundled_in(folder);
         }
-        match scanner_program_beside_this_program() {
+        match places.scanner_program {
             Some(program) => {
-                self.use_this_plugin_scanner(program, ScanCache::default_file(), true);
-                if let Some(file) = Breadcrumb::default_file() {
+                self.use_this_plugin_scanner(program, places.cache_file, true);
+                if let Some(file) = places.breadcrumb_file {
                     self.keep_a_breadcrumb_of_the_plugins_in_use_in(file);
                 }
                 self.start_scanning_plugins();
@@ -410,7 +454,8 @@ impl FastForwardApplication {
         }
         let program = search.scanner_program.clone();
         let shader_folders = search.folders_to_scan_for_shaders();
-        if program.is_none() && shader_folders.is_empty() {
+        let with_the_shaders_of_the_program = search.with_the_shaders_of_the_program;
+        if program.is_none() && shader_folders.is_empty() && !with_the_shaders_of_the_program {
             // (Nothing to look with and nothing to look in: the shaders that the folders that were taken away had are gone.)
             self.install_the_shaders_that_were_found(ShaderScan::default());
             return;
@@ -436,7 +481,11 @@ impl FastForwardApplication {
                     }
                     None => (Vec::new(), Vec::new()),
                 };
-                let shaders = scan_the_folders_for_shaders(&shader_folders);
+                let mut shaders = scan_the_folders_for_shaders(&shader_folders);
+                if with_the_shaders_of_the_program {
+                    // (First: where a folder has a copy of one of them, it is the one that comes with the program that is installed.)
+                    shaders = scan_of_the_shaders_of_the_program().followed_by(shaders);
+                }
                 let _ = sender.send(ScanDone {
                     libraries,
                     problems,

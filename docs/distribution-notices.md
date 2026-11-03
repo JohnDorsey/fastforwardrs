@@ -25,8 +25,9 @@ include, so that it is not found out on the day.
 |---|---|---|
 | `assets/fonts/Hack-Regular.ttf` | the Hack project (Source Foundry), with Bitstream Vera and DejaVu glyphs | MIT, and the Bitstream Vera licence (its licence file is next to it) |
 | the default fonts of egui (`epaint_default_fonts`, inside the program) | the egui project | the crate says `(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0`; the fonts are data that is only embedded and drawn, not code that is combined with GPL code, and their notices are in `THIRD_PARTY.md` (LG-07 asked for this check; **verdict: acceptable as data, with the notices; to be looked at again if a release ships the font files separately**) |
+| the shaders in `assets/shaders` (kept inside the program: `src/shader_files/shaders_of_the_program.rs`) | written for the program, from the mathematics and not from another person's code | CC0-1.0 (two lines of SPDX at the top of each file, and of each file of `assets/shaders/shared`) |
 
-No shader, LUT, sound or plugin ships yet. When some do, each is added here with its author, licence and URL, and only with a licence of the kinds LG-02 allows.
+No LUT, sound or plugin ships in the program yet (the five look-up tables are files in `assets/luts`, CC0, chosen with *Add effect from file...*). When some do, each is added here with its author, licence and URL, and only with a licence of the kinds LG-02 allows.
 
 **Amended 2026-10-20 (the maintainer's decision):** LG-02 now also allows **GPL and LGPL licences that are compatible with GPLv3** (GPL-3.0, GPL-3.0-or-later, GPL-2.0-or-later,
 LGPL-3.0, LGPL-2.1-or-later) for what ships, **plugin binaries included**, on the conditions of the ffmpeg section below: the licence text next to it, the copyright notices

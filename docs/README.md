@@ -10,6 +10,7 @@ The top-level [`README.md`](../README.md) is for someone who wants to install th
 | [`effects-and-shaders-in-detail.md`](effects-and-shaders-in-detail.md) | what an effect is, the effects there are, look-up tables, shaders (ISF: filters, generators, passes), where the files that effects use are kept |
 | [`settings-colours-and-export.md`](settings-colours-and-export.md) | each setting, how colours are read and mixed, what the exported video is |
 | [`project-file-format.md`](project-file-format.md) | the `.ffrs` and `.json` project files: layout, an example (it is run by a test), every version |
+| [`own-shaders.md`](own-shaders.md) | the shaders that come with the program (fractal generators and more): what each makes and has to set, how they are made, looked at (`examples/shader_pictures.rs`) and checked, what was found about the compiler and the software adapter |
 | [`plugins-and-trust.md`](plugins-and-trust.md) | sound plugins: who may run them, how they are found, how they run in the sound, the check of a plugin's start, the plugins that come with the program |
 
 ## For whoever builds it
