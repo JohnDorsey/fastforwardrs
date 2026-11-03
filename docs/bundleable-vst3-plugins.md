@@ -83,6 +83,11 @@ MIT [B for the date]; what each of these builds carries:
   | Surge XT Effects | 14 | 0.27 | 0.000 (no effect is in its slots until a patch puts one there [B]) |
 
   (The values counted here are those of the module, with the hidden ones; the effect has the ones that a person can use, as the scan says.)
+* **macOS [V by CI, not by hand].** The members of the sets for macOS follow the names of the CLAP and the LV2 ones (`dpf-DPF-Plugins-vst3bundles.pkg/Payload/Kars.vst3`, `Surge XT.vst3/` in
+  the zip), which I could only believe, having no Mac and no way to open a disk image here. **The CI job of a Mac (the run of the push of this piece, commit `b89a495`) fetched all 23 sets
+  with the program's own downloader in 107 s, every one of the seven VST3 sets with its modules (so the names were right), and the real scan and effect test (5 passed; the one it skipped
+  is the data of Surge XT, which has no build for macOS) and the real synthesizer tests (2 passed, the three VST3 instruments among them) passed on what it fetched.** So the macOS builds of
+  Dragonfly Reverb, DPF-Plugins and Surge XT as VST3 load and play with this host. (The steps are warnings in the workflow whatever they find; I read their annotations.)
 * **The sound of the instruments [V on Windows and Linux].** `bundled_synthesizers_real` finds the three VST3 synthesizers by the word in the name of their sets, and each plays a note and is
   quiet after it, and plays a MIDI clip through the plan, the graph and the host **where its notes are, silent before the first, with its tail, and a note held across a seek**. On Windows
   **Kars as VST3 is, to the five digits that are printed, the Kars of CLAP and of LV2** (first sound at sample 4800, the levels of the three notes 0.07516, 0.03018, 0.17071); Surge XT and Nekobi
@@ -92,8 +97,5 @@ MIT [B for the date]; what each of these builds carries:
 
 ## Not done, said plainly
 
-* **macOS.** The members of the sets for macOS follow the names of the CLAP and the LV2 ones (`dpf-DPF-Plugins-vst3bundles.pkg/Payload/Kars.vst3`, `Surge XT.vst3/` in the zip): **[B]**, I
-  could not open a disk image here. The CI job of a Mac fetches every set with the program's own downloader and scans what it fetched (its failures are warnings): see the end of this
-  document for what it said.
 * **Nobody has listened to them in the editor, and no window of them is shown** (piece 15.6).
 * **A reverb's tail after a clip** with these plugins (Dragonfly's rings on after the sound stops) was not tried through a project; the code that plays a tail is the same for every format.

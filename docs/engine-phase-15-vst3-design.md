@@ -338,7 +338,7 @@ The cost is **linear, about 31 microseconds a value in a release build** (0.14 m
 
 **Not done, said plainly.**
 
-* **macOS is not verified by hand**: the members for the Mac follow the names of the CLAP and LV2 ones (**[B]**; I cannot open a disk image here). The CI job of a Mac fetches every set (its failures are warnings): *(read after the push: see below)*.
+* **macOS was verified by CI and not by hand.** The members for the Mac follow the names of the CLAP and LV2 ones, which I could only believe. **The Mac job of the push (`b89a495`) fetched all 23 sets in 107 s, every VST3 module of the seven sets included, and its real scan, effect and synthesizer tests passed on what it fetched [V, read in the annotations of the run]**: the macOS builds of Dragonfly Reverb, DPF-Plugins and Surge XT as VST3 load and play with this host.
 * **The other VST3 modules of the same release files** (3BandEQ, PingPongPan, MaBitcrush, MaFreeverb, MaPitchshift, CycleShifter) were left out to keep a second copy of every plugin out of the menu; Wolf Shaper's release was not looked at.
 * **A reverb's tail after a clip** was not tried with the real Dragonfly through a project (the reverb tails of a project are the same code for every format).
 * **Nobody has listened to them in the editor**; no window of a VST3 plugin is shown (15.6).
