@@ -18,9 +18,13 @@ use crate::shader_files::{ShaderOnARenderer, a_scene_to_look_at};
 /// How big the pictures are that the shaders are drawn at in these tests: small, because a software adapter does the work, and enough that a slider that does something is seen.
 const SIZE: (u32, u32) = (48, 27);
 
-/// The first two lines of every file: who made it and under which licence.
-const THE_HEADER_OF_EVERY_FILE: &str =
-    "// SPDX-FileCopyrightText: 2026 John Dorsey\n// SPDX-License-Identifier: CC0-1.0\n";
+/// The first two lines of every file: who made it and under which licence. (The names of the tags are cut from what follows them in the source: a file that has the text of a tag in it is
+/// read by `reuse lint` as having that tag, and what follows it here is not a licence.)
+const THE_HEADER_OF_EVERY_FILE: &str = concat!(
+    "// SPDX-FileCopyrightText",
+    ": 2026 John Dorsey\n// SPDX-License-Identifier",
+    ": CC0-1.0\n"
+);
 
 /// `folder/file name` of every shader file under `assets/shaders`, by name.
 fn files_in_the_source() -> BTreeSet<String> {
@@ -260,10 +264,14 @@ fn true_text_of_the_shared_block(name: &str) -> String {
     let mut lines = text.lines();
     assert_eq!(
         lines.next(),
-        Some("// SPDX-FileCopyrightText: 2026 John Dorsey"),
+        Some(concat!("// SPDX-FileCopyrightText", ": 2026 John Dorsey")),
         "{name}.glsl"
     );
-    assert_eq!(lines.next(), Some("// SPDX-License-Identifier: CC0-1.0"), "{name}.glsl");
+    assert_eq!(
+        lines.next(),
+        Some(concat!("// SPDX-License-Identifier", ": CC0-1.0")),
+        "{name}.glsl"
+    );
     let code: Vec<&str> = lines.collect();
     format!("{}\n", code.join("\n").trim_matches('\n'))
 }

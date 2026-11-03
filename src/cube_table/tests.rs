@@ -453,7 +453,8 @@ fn the_five_sample_tables_are_read_and_are_33_points_a_side_with_their_titles() 
         assert_eq!(table.domain_min(), [0.0; 3]);
         assert_eq!(table.domain_max(), [1.0; 3]);
         assert!(
-            text.contains("SPDX-License-Identifier: CC0-1.0"),
+            // (The name of the tag is cut from what follows it: `reuse lint` reads the text of a tag in a file as a tag, and this is not a licence.)
+            text.contains(concat!("SPDX-License-Identifier", ": CC0-1.0")),
             "{title}: it says what its licence is"
         );
         assert!(
