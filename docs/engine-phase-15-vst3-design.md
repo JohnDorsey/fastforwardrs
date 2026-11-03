@@ -261,7 +261,7 @@ Both have a regression test that fails without the fix (checked by breaking the 
 **Not done, said plainly.**
 
 * **The words for a latency that changed** (alone, or when the plugin was made again) are not exercised: no test plugin changes its latency [B that they are right; read, not run].
-* **macOS** is unrun; Linux ran the same tests.
+* **macOS**: not run by hand. **CI's macOS jobs passed on the pushes of 15.3, of the limit and of 15.4 [V]**, which run the host crate's tests, the tests of the program that runs plugins, and the ones of 15.4 with the test plugins (so the macOS entry points `bundleEntry` and `bundleExit` and the module layout are tried with our own plugin, though with no real macOS plugin). Linux ran the same tests, by hand and in CI.
 * **Surge XT Effects with an effect loaded** was not tried (its default patch has none; with it the sound passes unchanged, which I believe is the plugin and not the host [B]); **a real project state of a real VST3 plugin** (a Surge patch) was not given through the project; both are 15.5.
 * No plugin window (15.6); no VST3 sets in the Bundles tab (15.5). **Surge XT as a VST3 is not a good candidate for the Bundles tab as it is: its parameter list is 2,855 long.** (Changed 2026-11-03: the 255 limit is gone and all 774 automatable parameters are values, so what remains is the cost of the panel, section 11. Its CLAP build is bundled.)
 
@@ -315,7 +315,7 @@ The cost is **linear, about 31 microseconds a value in a release build** (0.14 m
 
 **Not done, said plainly.**
 
-* **Linux: the first three files and the journey were not run for real on this PC's WSL**, which has ffmpeg 8 and the program asks for 9: they skip there (the three MIDI tests, which need no ffmpeg, ran and passed). **CI's Ubuntu job installs ffmpeg 9 and runs them for the first time**; macOS is unrun.
+* **Linux: the first three files and the journey were not run for real on this PC's WSL**, which has ffmpeg 8 and the program asks for 9: they skip there (the three MIDI tests, which need no ffmpeg, ran and passed). **CI's Ubuntu job installs ffmpeg 9 and ran them for the first time on the push of 2026-11-03: all nine jobs of the run (Windows, Ubuntu, macOS) passed [V, read from the run's jobs]**, so these tests are verified on the three systems, though by CI and not by hand on Linux and macOS.
 * **A reverb's tail after the end of a clip** with a VST3 plugin is not tried: the test plugins have no echo (CLAP's has), and the code that plays a tail is the same for every format (its tests are in `sound_plugins_clap_in_the_sound.rs`). Dragonfly Reverb would show it; that is 15.5.
 * **The question the editor asks about a folder** (the dialog that says "may I run plugins from here?") is tried with VST3 only as far as the host asks it (`take_wanted` gives the folder that holds the `.vst3` module, the module's name and the plugin's); the dialog itself is the same for every format.
 * **A crash during a play in the editor's window with sound coming out of the speakers** is the stream of the preview, tried above; the speakers are not.
