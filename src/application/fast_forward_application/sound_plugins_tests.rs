@@ -749,6 +749,7 @@ fn the_window_counts_the_plugins_of_a_vst3_module_and_says_when_a_module_is_not_
             facts: None,
             problem: None,
             has_state: false,
+            has_a_window: false,
         };
         scanned.problem = Some("it could not be made".to_owned());
         scanned

@@ -66,6 +66,8 @@ pub(super) struct PluginEditors {
     told_at: Option<Instant>,
     /// Whether the windows that are opened have no window at all, if something said so (the environment variable says so otherwise).
     headless: Option<bool>,
+    /// What the programs that show windows are given in their environment beside what they are always given (**for the tests**).
+    extra_environment: Vec<(String, String)>,
 }
 
 impl PluginEditors {
@@ -149,6 +151,12 @@ impl PluginEditors {
     pub(super) fn use_this_program(&mut self, program: std::path::PathBuf, headless: bool) {
         self.windows = EditorWindows::with_program(program);
         self.headless = Some(headless);
+    }
+
+    /// Gives the programs that show windows this variable in their environment from now on (**for the tests**).
+    pub(super) fn add_to_the_environment(&mut self, name: String, value: String) {
+        self.extra_environment.retain(|(kept, _)| *kept != name);
+        self.extra_environment.push((name, value));
     }
 
     /// Whether a hand is holding a parameter in a window: the history counts the edits that come while it is as one gesture, as it counts those that are made while the mouse button is
@@ -237,9 +245,10 @@ impl FastForwardApplication {
             return Err("the plugin has no window".to_owned());
         }
         let (kind_of_plugin, id) = match &plugin.address {
-            PluginAddress::Clap { id } => (PluginKind::Clap, id),
-            PluginAddress::Lv2 { uri } => (PluginKind::Lv2, uri),
-            _ => return Err("only a CLAP plugin or an LV2 plugin has a window".to_owned()),
+            PluginAddress::Clap { id } => (PluginKind::Clap, id.clone()),
+            PluginAddress::Lv2 { uri } => (PluginKind::Lv2, uri.clone()),
+            PluginAddress::Vst3 { class_id } => (PluginKind::Vst3, class_id.text()),
+            _ => return Err("only a CLAP, LV2 or VST3 plugin has a window".to_owned()),
         };
         // (A library is loaded only from a folder that has been said yes to: a window loads it too.)
         let folder = folder_of(&plugin.library);
@@ -264,15 +273,19 @@ impl FastForwardApplication {
             .and_then(|effect| effect.state().cloned());
         let what = WhatToOpen {
             library: plugin.library.clone(),
-            plugin_id: id.clone(),
+            plugin_id: id,
             kind: kind_of_plugin,
             title,
             values,
             state: state.as_deref().map(crate::base64::encode),
-            environment: self
-                .environment
-                .plugin_host
-                .environment_for_a_program_that_loads(&plugin.library),
+            environment: {
+                let mut environment = self
+                    .environment
+                    .plugin_host
+                    .environment_for_a_program_that_loads(&plugin.library);
+                environment.extend(self.interface.plugin_editors.extra_environment.iter().cloned());
+                environment
+            },
             headless: self
                 .interface
                 .plugin_editors

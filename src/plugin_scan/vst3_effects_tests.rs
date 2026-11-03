@@ -77,6 +77,7 @@ fn a_stereo_effect_with(parameters: Vec<ParameterDescription>) -> ScannedClass {
         }),
         problem: None,
         has_state: false,
+        has_a_window: false,
     }
 }
 
@@ -111,9 +112,20 @@ fn a_plugin_is_an_effect_with_the_key_the_name_the_address_and_the_channels_that
     assert_eq!(effect.library, PathBuf::from("/plugins/amp.vst3"));
     assert_eq!((effect.audio_inputs, effect.audio_outputs), (2, 2));
     assert!(!effect.descriptor.makes_sound_from_notes);
-    assert!(!effect.has_a_window, "the window of a VST3 plugin is a later piece");
+    assert!(!effect.has_a_window, "the scan found no window");
     assert_eq!(effect.start_warning, None);
     assert_eq!(effect.descriptor.problem(), None);
+}
+
+#[test]
+fn a_plugin_has_a_window_when_the_scan_found_that_its_controller_makes_one() {
+    let mut class = a_stereo_effect_with(Vec::new());
+    class.has_a_window = true;
+
+    let effect = the_effect(&class).expect("it is an effect");
+
+    assert!(effect.has_a_window);
+    assert!(!the_effect(&a_stereo_effect_with(Vec::new())).unwrap().has_a_window);
 }
 
 #[test]

@@ -8,6 +8,7 @@
 //!
 //! * [`Module`] is a module (a `.vst3` folder or file) that is loaded; it lists its classes and makes them.
 //! * [`Instance`] is a plugin that has been made from it, with its component and controller connected: it can be given values, sound and notes, and its state saved and restored.
+//! * A plugin's window (`IPlugView`) is put in a window of the caller with [`Instance::open_view`], told its size, and watched with [`Instance::view_events`].
 //! * [`ClassId`] is the id of a class in a form that is the same on every system.
 //! * [`scan_module`] loads a module, and makes and runs each of its plugins once on silence, saying what it is doing as it goes: **it is meant to be run in a program of its
 //!   own** (`fastforwardrs-plugin-scan`), so that a library that crashes or never returns costs that program and not the editor.
@@ -26,6 +27,7 @@ mod notes;
 mod objects;
 mod scan;
 mod state;
+mod view;
 
 pub use classid::ClassId;
 pub use description::{BusDescription, ClassDescription, ClassFacts, FactoryDescription, ParameterDescription};
@@ -34,6 +36,13 @@ pub use module::{AUDIO_MODULE_CLASS, Module, OpenError, library_file_of};
 pub use notes::{NoteEvent, NoteEventKind};
 pub use scan::{ModuleScan, PROBE_BLOCK_FRAMES, PROBE_SAMPLE_RATE, ScannedClass, scan_module};
 pub use state::{StateError, decode_state, encode_state};
+pub use view::{ViewError, ViewEvent, ViewSize};
 
 #[cfg(test)]
+mod message_tests;
+#[cfg(test)]
+mod run_loop_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod view_tests;

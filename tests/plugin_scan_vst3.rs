@@ -230,6 +230,27 @@ fn the_plugins_of_a_module_that_work_are_effects_and_the_others_say_why_not() {
 }
 
 #[test]
+fn a_plugin_whose_controller_makes_a_window_is_said_to_have_one_and_the_others_are_not() {
+    let found = what_the_scan_found();
+
+    for (numbers, has_a_window) in [
+        (plugins::GAIN, true),
+        (plugins::SINGLE, true),
+        (plugins::LATENCY, false),
+        (plugins::INSTRUMENT, false),
+        (plugins::SIDE_CHAIN_EFFECT, false),
+        (plugins::NO_DEFAULTS, true),
+    ] {
+        assert_eq!(
+            effect_of(&found, numbers).has_a_window,
+            has_a_window,
+            "{}",
+            id(numbers).text()
+        );
+    }
+}
+
+#[test]
 fn what_a_parameter_says_is_the_kind_of_value_the_effect_has() {
     let found = what_the_scan_found();
     let gain = effect_of(&found, plugins::GAIN);
@@ -273,7 +294,7 @@ fn an_effect_is_offered_under_the_name_the_vendor_the_key_and_the_address_that_t
     assert!(gain.library.ends_with("test.vst3"));
     assert_eq!((gain.audio_inputs, gain.audio_outputs), (2, 2));
     assert!(!gain.descriptor.makes_sound_from_notes);
-    assert!(!gain.has_a_window);
+    assert!(gain.has_a_window, "its controller makes a window");
     assert!(
         gain.descriptor.description.contains("VST3 plugin (Fx)"),
         "{}",

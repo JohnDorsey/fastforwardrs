@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The inside of the editor-window program (`fastforwardrs-plugin-editor`, which is only this, called from `main`): **it loads the plugin library it is given**, makes the window of a
-//! plugin (a CLAP plugin's [`clap_host::Editor`] or an LV2 plugin's user interface: see [`super::backends`]), and shows it; what a person does in the window it says on its standard output, and what the editor says (the values the
+//! plugin (a CLAP plugin's [`clap_host::Editor`], an LV2 plugin's user interface or a VST3 plugin's `IPlugView`: see [`super::backends`]), and shows it; what a person does in the window it says on its standard output, and what the editor says (the values the
 //! project has, the plugin's state) it reads on its standard input (see [`super::protocol`]). It is a program of its own so that a plugin whose window crashes does not take the
 //! editor and the project with it, and so that the plugin's window has the main thread of a program that has a message loop, on every system (P1 of the design).
 //!
@@ -23,17 +23,18 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
-use super::backends::{ClapWindow, Lv2Window, PluginWindow};
+use super::backends::{ClapWindow, Lv2Window, PluginWindow, Vst3Window};
 use super::protocol::{FromProgram, ToProgram, line_of, message_in};
 use super::the_kind_of_window;
 use crate::base64;
 
 /// What the program says when it is used wrongly.
 pub const USAGE: &str =
-    "Usage: fastforwardrs-plugin-editor --library <file or folder> --id <plugin id> [--kind clap|lv2] [--title <words>] [--headless]
+    "Usage: fastforwardrs-plugin-editor --library <file or folder> --id <plugin id> [--kind clap|lv2|vst3] [--title <words>] [--headless]
 
 Shows the window of a plugin: a CLAP plugin (the library is its file and the id is its id, the
-default) or an LV2 plugin (the library is its bundle's folder and the id is its URI). It is started
+default), an LV2 plugin (the library is its bundle's folder and the id is its URI) or a VST3 plugin
+(the library is its .vst3 folder or file and the id is its class id, as the editor writes it). It is started
 by the editor, which talks to it in lines on its standard input and output (see
 plugin_editor::protocol); it ends when the window is closed.
 ";
@@ -58,6 +59,7 @@ const HOW_OFTEN_TO_ASK_THE_SIZE: Duration = Duration::from_millis(100);
 pub enum PluginKind {
     Clap,
     Lv2,
+    Vst3,
 }
 
 impl PluginKind {
@@ -66,6 +68,7 @@ impl PluginKind {
         match self {
             Self::Clap => "clap",
             Self::Lv2 => "lv2",
+            Self::Vst3 => "vst3",
         }
     }
 }
@@ -73,9 +76,9 @@ impl PluginKind {
 /// What the program was started with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Arguments {
-    /// A CLAP plugin's library file, or an LV2 plugin's bundle folder.
+    /// A CLAP plugin's library file, an LV2 plugin's bundle folder, or a VST3 plugin's module.
     pub library: PathBuf,
-    /// A CLAP plugin's id, or an LV2 plugin's URI.
+    /// A CLAP plugin's id, an LV2 plugin's URI, or a VST3 plugin's class id.
     pub id: String,
     pub kind: PluginKind,
     pub title: String,
@@ -96,7 +99,8 @@ pub fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
                 kind = match value("--kind")?.to_string_lossy().as_ref() {
                     "clap" => PluginKind::Clap,
                     "lv2" => PluginKind::Lv2,
-                    other => return Err(format!("{other:?} is not a kind of plugin (clap or lv2)")),
+                    "vst3" => PluginKind::Vst3,
+                    other => return Err(format!("{other:?} is not a kind of plugin (clap, lv2 or vst3)")),
                 }
             }
             "--headless" => headless = true,
@@ -155,6 +159,11 @@ impl Session {
 
     /// Ends the program: the window is destroyed first, and the library is not unloaded (some crash when they are).
     fn end(mut self) -> ! {
+        // (A kind of plugin that cannot say that its state changed is looked at once more: what a hand did in the last moment is not lost.)
+        if !self.state_is_not_what_was_said && self.editor.state_changed_since_it_was_looked_at() {
+            self.say(&FromProgram::StateChanged);
+            self.state_is_not_what_was_said = true;
+        }
         if self.state_is_not_what_was_said
             && let Ok(bytes) = self.editor.save_the_state()
         {
@@ -245,6 +254,12 @@ fn the_editor_or_end(arguments: &Arguments, out: &mut dyn Write) -> Box<dyn Plug
             Err(error) => fail(out, error),
         };
     }
+    if arguments.kind == PluginKind::Vst3 {
+        return match Vst3Window::new(&arguments.library, &arguments.id) {
+            Ok(window) => Box::new(window),
+            Err(error) => fail(out, error),
+        };
+    }
     let library = match Library::open(&arguments.library) {
         Ok(library) => library,
         Err(error) => fail(out, format!("the library could not be loaded: {error}")),
@@ -323,9 +338,22 @@ fn run_without_a_window(mut session: Session, input: impl BufRead + Send + 'stat
     }
 }
 
+/// The message loop of the program. **On Linux it is X11's if it can be** (a session that has Wayland has X11 too, as XWayland): the windows that plugins make in the window of this program
+/// are X11's (`x11`, which CLAP and LV2 ask for, and `X11EmbedWindowID`, which VST3 does), and a window of Wayland's has no id that a plugin could be given.
+fn the_event_loop() -> Result<EventLoop<Wake>, winit::error::EventLoopError> {
+    #[cfg(target_os = "linux")]
+    {
+        use winit::platform::x11::EventLoopBuilderExtX11;
+        if let Ok(event_loop) = EventLoop::<Wake>::with_user_event().with_x11().build() {
+            return Ok(event_loop);
+        }
+    }
+    EventLoop::<Wake>::with_user_event().build()
+}
+
 /// With a window: `winit` has the main thread and its message loop, which the plugin's window needs too.
 fn run_with_a_window(arguments: Arguments, session: Session, input: impl BufRead + Send + 'static) -> ! {
-    let event_loop = match EventLoop::<Wake>::with_user_event().build() {
+    let event_loop = match the_event_loop() {
         Ok(event_loop) => event_loop,
         Err(error) => {
             let mut session = session;
@@ -631,24 +659,29 @@ mod tests {
     }
 
     #[test]
-    fn the_kind_of_plugin_is_clap_unless_it_is_said_and_only_clap_and_lv2_are_kinds() {
+    fn the_kind_of_plugin_is_clap_unless_it_is_said_and_only_clap_lv2_and_vst3_are_kinds() {
         let lv2 = arguments_of(&["--library", "a.lv2", "--id", "urn:x", "--kind", "lv2"]).unwrap();
         assert_eq!(lv2.kind, PluginKind::Lv2);
+        let vst3 = arguments_of(&["--library", "a.vst3", "--id", "5445535447", "--kind", "vst3"]).unwrap();
+        assert_eq!(vst3.kind, PluginKind::Vst3);
         let clap = arguments_of(&["--library", "a.clap", "--id", "x", "--kind", "clap"]).unwrap();
         assert_eq!(clap.kind, PluginKind::Clap);
         let said_nothing = arguments_of(&["--library", "a.clap", "--id", "x"]).unwrap();
         assert_eq!(said_nothing.kind, PluginKind::Clap);
         assert!(
-            arguments_of(&["--library", "a", "--id", "x", "--kind", "vst3"])
+            arguments_of(&["--library", "a", "--id", "x", "--kind", "vst2"])
                 .unwrap_err()
-                .contains("vst3")
+                .contains("vst2")
         );
         assert!(
             arguments_of(&["--library", "a", "--id", "x", "--kind"])
                 .unwrap_err()
                 .contains("needs a value")
         );
-        assert_eq!((PluginKind::Clap.word(), PluginKind::Lv2.word()), ("clap", "lv2"));
+        assert_eq!(
+            (PluginKind::Clap.word(), PluginKind::Lv2.word(), PluginKind::Vst3.word()),
+            ("clap", "lv2", "vst3")
+        );
     }
 
     #[test]

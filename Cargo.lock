@@ -4008,7 +4008,9 @@ dependencies = [
 name = "vst3-host"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "libloading",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "tempfile",
@@ -4021,6 +4023,7 @@ dependencies = [
 name = "vst3-test-plugins"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "vst3",
 ]
 

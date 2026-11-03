@@ -108,5 +108,5 @@ MIT [B for the date]; what each of these builds carries:
 
 ## Not done, said plainly
 
-* **Nobody has listened to them in the editor, and no window of them is shown** (piece 15.6).
+* **Nobody has listened to them in the editor.** Their windows (piece 15.6, section 14 of the design document) were opened and looked at on Windows and Linux for Dragonfly Hall Reverb, Surge XT Effects and Wolf Shaper (Windows) and Dragonfly Hall Reverb and Surge XT Effects (Linux); a knob and a curve were moved on Windows. The rest were not opened.
 * **A reverb's tail after a clip** with these plugins (Dragonfly's rings on after the sound stops) was not tried through a project; the code that plays a tail is the same for every format.

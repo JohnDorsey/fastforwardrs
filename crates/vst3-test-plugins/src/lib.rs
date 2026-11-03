@@ -16,6 +16,7 @@
 //! | [`SIDE_CHAIN_EFFECT`] | an effect with **two audio inputs, the side chain first and the main one second** (as Surge XT Effects has them, the other way round): the sound is the main input times a half. A host has to find the main one by its type, not by its place |
 //! | [`SIDE_CHAIN_INSTRUMENT`] | the instrument as Surge XT has it: its only audio input is a **side-chain** (`kAux`), it has two more outputs of the same kind, and **it applies its state in the first block that follows, and a note in that block makes `process` fail** (the VST3 build of Surge XT hangs like that for some patches); a block with no events before the first note does not hurt. The state is text, of which `edits=N` is what it keeps: each edit makes the sound half as loud again |
 //! | [`NO_DEFAULTS`] | the gain effect whose **controller says that the default of every parameter is 0**, as the controller of Surge XT does (and, like Surge's, says that every value is 0 until it is given the component's state) |
+//! | the window | [`GAIN`] and [`SINGLE`] have a window (`createView("editor")`): see [`VIEW_WIDTH`]. It is **strict**: it wants a parent and the kind of window of this system, it takes `onSize` only while it is attached, and it is told by keys (`onKeyDown`, which a host forwards) to do what a hand would: `e` an edit of `Gain` in the three calls VST3 has for it, `r` a request for another size (`b` for one that is more than it allows), `d` `setDirty`, `v` a change of the controller's value with `kParamValuesChanged`, `w` three of them, `l` (Linux) a timer and a descriptor asked of the host's run loop, `s` a change of the component's state that is told in a message and not to the host (the hidden value `Secret` goes up a quarter), `m` an edit that is told in a message made by the host (as DPF's windows tell theirs: it is made only if the message comes back whole). The keys in the variable `FFRS_TEST_VIEW_KEYS` are pressed when it is attached |
 //! | [`COMPATIBILITY`] | a class of the category `Plugin Compatibility Class`, which a host does not make |
 //! | [`FAILS_TO_INITIALIZE`], [`FAILS_TO_ACTIVATE`], [`FAILS_TO_PROCESS`], [`NOT_NUMBERS`] | the gain effect, which misbehaves on purpose: `initialize` says no, `setActive` says no, `process` says it failed, the sound is not made of numbers |
 
@@ -29,10 +30,15 @@
 )]
 
 use std::cell::{Cell, RefCell};
-use std::ffi::{c_char, c_void};
+use std::ffi::{CStr, c_char, c_void};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::{ptr, slice};
 
+#[cfg(target_os = "linux")]
+use vst3::Steinberg::Linux::{
+    FileDescriptor, IEventHandler, IEventHandlerTrait, IRunLoop, IRunLoopTrait, ITimerHandler, ITimerHandlerTrait,
+};
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{Class, ComPtr, ComRef, ComWrapper, uid};
@@ -83,7 +89,7 @@ const STATE_MAGIC: &[u8; 4] = b"TGN1";
 /// `crash_when_loaded`, `hang_when_loaded`, `init_says_no` (the module's start-up function returns false), `crash_when_made`, `hang_when_made` (the factory is asked for a class),
 /// `crash_when_activated`, `crash_when_run`, `hang_when_run`, `exit_when_run` (ends the program with no answer), `crash_at_every_fourth_run` (a program that counts its runs and
 /// crashes at the fourth, so a program that is started again plays three runs and crashes again: for the tests of a copy that is started again), `print_noise` (writes to the
-/// standard output while it is loaded and while it is made).
+/// standard output while it is loaded and while it is made), `echo_values` (every value that the controller is given is said back as an edit of its own), `crash_when_attached` and `hang_when_attached` (its window is put in a parent).
 fn misbehaviour() -> &'static str {
     static HOW: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     HOW.get_or_init(|| std::env::var("FFRS_TEST_PLUGIN").unwrap_or_default())
@@ -233,9 +239,13 @@ fn normalized_of(id: u32, plain: f64) -> f64 {
 
 struct ControllerCore {
     kind: Kind,
-    values: RefCell<[f64; 32]>,
+    values: Rc<RefCell<[f64; 32]>>,
     /// The host's handler, which the controller tells its edits to.
     handler: RefCell<Option<ComPtr<IComponentHandler>>>,
+    /// The host that the plugin was initialized with (it makes messages and lists, as a plugin does that talks to its other half).
+    host: RefCell<Option<ComPtr<IHostApplication>>>,
+    /// The other half, as the host connected it (the component, for a controller of a class of its own).
+    peer: RefCell<Option<ComPtr<IConnectionPoint>>>,
     /// Whether the controller has been connected to its component: a controller of a class of its own gives nothing until it is (a controller that is the component is).
     connected: Cell<bool>,
     /// Whether the controller has been given the state of its component (`setComponentState`, and the state was the component's). **Until it has, it says that every value is 0**, as the controller
@@ -253,13 +263,58 @@ impl ControllerCore {
         }
         Self {
             kind,
-            values: RefCell::new(values),
+            values: Rc::new(RefCell::new(values)),
             handler: RefCell::new(None),
+            host: RefCell::new(None),
+            peer: RefCell::new(None),
             connected: Cell::new(connected),
             // (Only a controller whose component has a state to give has anything to wait for.)
             synced: Cell::new(!matches!(kind, Kind::Gain | Kind::Single)),
             declares_defaults,
         }
+    }
+
+    /// `echo_values`: says a value that it was given as an edit of its own, in the three calls, as some plugins do (Surge XT Effects makes edits that nobody made). A host must not take
+    /// that for a hand.
+    unsafe fn say_it_as_an_edit_if_asked(&self, id: u32, value: f64) {
+        if misbehaviour() != "echo_values" {
+            return;
+        }
+        let handler = self.handler.borrow().clone();
+        if let Some(handler) = handler {
+            handler.beginEdit(id);
+            handler.performEdit(id, value);
+            handler.endEdit(id);
+        }
+    }
+
+    /// The window of the plugin, if it has one and `name` is what a window of an editor is called.
+    unsafe fn create_a_view(&self, name: *const c_char) -> *mut IPlugView {
+        let wanted = !name.is_null() && CStr::from_ptr(name).to_bytes() == b"editor";
+        if !wanted || !matches!(self.kind, Kind::Gain | Kind::Single) {
+            return ptr::null_mut();
+        }
+        let view = ComWrapper::new(TestView {
+            me: Cell::new(ptr::null_mut()),
+            handler: self.handler.borrow().clone(),
+            host: self.host.borrow().clone(),
+            peer: self.peer.borrow().clone(),
+            values: Rc::clone(&self.values),
+            attached: Cell::new(false),
+            size: Cell::new((VIEW_WIDTH, VIEW_HEIGHT)),
+            frame: RefCell::new(None),
+            #[cfg(target_os = "linux")]
+            run_loop: RefCell::new(None),
+        });
+        let Some(pointer) = view.to_com_ptr::<IPlugView>() else {
+            return ptr::null_mut();
+        };
+        view.me.set(pointer.as_ptr());
+        pointer.into_raw()
+    }
+
+    unsafe fn keep_the_host(&self, context: *mut FUnknown) {
+        *self.host.borrow_mut() = ComRef::from_raw(context).and_then(|context| context.cast::<IHostApplication>());
     }
 
     unsafe fn keep_the_handler(&self, handler: *mut IComponentHandler) {
@@ -407,6 +462,7 @@ macro_rules! the_controller_is {
             unsafe fn setParamNormalized(&self, id: u32, value: f64) -> tresult {
                 if self.core.kind.parameters().contains(&id) {
                     self.core.values.borrow_mut()[id as usize] = value;
+                    self.core.say_it_as_an_edit_if_asked(id, value);
                     kResultOk
                 } else {
                     kInvalidArgument
@@ -416,8 +472,8 @@ macro_rules! the_controller_is {
                 self.core.keep_the_handler(handler);
                 kResultOk
             }
-            unsafe fn createView(&self, _name: *const c_char) -> *mut IPlugView {
-                ptr::null_mut()
+            unsafe fn createView(&self, name: *const c_char) -> *mut IPlugView {
+                self.core.create_a_view(name)
             }
         }
     };
@@ -432,7 +488,8 @@ impl Class for Controller {
 }
 
 impl IPluginBaseTrait for Controller {
-    unsafe fn initialize(&self, _context: *mut FUnknown) -> tresult {
+    unsafe fn initialize(&self, context: *mut FUnknown) -> tresult {
+        self.core.keep_the_host(context);
         kResultOk
     }
     unsafe fn terminate(&self) -> tresult {
@@ -443,12 +500,14 @@ impl IPluginBaseTrait for Controller {
 the_controller_is!(Controller);
 
 impl IConnectionPointTrait for Controller {
-    unsafe fn connect(&self, _other: *mut IConnectionPoint) -> tresult {
+    unsafe fn connect(&self, other: *mut IConnectionPoint) -> tresult {
         self.core.connected.set(true);
+        *self.core.peer.borrow_mut() = ComRef::from_raw(other).map(|other| other.to_com_ptr());
         kResultOk
     }
     unsafe fn disconnect(&self, _other: *mut IConnectionPoint) -> tresult {
         self.core.connected.set(false);
+        *self.core.peer.borrow_mut() = None;
         kResultOk
     }
     unsafe fn notify(&self, _message: *mut IMessage) -> tresult {
@@ -503,6 +562,458 @@ impl IMidiMappingTrait for InstrumentController {
         };
         *id = parameter;
         kResultTrue
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The window of the gain effect.
+
+/// How big the window is before a host says another size: 300 by 200.
+pub const VIEW_WIDTH: i32 = 300;
+pub const VIEW_HEIGHT: i32 = 200;
+/// The least and the most that the window says it can be (`checkSizeConstraint` brings a size inside them).
+pub const VIEW_LEAST: (i32, i32) = (200, 150);
+pub const VIEW_MOST: (i32, i32) = (800, 600);
+/// The size that the key `r` asks the host for, and the one (more than the window allows) that the key `b` asks for.
+pub const VIEW_ASKED: (i32, i32) = (640, 480);
+pub const VIEW_ASKED_TOO_BIG: (i32, i32) = (2000, 1500);
+/// The value of `Gain` (normalised) that the key `e` makes an edit of, and the one the key `v` sets and says has changed.
+pub const VIEW_EDIT_NORMALIZED: f64 = 0.75;
+pub const VIEW_VALUES_NORMALIZED: f64 = 0.5;
+
+/// The window of [`GAIN`] and [`SINGLE`]. It does nothing but keep its size and do what a key says.
+struct TestView {
+    /// Its own pointer as a window (`resizeView` is given the view that asks), set when it is made.
+    me: Cell<*mut IPlugView>,
+    handler: Option<ComPtr<IComponentHandler>>,
+    host: Option<ComPtr<IHostApplication>>,
+    peer: Option<ComPtr<IConnectionPoint>>,
+    values: Rc<RefCell<[f64; 32]>>,
+    attached: Cell<bool>,
+    size: Cell<(i32, i32)>,
+    frame: RefCell<Option<ComPtr<IPlugFrame>>>,
+    /// What the window registered with the host's run loop, to take away when it is taken out of its parent.
+    #[cfg(target_os = "linux")]
+    run_loop: RefCell<Option<RunLoopUse>>,
+}
+
+impl Class for TestView {
+    type Interfaces = (IPlugView, IPlugViewContentScaleSupport);
+}
+
+impl Drop for TestView {
+    fn drop(&mut self) {
+        // (Strict: a window that is let go of while it is still in its parent is a host that did not take it out first; real plugins crash then, and this one ends the program.)
+        if self.attached.get() {
+            std::process::abort();
+        }
+    }
+}
+
+/// The kind of parent window that a window of this system is put in.
+fn the_platform_type() -> &'static [u8] {
+    if cfg!(target_os = "windows") {
+        b"HWND"
+    } else if cfg!(target_os = "macos") {
+        b"NSView"
+    } else {
+        b"X11EmbedWindowID"
+    }
+}
+
+impl TestView {
+    /// Makes a message with the host that has this id and sends it to the other half. Whether it did.
+    unsafe fn send_a_message_to_the_other_half(&self, id: &CStr) -> bool {
+        let (Some(host), Some(peer)) = (&self.host, &self.peer) else {
+            return false;
+        };
+        let (mut class, mut interface) = (IMessage_iid, IMessage_iid);
+        let mut object: *mut c_void = ptr::null_mut();
+        if host.createInstance(&mut class, &mut interface, &mut object) != kResultOk {
+            return false;
+        }
+        let Some(message) = ComPtr::from_raw(object.cast::<IMessage>()) else {
+            return false;
+        };
+        message.setMessageID(id.as_ptr());
+        peer.notify(message.as_ptr()) == kResultOk
+    }
+
+    /// Makes a list and a message with the host, fills the message with a number, a float, a text and some bytes, and reads them back from a second look at its attributes. Whether all of it
+    /// is as it was put.
+    unsafe fn a_message_goes_through_the_host(&self) -> bool {
+        let Some(host) = &self.host else {
+            return false;
+        };
+        // A list on its own.
+        let (mut class, mut interface) = (IAttributeList_iid, IAttributeList_iid);
+        let mut object: *mut c_void = ptr::null_mut();
+        if host.createInstance(&mut class, &mut interface, &mut object) != kResultOk
+            || ComPtr::from_raw(object.cast::<IAttributeList>()).is_none()
+        {
+            return false;
+        }
+        // A message.
+        let (mut class, mut interface) = (IMessage_iid, IMessage_iid);
+        let mut object: *mut c_void = ptr::null_mut();
+        if host.createInstance(&mut class, &mut interface, &mut object) != kResultOk {
+            return false;
+        }
+        let Some(message) = ComPtr::from_raw(object.cast::<IMessage>()) else {
+            return false;
+        };
+        message.setMessageID(c"parameter-set".as_ptr());
+        let Some(attributes) = ComRef::from_raw(message.getAttributes()) else {
+            return false;
+        };
+        let note: Vec<u16> = "hi".encode_utf16().chain(std::iter::once(0)).collect();
+        let bytes = [1_u8, 2, 3];
+        let put = attributes.setInt(c"rindex".as_ptr(), i64::from(PARAMETER_GAIN))
+            | attributes.setFloat(c"value".as_ptr(), VIEW_EDIT_NORMALIZED)
+            | attributes.setString(c"note".as_ptr(), note.as_ptr())
+            | attributes.setBinary(c"blob".as_ptr(), bytes.as_ptr().cast(), 3);
+        if put != kResultOk {
+            return false;
+        }
+        // The other half looks at the message again.
+        let Some(again) = ComRef::from_raw(message.getAttributes()) else {
+            return false;
+        };
+        let (mut number, mut float, mut text) = (0_i64, 0.0_f64, [0_u16; 8]);
+        let (mut data, mut size): (*const c_void, u32) = (ptr::null(), 0);
+        let got = again.getInt(c"rindex".as_ptr(), &mut number)
+            | again.getFloat(c"value".as_ptr(), &mut float)
+            | again.getString(c"note".as_ptr(), text.as_mut_ptr(), 16)
+            | again.getBinary(c"blob".as_ptr(), &mut data, &mut size);
+        got == kResultOk
+            && number == i64::from(PARAMETER_GAIN)
+            && float == VIEW_EDIT_NORMALIZED
+            && text[..3] == note[..]
+            && size == 3
+            && slice::from_raw_parts(data.cast::<u8>(), 3) == bytes
+            && CStr::from_ptr(message.getMessageID()).to_bytes() == b"parameter-set"
+    }
+
+    /// Says what the window was told, on the standard output, when the variable `FFRS_TEST_VIEW_PRINT` is set (for the tests of the program that shows windows, which read it).
+    fn say(&self, words: String) {
+        if std::env::var_os("FFRS_TEST_VIEW_PRINT").is_some() {
+            println!("test view: {words}");
+        }
+    }
+
+    /// What a hand would do, by the key that says it. Whether the key is one of them.
+    unsafe fn press(&self, key: u8) -> bool {
+        match key {
+            b'e' => {
+                // (A controller keeps the value it edits.)
+                self.values.borrow_mut()[PARAMETER_GAIN as usize] = VIEW_EDIT_NORMALIZED;
+                if let Some(handler) = &self.handler {
+                    handler.beginEdit(PARAMETER_GAIN);
+                    handler.performEdit(PARAMETER_GAIN, VIEW_EDIT_NORMALIZED);
+                    handler.endEdit(PARAMETER_GAIN);
+                }
+                true
+            }
+            b'r' | b'b' => {
+                let asked = if key == b'r' { VIEW_ASKED } else { VIEW_ASKED_TOO_BIG };
+                let frame = self.frame.borrow().clone();
+                if let Some(frame) = frame {
+                    let mut wanted = ViewRect {
+                        left: 0,
+                        top: 0,
+                        right: asked.0,
+                        bottom: asked.1,
+                    };
+                    frame.resizeView(self.me.get(), &mut wanted);
+                }
+                true
+            }
+            b'm' => {
+                // (What a plugin built with DPF does for every edit of its window: a message made by the host, filled, and read back by the other half. Only a message that comes back whole is an
+                // edit.)
+                if self.a_message_goes_through_the_host() {
+                    self.press(b'e')
+                } else {
+                    false
+                }
+            }
+            b'l' => {
+                // (Linux: the window asks the host's run loop for a timer and a descriptor. Only when it is told to: the window of every other test is to make no event of its own.)
+                #[cfg(target_os = "linux")]
+                {
+                    let frame = self.frame.borrow().clone();
+                    if let Some(frame) = frame {
+                        self.use_the_run_loop(&frame);
+                        return true;
+                    }
+                }
+                false
+            }
+            b's' => {
+                // (A change of the state that is told to the other half in a message and to the host in nothing: a plugin built with DPF does that when a hand draws in its window.)
+                self.send_a_message_to_the_other_half(c"bump-secret")
+            }
+            b'd' => {
+                if let Some(handler) = self
+                    .handler
+                    .as_ref()
+                    .and_then(|handler| handler.cast::<IComponentHandler2>())
+                {
+                    handler.setDirty(1);
+                }
+                true
+            }
+            b'w' => {
+                // (Three values changed at once, as a preset chosen in a window does: `Gain` to 2, `Mode` to 2, `Bypass` on.)
+                {
+                    let mut values = self.values.borrow_mut();
+                    values[PARAMETER_GAIN as usize] = VIEW_VALUES_NORMALIZED;
+                    values[PARAMETER_MODE as usize] = 1.0;
+                    values[PARAMETER_BYPASS as usize] = 1.0;
+                }
+                if let Some(handler) = &self.handler {
+                    handler.restartComponent(RestartFlags_::kParamValuesChanged as _);
+                }
+                true
+            }
+            b'v' => {
+                self.values.borrow_mut()[PARAMETER_GAIN as usize] = VIEW_VALUES_NORMALIZED;
+                if let Some(handler) = &self.handler {
+                    handler.restartComponent(RestartFlags_::kParamValuesChanged as _);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+impl IPlugViewTrait for TestView {
+    unsafe fn isPlatformTypeSupported(&self, kind: FIDString) -> tresult {
+        if !kind.is_null() && CStr::from_ptr(kind).to_bytes() == the_platform_type() {
+            kResultTrue
+        } else {
+            kResultFalse
+        }
+    }
+    unsafe fn attached(&self, parent: *mut c_void, kind: FIDString) -> tresult {
+        misbehave_if_asked("crash_when_attached");
+        misbehave_if_asked("hang_when_attached");
+        // (Strict: a window wants a parent, of the kind of this system, and is put in one only once.)
+        if parent.is_null() || self.isPlatformTypeSupported(kind) != kResultTrue || self.attached.get() {
+            return kResultFalse;
+        }
+        self.attached.set(true);
+        self.say(format!(
+            "attached parent={} kind={}",
+            parent as usize,
+            String::from_utf8_lossy(the_platform_type())
+        ));
+        if let Ok(keys) = std::env::var("FFRS_TEST_VIEW_KEYS") {
+            for key in keys.bytes() {
+                self.press(key);
+            }
+        }
+        kResultOk
+    }
+    unsafe fn removed(&self) -> tresult {
+        if !self.attached.replace(false) {
+            return kResultFalse;
+        }
+        // (What the window asked of the run loop is taken away with it.)
+        #[cfg(target_os = "linux")]
+        {
+            *self.run_loop.borrow_mut() = None;
+        }
+        self.say("removed".to_owned());
+        kResultOk
+    }
+    unsafe fn onWheel(&self, _distance: f32) -> tresult {
+        kResultFalse
+    }
+    unsafe fn onKeyDown(&self, key: char16, _code: int16, _modifiers: int16) -> tresult {
+        if self.attached.get() && u8::try_from(key).is_ok_and(|key| self.press(key)) {
+            kResultTrue
+        } else {
+            kResultFalse
+        }
+    }
+    unsafe fn onKeyUp(&self, _key: char16, _code: int16, _modifiers: int16) -> tresult {
+        kResultFalse
+    }
+    unsafe fn getSize(&self, size: *mut ViewRect) -> tresult {
+        let (width, height) = self.size.get();
+        *size = ViewRect {
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: height,
+        };
+        kResultOk
+    }
+    unsafe fn onSize(&self, size: *mut ViewRect) -> tresult {
+        if !self.attached.get() {
+            return kResultFalse;
+        }
+        let rect = &*size;
+        self.size.set((rect.right - rect.left, rect.bottom - rect.top));
+        self.say(format!("onSize {}x{}", rect.right - rect.left, rect.bottom - rect.top));
+        kResultOk
+    }
+    unsafe fn onFocus(&self, _state: TBool) -> tresult {
+        kResultOk
+    }
+    unsafe fn setFrame(&self, frame: *mut IPlugFrame) -> tresult {
+        *self.frame.borrow_mut() = ComRef::from_raw(frame).map(|frame| frame.to_com_ptr());
+        self.say(format!("setFrame {}", if frame.is_null() { "none" } else { "given" }));
+        kResultOk
+    }
+    unsafe fn canResize(&self) -> tresult {
+        kResultTrue
+    }
+    unsafe fn checkSizeConstraint(&self, rect: *mut ViewRect) -> tresult {
+        let rect = &mut *rect;
+        let width = (rect.right - rect.left).clamp(VIEW_LEAST.0, VIEW_MOST.0);
+        let height = (rect.bottom - rect.top).clamp(VIEW_LEAST.1, VIEW_MOST.1);
+        rect.right = rect.left + width;
+        rect.bottom = rect.top + height;
+        kResultTrue
+    }
+}
+
+impl IPlugViewContentScaleSupportTrait for TestView {
+    unsafe fn setContentScaleFactor(&self, factor: IPlugViewContentScaleSupport_::ScaleFactor) -> tresult {
+        self.say(format!("scale {factor}"));
+        // (A window that has not been given a size by the host is as big as its scale makes it.)
+        if !self.attached.get() {
+            self.size.set((
+                (f64::from(VIEW_WIDTH) * f64::from(factor)).round() as i32,
+                (f64::from(VIEW_HEIGHT) * f64::from(factor)).round() as i32,
+            ));
+        }
+        kResultOk
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The window's use of the host's run loop (Linux): a timer, and a pipe that it has something to read from.
+
+/// What the window of the test plugin asks of the run loop of the host on Linux, as a plugin's window does with its timers and its connection to the display: a timer that is called every
+/// 10 ms and, at its third call, makes the edit of the key `e`; and a pipe whose read end is looked at, one byte of which is put in it when the window is put in its parent, which makes the
+/// request for another size of the key `r` when it is read.
+#[cfg(target_os = "linux")]
+struct RunLoopUse {
+    run_loop: ComPtr<IRunLoop>,
+    timer: ComWrapper<TestTimer>,
+    watcher: ComWrapper<TestWatcher>,
+    pipe: [i32; 2],
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for RunLoopUse {
+    fn drop(&mut self) {
+        // SAFETY: the run loop is live; the handlers are the ones that were registered; the descriptors are the pipe's, which this made and closes.
+        unsafe {
+            if let Some(timer) = self.timer.to_com_ptr::<ITimerHandler>() {
+                self.run_loop.unregisterTimer(timer.as_ptr());
+            }
+            if let Some(watcher) = self.watcher.to_com_ptr::<IEventHandler>() {
+                self.run_loop.unregisterEventHandler(watcher.as_ptr());
+            }
+            libc::close(self.pipe[0]);
+            libc::close(self.pipe[1]);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct TestTimer {
+    ticks: Cell<u32>,
+    handler: Option<ComPtr<IComponentHandler>>,
+    values: Rc<RefCell<[f64; 32]>>,
+}
+
+#[cfg(target_os = "linux")]
+impl Class for TestTimer {
+    type Interfaces = (ITimerHandler,);
+}
+
+#[cfg(target_os = "linux")]
+impl ITimerHandlerTrait for TestTimer {
+    unsafe fn onTimer(&self) {
+        self.ticks.set(self.ticks.get() + 1);
+        if self.ticks.get() == 3
+            && let Some(handler) = &self.handler
+        {
+            self.values.borrow_mut()[PARAMETER_GAIN as usize] = VIEW_EDIT_NORMALIZED;
+            handler.beginEdit(PARAMETER_GAIN);
+            handler.performEdit(PARAMETER_GAIN, VIEW_EDIT_NORMALIZED);
+            handler.endEdit(PARAMETER_GAIN);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct TestWatcher {
+    descriptor: i32,
+    view: *const TestView,
+}
+
+#[cfg(target_os = "linux")]
+impl Class for TestWatcher {
+    type Interfaces = (IEventHandler,);
+}
+
+#[cfg(target_os = "linux")]
+impl IEventHandlerTrait for TestWatcher {
+    unsafe fn onFDIsSet(&self, descriptor: FileDescriptor) {
+        // (Strict: it is called for the descriptor that it was registered for, and only when there is something to read.)
+        if descriptor != self.descriptor {
+            return;
+        }
+        let mut byte = 0_u8;
+        if libc::read(descriptor, (&mut byte as *mut u8).cast(), 1) == 1 {
+            // SAFETY: the view outlives its watcher (the watcher is taken out of the run loop when the view is taken out of its parent, before the view goes).
+            (*self.view).press(b'r');
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl TestView {
+    /// Asks the host's run loop (the frame's `IRunLoop`) for a timer and a descriptor.
+    unsafe fn use_the_run_loop(&self, frame: &ComPtr<IPlugFrame>) {
+        let Some(run_loop) = frame.cast::<IRunLoop>() else {
+            return;
+        };
+        let mut pipe = [0_i32; 2];
+        if libc::pipe(pipe.as_mut_ptr()) != 0 {
+            return;
+        }
+        let timer = ComWrapper::new(TestTimer {
+            ticks: Cell::new(0),
+            handler: self.handler.clone(),
+            values: Rc::clone(&self.values),
+        });
+        let watcher = ComWrapper::new(TestWatcher {
+            descriptor: pipe[0],
+            view: self,
+        });
+        if let (Some(timer_pointer), Some(watcher_pointer)) = (
+            timer.to_com_ptr::<ITimerHandler>(),
+            watcher.to_com_ptr::<IEventHandler>(),
+        ) {
+            run_loop.registerTimer(timer_pointer.as_ptr(), 10);
+            run_loop.registerEventHandler(watcher_pointer.as_ptr(), pipe[0]);
+            // (Something to read: the host has to call the watcher for it.)
+            libc::write(pipe[1], [1_u8].as_ptr().cast(), 1);
+            *self.run_loop.borrow_mut() = Some(RunLoopUse {
+                run_loop,
+                timer,
+                watcher,
+                pipe,
+            });
+        }
     }
 }
 
@@ -615,7 +1126,8 @@ impl<const SINGLE: bool> Plugin<SINGLE> {
 }
 
 impl<const SINGLE: bool> IPluginBaseTrait for Plugin<SINGLE> {
-    unsafe fn initialize(&self, _context: *mut FUnknown) -> tresult {
+    unsafe fn initialize(&self, context: *mut FUnknown) -> tresult {
+        self.core.keep_the_host(context);
         if self.fault == Fault::Initialize {
             kResultFalse
         } else {
@@ -640,7 +1152,17 @@ impl IConnectionPointTrait for Plugin<false> {
         self.connected.set(false);
         kResultOk
     }
-    unsafe fn notify(&self, _message: *mut IMessage) -> tresult {
+    unsafe fn notify(&self, message: *mut IMessage) -> tresult {
+        // (The message that the test window sends, as the window of a plugin built with DPF sends its edits of the state: it changes what the component keeps, and nothing is said to the host.)
+        let Some(message) = ComRef::from_raw(message) else {
+            return kInvalidArgument;
+        };
+        let id = message.getMessageID();
+        if !id.is_null() && CStr::from_ptr(id).to_bytes() == b"bump-secret" {
+            let mut values = self.values.borrow_mut();
+            let place = &mut values[PARAMETER_SECRET as usize];
+            *place = (*place + 0.25).min(1.0);
+        }
         kResultOk
     }
 }

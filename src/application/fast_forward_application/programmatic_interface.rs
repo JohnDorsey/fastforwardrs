@@ -84,6 +84,13 @@ impl FastForwardApplication {
         self.interface.plugin_editors.use_this_program(program, headless);
     }
 
+    /// Adds a variable to the environment of the programs that show plugin windows, from now on (**for the tests**: the window of a test plugin does what a variable says).
+    pub fn add_to_the_environment_of_plugin_windows(&mut self, name: &str, value: &str) {
+        self.interface
+            .plugin_editors
+            .add_to_the_environment(name.to_owned(), value.to_owned());
+    }
+
     /// Puts the video or sound file at `path` on the timeline at the current frame, as choosing it
     /// after "Link and import" does.
     ///

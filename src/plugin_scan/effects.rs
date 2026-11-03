@@ -1035,8 +1035,7 @@ pub fn effect_of_a_vst3_plugin(module: &Path, scanned: &vst3_host::ScannedClass)
         audio_outputs: outputs,
         value_handles,
         pre_roll_samples: pre_roll_of_a_vst3_plugin(facts.tail),
-        // (The window of a VST3 plugin is piece 15.6.)
-        has_a_window: false,
+        has_a_window: scanned.has_a_window,
         start_warning: None,
         presets: Vec::new(),
     })

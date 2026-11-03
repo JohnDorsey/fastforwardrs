@@ -97,6 +97,12 @@ fn every_plugin_of_the_manifest_is_found_loads_can_be_an_effect_and_starts_stead
                         class.class.name,
                         class.problem
                     );
+                    println!(
+                        "{file}: {}: window {} id {}",
+                        class.class.name,
+                        class.has_a_window,
+                        class.class.id.text()
+                    );
                 }
             }
             other => panic!("{file} was not scanned as a plugin library, bundle or module: {other:?}"),

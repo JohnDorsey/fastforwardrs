@@ -26,6 +26,7 @@ use crate::module::Module;
 use crate::notes::{CONTROLLER_ALL_NOTES_OFF, CONTROLLER_PITCH_BEND, NoteEvent, NoteEventKind};
 use crate::objects::{EventList, HostObject, MemoryStream, ParameterChanges};
 use crate::state::{StateError, decode_state, encode_state};
+use crate::view::OpenView;
 
 /// The most steps of a stepped parameter whose texts are read.
 const MOST_STEPS_WITH_TEXTS: i32 = 255;
@@ -81,14 +82,15 @@ pub struct BetweenBlocks {
 /// A copy of a plugin.
 pub struct Instance {
     // (The plugin's interfaces are let go of in the order they are written here, which is the reverse of making them: some plugins (DPF's) complain if their component goes
-    // before the interface of their processor.)
+    // before the interface of their processor. **The window comes first of all**: it is the controller's, and is taken out of its parent before the controller is touched.)
+    pub(crate) view: Option<OpenView>,
     mapping: Option<ComPtr<IMidiMapping>>,
-    controller: Option<ComPtr<IEditController>>,
+    pub(crate) controller: Option<ComPtr<IEditController>>,
     processor: ComPtr<IAudioProcessor>,
     component: ComPtr<IComponent>,
-    host: ComWrapper<HostObject>,
-    facts: ClassFacts,
-    most_frames: usize,
+    pub(crate) host: ComWrapper<HostObject>,
+    pub(crate) facts: ClassFacts,
+    pub(crate) most_frames: usize,
     sample_rate: f64,
     /// The places of the main buses among the buses of the plugin.
     main_input: Option<usize>,
@@ -99,7 +101,7 @@ pub struct Instance {
     changes_out: ComWrapper<ParameterChanges>,
     events: ComWrapper<EventList>,
     /// The changes of parameters that wait for the next block: `(parameter, sample, normalised value)`.
-    pending: Vec<(u32, i32, f64)>,
+    pub(crate) pending: Vec<(u32, i32, f64)>,
     time_in_samples: i64,
     latency: u32,
     /// What the read-only parameters said last: `(parameter, normalised value)`.
@@ -124,6 +126,8 @@ unsafe impl Send for Instance {}
 
 impl Drop for Instance {
     fn drop(&mut self) {
+        // (A window that is open comes out of its parent first.)
+        self.close_view();
         // SAFETY: the plugin's objects are alive until this function ends; stopping, switching off, disconnecting and ending are the calls VST3 makes for letting a plugin go, in
         // the reverse order of making it.
         unsafe {
@@ -363,6 +367,7 @@ impl Instance {
             | ProcessContext_::StatesAndFlags_::kTimeSigValid) as _;
 
         let mut instance = Self {
+            view: None,
             host,
             component,
             processor,
@@ -496,6 +501,7 @@ impl Instance {
         unsafe { controller.setParamNormalized(id, normalized) };
         self.pending
             .push((id, i32::try_from(at_sample).unwrap_or(i32::MAX), normalized));
+        self.note_that_a_value_was_given(id, plain);
     }
 
     /// The plain value that the controller has for the parameter `id` now (`None` for a plugin with no controller).
@@ -506,7 +512,7 @@ impl Instance {
         Some(self.plain_of(id, normalized))
     }
 
-    fn plain_of(&self, id: u32, normalized: f64) -> f64 {
+    pub(crate) fn plain_of(&self, id: u32, normalized: f64) -> f64 {
         match &self.controller {
             // SAFETY: the controller is live; the call has numbers only.
             Some(controller) => unsafe { controller.normalizedParamToPlain(id, normalized) },

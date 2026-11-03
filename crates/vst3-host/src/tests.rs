@@ -27,15 +27,15 @@ fn the_module_folder() -> &'static PathBuf {
         .1
 }
 
-fn the_module() -> Module {
+pub(crate) fn the_module() -> Module {
     Module::open(the_module_folder()).expect("the module of the test plugins opens")
 }
 
-fn id(numbers: [u32; 4]) -> ClassId {
+pub(crate) fn id(numbers: [u32; 4]) -> ClassId {
     ClassId::from_numbers(numbers[0], numbers[1], numbers[2], numbers[3])
 }
 
-fn make(numbers: [u32; 4]) -> Instance {
+pub(crate) fn make(numbers: [u32; 4]) -> Instance {
     Instance::new(&the_module(), id(numbers), 48_000.0, 512, None)
         .expect("the plugin is made")
         .0

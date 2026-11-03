@@ -14,3 +14,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 vst3 = "0.3.0"
+
+# (Linux: the window of the plugin uses the host's run loop, with a pipe and a timer, as a real plugin's window does with its connection to the display.)
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

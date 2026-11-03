@@ -28,6 +28,9 @@ pub struct ScannedClass {
     pub problem: Option<String>,
     /// Whether the plugin has a state to save.
     pub has_state: bool,
+    /// Whether the plugin has a window that this system can put in a parent (its controller makes one). **A window is made to find out, and let go of at once.**
+    #[serde(default)]
+    pub has_a_window: bool,
 }
 
 /// What the scan of a module found.
@@ -55,26 +58,37 @@ pub fn scan_module(path: &Path, step: &mut impl FnMut(&str)) -> Result<ModuleSca
     };
     for class in module.classes().into_iter().filter(ClassDescription::is_a_plugin) {
         step(&format!("making {} ({})", class.name, class.id));
-        let (facts, problem, has_state) = probe(&module, &class, step);
+        let probed = probe(&module, &class, step);
         scan.classes.push(ScannedClass {
             class,
-            facts,
-            problem,
-            has_state,
+            facts: probed.facts,
+            problem: probed.problem,
+            has_state: probed.has_state,
+            has_a_window: probed.has_a_window,
         });
     }
     Ok(scan)
 }
 
-/// Makes the plugin, runs it once on silence, and says what came of it: what it is, why not (if not), and whether it has a state.
-fn probe(
-    module: &Module,
-    class: &ClassDescription,
-    step: &mut impl FnMut(&str),
-) -> (Option<ClassFacts>, Option<String>, bool) {
+/// What making a plugin and running it once came to.
+#[derive(Default)]
+struct Probed {
+    facts: Option<ClassFacts>,
+    problem: Option<String>,
+    has_state: bool,
+    has_a_window: bool,
+}
+
+/// Makes the plugin, runs it once on silence, and says what came of it: what it is, why not (if not), whether it has a state and whether it has a window.
+fn probe(module: &Module, class: &ClassDescription, step: &mut impl FnMut(&str)) -> Probed {
     let mut instance = match Instance::new(module, class.id, PROBE_SAMPLE_RATE, PROBE_BLOCK_FRAMES, None) {
         Ok((instance, _)) => instance,
-        Err(error) => return (None, Some(error.to_string()), false),
+        Err(error) => {
+            return Probed {
+                problem: Some(error.to_string()),
+                ..Probed::default()
+            };
+        }
     };
     step(&format!("running {} on silence", class.name));
     let facts = instance.facts().clone();
@@ -84,9 +98,21 @@ fn probe(
     let mut input_slices: Vec<&mut [f32]> = inputs.iter_mut().map(Vec::as_mut_slice).collect();
     let mut output_slices: Vec<&mut [f32]> = outputs.iter_mut().map(Vec::as_mut_slice).collect();
     if let Err(error) = instance.run(&mut input_slices, &mut output_slices, PROBE_BLOCK_FRAMES) {
-        return (Some(facts), Some(error.to_string()), false);
+        return Probed {
+            facts: Some(facts),
+            problem: Some(error.to_string()),
+            ..Probed::default()
+        };
     }
     let problem =
         (!is_made_of_numbers(&outputs)).then(|| "its sound is not made of numbers when it is given silence".to_owned());
-    (Some(facts), problem, instance.save_state().is_ok())
+    let has_state = instance.save_state().is_ok();
+    step(&format!("looking for the window of {}", class.name));
+    let has_a_window = problem.is_none() && instance.has_a_view();
+    Probed {
+        facts: Some(facts),
+        problem,
+        has_state,
+        has_a_window,
+    }
 }
