@@ -480,8 +480,8 @@ fn every_real_vst3_effect_makes_finite_sound_that_is_not_silent_and_changes_the_
             table.push((class.class.name.clone(), file.clone(), made));
         }
     }
-    // (The effects of the sets: the four of Dragonfly, MVerb, MaGigaverb and Surge XT Effects.)
-    assert!(table.len() >= 7, "only {} VST3 effects were tried", table.len());
+    // (The effects of the sets: the four of Dragonfly, MVerb, Surge XT Effects, 3BandEQ, PingPongPan, the four of Max-Gen and CycleShifter: 13, and Wolf Shaper, which has no build for macOS, makes 14.)
+    assert!(table.len() >= 13, "only {} VST3 effects were tried", table.len());
     for (name, file, made) in &table {
         assert!(made.all_finite, "{name} ({file}) made a sample that is not a number");
         assert!(made.peak < 8.0, "{name} ({file}) made a peak of {}", made.peak);
@@ -491,8 +491,9 @@ fn every_real_vst3_effect_makes_finite_sound_that_is_not_silent_and_changes_the_
             made.outputs_of_control
         );
         assert!(made.rms_out > 1e-5, "{name} ({file}) made silence from a steady sound");
-        // (Surge XT Effects has no effect in its slots until a patch puts one there, I believe, and passes the sound as it is: it is not silent, and it may change nothing.)
-        if !name.to_lowercase().contains("surge") {
+        // (Surge XT Effects has no effect in its slots until a patch puts one there, I believe, and passes the sound as it is: it is not silent, and it may change nothing.
+        // The 3 Band EQ has every band at unity at its defaults and changes nothing either: [V] its change is 0.00000 on Windows.)
+        if !name.to_lowercase().contains("surge") && !name.to_lowercase().contains("3 band") {
             assert!(
                 made.rms_of_the_change > 1e-5,
                 "{name} ({file}) did not change the sound"

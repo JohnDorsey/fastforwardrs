@@ -11,22 +11,25 @@ This is what was added, what was left out and why, and what was tried. **[V]** =
 *I am not a lawyer; this is a reading of the licences by someone who has to ship the result, not legal advice.* The policy is the one of `distribution-notices.md` (LG-02 as amended on
 2026-10-20): GPL and LGPL licences compatible with GPLv3 and the permissive ones; not AGPL, not GPL-2.0-only.
 
-## What was added: seven sets, and no new download at all
+## What was added: ten sets, and no new download at all
 
-The authors of Dragonfly Reverb, DPF-Plugins and Surge XT put **a `.vst3` module (a folder) beside the CLAP file in the same release file** that the CLAP sets already fetch, so the Bundles
-tab downloads **exactly what it did: 404,310,339 bytes for Windows with the data of Surge XT (151.5 MB without it), counted once for each release file** [V: the real fetch below].
+The authors of Dragonfly Reverb, DPF-Plugins, Surge XT, CycleShifter and Wolf Shaper put **a `.vst3` module (a folder) beside the CLAP file in the same release file** that the CLAP sets already fetch, so the Bundles
+tab downloads **exactly what it did: 404,310,339 bytes for Windows with the data of Surge XT (151.5 MB without it), counted once for each release file** [V: the real fetch below, the same figure with 26 sets as with 16].
 
 | Set (id) | Licence | Plugins | From |
 |---|---|---|---|
 | Dragonfly Reverb (VST3) (`dragonfly-reverb-vst3`) | GPL-3.0-or-later | Early Reflections, Hall, Plate, Room | the files of `dragonfly-reverb` |
 | MVerb (VST3) (`mverb-vst3`) | GPL-3.0-or-later | MVerb | the DPF-Plugins v1.7 files |
-| MaGigaverb (VST3) (`magigaverb-vst3`) | LGPL-3.0-only AND ISC (the wrapper) | MaGigaverb | the DPF-Plugins v1.7 files |
 | Surge XT Effects (VST3) (`surge-xt-effects-vst3`) | GPL-3.0-or-later | Surge XT Effects | the files of `surge-xt-effects` |
 | Surge XT (synthesizer, VST3) (`surge-xt-synthesizer-vst3`) | GPL-3.0-or-later | Surge XT | the same |
 | Kars (synthesizer, VST3) (`kars-vst3`) | ISC | Kars | the DPF-Plugins v1.7 files |
 | Nekobi (synthesizer, VST3) (`nekobi-vst3`) | GPL-2.0-or-later (read from its source files: see `bundleable-synthesizers.md`) | Nekobi | the DPF-Plugins v1.7 files |
+| DPF Mini-Series (VST3) (`dpf-mini-series-vst3`) | LGPL-3.0-only | 3BandEQ, PingPongPan | the DPF-Plugins v1.7 files |
+| DPF Max-Gen plugins (VST3) (`dpf-max-gen-vst3`) | LGPL-3.0-only AND ISC (the wrapper) | MaBitcrush, MaFreeverb, MaGigaverb, MaPitchshift | the DPF-Plugins v1.7 files |
+| CycleShifter (VST3) (`cycleshifter-vst3`) | MIT | CycleShifter | the DPF-Plugins v1.7 files |
+| Wolf Shaper (VST3) (`wolf-shaper-vst3`) | GPL-3.0-or-later | Wolf Shaper (no build for macOS, as for LV2) | the files of `wolf-shaper-lv2` (Windows `bin/wolf-shaper.vst3/`, Linux `wolf-shaper.vst3/`) |
 
-They are **the VST3 sets of the plugins that have a CLAP set**: everything but the plugins and the names of the files is the CLAP set's (the authors, the licence, the licence texts, the
+They are **the VST3 sets of the plugins that have a CLAP set or an LV2 set**: everything but the plugins and the names of the files is that set's (the authors, the licence, the licence texts, the
 source, the release files and their checksums), and a test of the manifest says so (`test_the_vst3_sets_are_these...`). Each is a set of its own for the reason the LV2 ones are: the same
 plugin as CLAP and as VST3 would be two effects with one name in the menu, and a person who fetches the CLAP set should not get both. **Surge XT is therefore in the menu twice, under CLAP
 and under VST3**, and so is each Dragonfly reverb (and the VST3 build has the 774 values of Surge XT, all of them since the limit of 255 went: see section 11 of the design document).
@@ -39,9 +42,9 @@ and not one file), or, for the disk images of macOS, a path in what the installe
 A VST3 file contains the interface of VST3, and that interface has a licence of its own. Steinberg's SDK is "Steinberg VST3 License **or** GPL-3.0" (since 2017) and, from 3.8 (2022),
 MIT [B for the date]; what each of these builds carries:
 
-* **DPF-based plugins (Dragonfly, MVerb, MaGigaverb, Kars, Nekobi): DPF's own header files, "travesty" [V]**: a pure C description of the interface of VST3 written by Filipe Coelho,
+* **DPF-based plugins (Dragonfly, MVerb, 3BandEQ, PingPongPan, the Max-Gen four, CycleShifter, Kars, Nekobi, Wolf Shaper): DPF's own header files, "travesty" [V]**: a pure C description of the interface of VST3 written by Filipe Coelho,
   **ISC**, with its notice in every header ("Copyright (C) 2021-2022 Filipe Coelho", `dpf/distrho/src/travesty/base.h`). I read it **in the tag `v1.7` of DPF-Plugins and in the DPF commit
-  `dc6557a` that Dragonfly Reverb 3.2.10 holds**; the DPF-Plugins licence table lists DPF as ISC. **The VST3 file therefore has the licence of the plugin and nothing more.** The binaries were
+  `dc6557a` that Dragonfly Reverb 3.2.10 holds, and in the DPF commit `d8c2673` that Wolf Shaper 1.0.2 holds**; the DPF-Plugins licence table lists DPF as ISC. **The VST3 file therefore has the licence of the plugin and nothing more.** The binaries were
   not taken apart [B that they were built from these headers; DPF has no other way to build a VST3 plugin that I know of].
 * **Surge XT: the SDK that its JUCE carries [V]**: the Surge team's JUCE (`surge-synthesizer/JUCE`, commit `cf5754b`, the one that `release_xt_1.3.4` pins) has Steinberg's SDK in
   `modules/juce_audio_processors/format_types/VST3_SDK`, whose `LICENSE.txt` says "licensed under the terms of the Steinberg VST3 License, **or alternatively under the terms of the General
@@ -53,9 +56,9 @@ MIT [B for the date]; what each of these builds carries:
 
 ## Left out, with the reason
 
-* **The other VST3 modules of the same release files**: 3BandEQ, PingPongPan, MaBitcrush, MaFreeverb, MaPitchshift and CycleShifter (their LV2 sets exist; I listed the DPF-Plugins files and they are in them). Nothing is wrong with
-  them that I know of; they were not added **to keep the menu from having a second copy of every plugin** until a person says they want the format for them. Each is one line in the
-  manifest. [B that their VST3 builds work as these do] **Wolf Shaper**: I did not look whether its release has a VST3 build.
+* **Nothing of the VST3 modules of these release files is left out any more.** The first version of this piece left 3BandEQ, PingPongPan, MaBitcrush, MaFreeverb, MaPitchshift, CycleShifter and
+  Wolf Shaper out "to keep the menu from having a second copy of every plugin"; the maintainer asked for them in the same release files (2026-11-03), and they are the sets above. Wolf Shaper's
+  release does hold a VST3 build (Windows and Linux; macOS has none, as for LV2) [V: the real fetch]. **MaGigaverb is in the Max-Gen set** and has no set of its own any more.
 * **3BandSplitter, AmplitudeImposer, SoulForce, glBars, ProM**: as for CLAP and LV2, the shapes of their buses are not used by any effect of the program (ProM and glBars are pictures, and ProM
   is 4,246 files in its module).
 * **A VST3 build of the Surge XT patches**: there is none; the data of Surge XT is found by the VST3 build too, since Surge looks for `SurgeXTData` in the folders above its own file [B: the
@@ -63,13 +66,13 @@ MIT [B for the date]; what each of these builds carries:
 
 ## What was checked
 
-* **The manifest.** 23 sets, the Rust and the Python checks both fit; `.vst3` is accepted as a folder member (and `Thing.vst3` without the `/` is refused with the reason), tests of both.
-* **The download [V].** The program's own downloader fetched all 23 sets on **Windows (404,310,339 bytes in 97.9 s) and on Linux in Ubuntu (95.6 s)**: every checksum right, every VST3
+* **The manifest.** 26 sets, the Rust and the Python checks both fit; `.vst3` is accepted as a folder member (and `Thing.vst3` without the `/` is refused with the reason), tests of both.
+* **The download [V].** The program's own downloader fetched all 26 sets on **Windows (404,310,339 bytes in 177.9 s on the day, the network being slower than on the first day) and on Linux in Ubuntu (106 s)**: every checksum right, every VST3
   module a folder with `Contents` in it. Before fetching, the release files were listed to see that the members are there: the Windows zips of Dragonfly Reverb, DPF-Plugins and Surge XT
   and the Linux files of Dragonfly Reverb, DPF-Plugins and Surge XT all hold the `.vst3` folders under the names the manifest takes [V].
 * **The scan [V on Windows and Linux].** `every_plugin_of_the_manifest_is_found_loads_can_be_an_effect_and_starts_steady` (ignored, by hand on a fetched folder) now has the VST3 modules: each
   is found, scanned, has no problem. The effects found are as many as the files.
-* **The sound of the effects [V on Windows and Linux].** `every_real_vst3_effect_makes_finite_sound_that_is_not_silent_and_changes_the_sound_it_is_given` runs each VST3 effect for 200
+* **The sound of the effects [V on Windows and Linux, with the same numbers on both].** `every_real_vst3_effect_makes_finite_sound_that_is_not_silent_and_changes_the_sound_it_is_given` runs each VST3 effect for 200
   blocks of 512 frames with two tones and noise, every value as the effect gives it at its first block:
 
   | Effect | values | peak | change |
@@ -81,13 +84,21 @@ MIT [B for the date]; what each of these builds carries:
   | MVerb | 12 | 0.30 | 0.103 |
   | MaGigaverb | 8 | 0.80 | 0.186 |
   | Surge XT Effects | 14 | 0.27 | 0.000 (no effect is in its slots until a patch puts one there [B]) |
+  | 3 Band EQ | 9 | 0.27 | 0.000 (every band at unity at its defaults: an EQ that does nothing until it is turned; the test does not ask it to change the sound) |
+  | Ping Pong Pan | 5 | 0.27 | 0.065 |
+  | MaBitcrush | 1 | 0.42 | 0.151 |
+  | MaFreeverb | 4 | 0.03 | 0.178 |
+  | MaPitchshift | 4 | 0.28 | 0.145 |
+  | Cycle Shifter | 5 | 0.55 | 0.099 |
+  | Wolf Shaper | 13 | 0.28 | 0.0005 (its curve is the straight line at its defaults; it passes 1e-5 by a factor of 50 and nothing more is claimed) |
 
   (The values counted here are those of the module, with the hidden ones; the effect has the ones that a person can use, as the scan says.)
 * **macOS [V by CI, not by hand].** The members of the sets for macOS follow the names of the CLAP and the LV2 ones (`dpf-DPF-Plugins-vst3bundles.pkg/Payload/Kars.vst3`, `Surge XT.vst3/` in
-  the zip), which I could only believe, having no Mac and no way to open a disk image here. **The CI job of a Mac (the run of the push of this piece, commit `b89a495`) fetched all 23 sets
+  the zip), which I could only believe, having no Mac and no way to open a disk image here. **The CI job of a Mac (the run of the push of the first seven sets, commit `b89a495`) fetched all 23 sets of that day
   with the program's own downloader in 107 s, every one of the seven VST3 sets with its modules (so the names were right), and the real scan and effect test (5 passed; the one it skipped
   is the data of Surge XT, which has no build for macOS) and the real synthesizer tests (2 passed, the three VST3 instruments among them) passed on what it fetched.** So the macOS builds of
-  Dragonfly Reverb, DPF-Plugins and Surge XT as VST3 load and play with this host. (The steps are warnings in the workflow whatever they find; I read their annotations.)
+  Dragonfly Reverb, DPF-Plugins and Surge XT as VST3 load and play with this host. The sets added after that (the Mini-Series, Max-Gen and CycleShifter) are the same release files and names of the same
+  kind; **not yet verified by a Mac at the time of writing** (the CI run of the push that adds them is where it is read). (The steps are warnings in the workflow whatever they find; I read their annotations.)
 * **The sound of the instruments [V on Windows and Linux].** `bundled_synthesizers_real` finds the three VST3 synthesizers by the word in the name of their sets, and each plays a note and is
   quiet after it, and plays a MIDI clip through the plan, the graph and the host **where its notes are, silent before the first, with its tail, and a note held across a seek**. On Windows
   **Kars as VST3 is, to the five digits that are printed, the Kars of CLAP and of LV2** (first sound at sample 4800, the levels of the three notes 0.07516, 0.03018, 0.17071); Surge XT and Nekobi

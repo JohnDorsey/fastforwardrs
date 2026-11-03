@@ -1266,79 +1266,6 @@
       }
     },
     {
-      "id": "magigaverb-vst3",
-      "name": "MaGigaverb (VST3)",
-      "version": "1.7 (of DPF-Plugins)",
-      "authors": [
-        "Cycling '74 (the Gen~ export)",
-        "Filipe Coelho (DISTRHO)"
-      ],
-      "licence": "LGPL-3.0-only AND ISC",
-      "licence_note": "the licence table of DPF-Plugins says LGPL-3.0 for the Max-Gen plugins; the files of the wrapper that make the plugin (its own LICENSE) are ISC VST3: the VST3 build of a plugin made with DPF has the interface of VST3 from DPF's own header files, \"travesty\" (pure C, ISC licence, \"Copyright (C) 2021-2022 Filipe Coelho\"), and not Steinberg's SDK, so the VST3 file has the licence of the plugin and nothing more. Read in the source: dpf/distrho/src/travesty/base.h of the tag v1.7 of DPF-Plugins and of the DPF (commit dc6557a) that Dragonfly Reverb 3.2.10 holds; the binaries were not taken apart.",
-      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
-      "plugins": [
-        "MaGigaverb"
-      ],
-      "licence_texts": [
-        {
-          "name": "LICENSE-LGPL-3.0.txt",
-          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/3BandEQ/LICENSE",
-          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
-        },
-        {
-          "name": "LICENSE-ISC-wrapper.txt",
-          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/gigaverb/LICENSE",
-          "sha256": "eea569f3336a0555d089df54a263edfc04ab52ff103ca9f8b25508d9f8491699"
-        },
-        {
-          "name": "LICENSE-DPF-Plugins.txt",
-          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
-          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
-        }
-      ],
-      "source": {
-        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
-        "sha256": null,
-        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
-      },
-      "platforms": {
-        "windows-x86_64": {
-          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
-          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
-          "size": 74524341,
-          "members": [
-            {
-              "from": "DPF-Plugins-v1.7/MaGigaverb.vst3/",
-              "to": "MaGigaverb.vst3"
-            }
-          ]
-        },
-        "linux-x86_64": {
-          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
-          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
-          "size": 9827340,
-          "members": [
-            {
-              "from": "DPF-Plugins-v1.7/MaGigaverb.vst3/",
-              "to": "MaGigaverb.vst3"
-            }
-          ]
-        },
-        "macos-universal": {
-          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
-          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
-          "size": 57933584,
-          "installer": "DPF-Plugins-AudioPlugins.pkg",
-          "members": [
-            {
-              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/MaGigaverb.vst3",
-              "to": "MaGigaverb.vst3"
-            }
-          ]
-        }
-      }
-    },
-    {
       "id": "surge-xt-effects-vst3",
       "name": "Surge XT Effects (VST3)",
       "version": "1.3.4",
@@ -1593,6 +1520,316 @@
             {
               "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/Nekobi.vst3",
               "to": "Nekobi.vst3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "dpf-mini-series-vst3",
+      "name": "DPF Mini-Series (VST3)",
+      "version": "1.7 (of DPF-Plugins)",
+      "authors": [
+        "Michael Gruhn (3BandEQ)",
+        "Filipe Coelho and the DISTRHO team"
+      ],
+      "licence": "LGPL-3.0-only",
+      "licence_note": "VST3: the VST3 build of a plugin made with DPF has the interface of VST3 from DPF's own header files, \"travesty\" (pure C, ISC licence, \"Copyright (C) 2021-2022 Filipe Coelho\"), and not Steinberg's SDK, so the VST3 file has the licence of the plugin and nothing more. Read in the source: dpf/distrho/src/travesty/base.h of the tag v1.7 of DPF-Plugins; the binaries were not taken apart.",
+      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
+      "plugins": [
+        "3BandEQ",
+        "PingPongPan"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE-LGPL-3.0.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/3BandEQ/LICENSE",
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+        },
+        {
+          "name": "LICENSE-DPF-Plugins.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
+          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
+        "sha256": null,
+        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
+          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
+          "size": 74524341,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/3BandEQ.vst3/",
+              "to": "3BandEQ.vst3"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/PingPongPan.vst3/",
+              "to": "PingPongPan.vst3"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
+          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
+          "size": 9827340,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/3BandEQ.vst3/",
+              "to": "3BandEQ.vst3"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/PingPongPan.vst3/",
+              "to": "PingPongPan.vst3"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
+          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
+          "size": 57933584,
+          "installer": "DPF-Plugins-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/3BandEQ.vst3",
+              "to": "3BandEQ.vst3"
+            },
+            {
+              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/PingPongPan.vst3",
+              "to": "PingPongPan.vst3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "dpf-max-gen-vst3",
+      "name": "DPF Max-Gen plugins (VST3)",
+      "version": "1.7 (of DPF-Plugins)",
+      "authors": [
+        "Cycling '74 (the Gen~ export)",
+        "Filipe Coelho (DISTRHO)"
+      ],
+      "licence": "LGPL-3.0-only AND ISC",
+      "licence_note": "the licence table of DPF-Plugins says LGPL-3.0 for the Max-Gen plugins; the files of the wrapper that make the plugin (its own LICENSE) are ISC VST3: the VST3 build of a plugin made with DPF has the interface of VST3 from DPF's own header files, \"travesty\" (pure C, ISC licence, \"Copyright (C) 2021-2022 Filipe Coelho\"), and not Steinberg's SDK, so the VST3 file has the licence of the plugin and nothing more. Read in the source: dpf/distrho/src/travesty/base.h of the tag v1.7 of DPF-Plugins; the binaries were not taken apart.",
+      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
+      "plugins": [
+        "MaBitcrush",
+        "MaFreeverb",
+        "MaGigaverb",
+        "MaPitchshift"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE-LGPL-3.0.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/3BandEQ/LICENSE",
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+        },
+        {
+          "name": "LICENSE-ISC-wrapper.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/gigaverb/LICENSE",
+          "sha256": "eea569f3336a0555d089df54a263edfc04ab52ff103ca9f8b25508d9f8491699"
+        },
+        {
+          "name": "LICENSE-DPF-Plugins.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
+          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
+        "sha256": null,
+        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
+          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
+          "size": 74524341,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/MaBitcrush.vst3/",
+              "to": "MaBitcrush.vst3"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaFreeverb.vst3/",
+              "to": "MaFreeverb.vst3"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaGigaverb.vst3/",
+              "to": "MaGigaverb.vst3"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaPitchshift.vst3/",
+              "to": "MaPitchshift.vst3"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
+          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
+          "size": 9827340,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/MaBitcrush.vst3/",
+              "to": "MaBitcrush.vst3"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaFreeverb.vst3/",
+              "to": "MaFreeverb.vst3"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaGigaverb.vst3/",
+              "to": "MaGigaverb.vst3"
+            },
+            {
+              "from": "DPF-Plugins-v1.7/MaPitchshift.vst3/",
+              "to": "MaPitchshift.vst3"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
+          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
+          "size": 57933584,
+          "installer": "DPF-Plugins-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/MaBitcrush.vst3",
+              "to": "MaBitcrush.vst3"
+            },
+            {
+              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/MaFreeverb.vst3",
+              "to": "MaFreeverb.vst3"
+            },
+            {
+              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/MaGigaverb.vst3",
+              "to": "MaGigaverb.vst3"
+            },
+            {
+              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/MaPitchshift.vst3",
+              "to": "MaPitchshift.vst3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cycleshifter-vst3",
+      "name": "CycleShifter (VST3)",
+      "version": "1.7 (of DPF-Plugins)",
+      "authors": [
+        "Niall Moody",
+        "Filipe Coelho (DISTRHO)"
+      ],
+      "licence": "MIT",
+      "licence_note": "VST3: the VST3 build of a plugin made with DPF has the interface of VST3 from DPF's own header files, \"travesty\" (pure C, ISC licence, \"Copyright (C) 2021-2022 Filipe Coelho\"), and not Steinberg's SDK, so the VST3 file has the licence of the plugin and nothing more. Read in the source: dpf/distrho/src/travesty/base.h of the tag v1.7 of DPF-Plugins; the binaries were not taken apart.",
+      "homepage": "https://github.com/DISTRHO/DPF-Plugins",
+      "plugins": [
+        "CycleShifter"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE-MIT.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/plugins/AmplitudeImposer/LICENSE",
+          "sha256": "02693f5aee5cb6f82390d20f760a153ea87f02c4bc08c9e82e9a0f411c2829b3"
+        },
+        {
+          "name": "LICENSE-DPF-Plugins.txt",
+          "url": "https://raw.githubusercontent.com/DISTRHO/DPF-Plugins/v1.7/LICENSE",
+          "sha256": "571ee29212a35bfdda5876b329bffc425c487a10a9bfa2fc1a6db68af8cbd9c6"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/DISTRHO/DPF-Plugins/archive/refs/tags/v1.7.tar.gz",
+        "sha256": null,
+        "note": "the source of the tag v1.7; GitHub makes this archive when it is asked for, and does not promise that its checksum stays the same, so a release keeps its own copy of it"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-win64.zip",
+          "sha256": "fdc609e0936e9c999395b9ddd98a9a72739cb672d8838ab71849469aee50ad98",
+          "size": 74524341,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/CycleShifter.vst3/",
+              "to": "CycleShifter.vst3"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-linux-x86_64.tar.xz",
+          "sha256": "8088e362f9f68fea179abe9f96b83fca07693224ffcf46837c24ff8b59b119cb",
+          "size": 9827340,
+          "members": [
+            {
+              "from": "DPF-Plugins-v1.7/CycleShifter.vst3/",
+              "to": "CycleShifter.vst3"
+            }
+          ]
+        },
+        "macos-universal": {
+          "url": "https://github.com/DISTRHO/DPF-Plugins/releases/download/v1.7/DPF-Plugins-v1.7-macos-universal.dmg",
+          "sha256": "94b996c898a7ba160561113d1c48c4700a6ef65d33f4092ea7289b1af44059e1",
+          "size": 57933584,
+          "installer": "DPF-Plugins-AudioPlugins.pkg",
+          "members": [
+            {
+              "from": "dpf-DPF-Plugins-vst3bundles.pkg/Payload/CycleShifter.vst3",
+              "to": "CycleShifter.vst3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "wolf-shaper-vst3",
+      "name": "Wolf Shaper (VST3)",
+      "version": "1.0.2",
+      "authors": [
+        "Patrick Desaulniers"
+      ],
+      "licence": "GPL-3.0-or-later",
+      "licence_note": "the source files say GPL v3 or later in their SPDX line; the LICENSE file is the GPL version 3 VST3: Wolf Shaper is made with DPF, whose VST3 build has the interface of VST3 from DPF's own header files, \"travesty\" (pure C, ISC licence, \"Copyright (C) 2021-2022 Filipe Coelho\"), and not Steinberg's SDK, so the VST3 file has the licence of the plugin and nothing more. Read in the source: dpf/distrho/src/travesty/base.h of the DPF (commit d8c2673) that Wolf Shaper 1.0.2 holds; the binaries were not taken apart.",
+      "homepage": "https://github.com/wolf-plugins/wolf-shaper",
+      "plugins": [
+        "Wolf Shaper"
+      ],
+      "licence_texts": [
+        {
+          "name": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/wolf-plugins/wolf-shaper/v1.0.2/LICENSE",
+          "sha256": "c53a65c2fd561c87eaabf1072ef5dcab8653042bc15308465f52413585eb6271"
+        }
+      ],
+      "source": {
+        "url": "https://github.com/wolf-plugins/wolf-shaper/releases/download/v1.0.2/wolf-shaper-v1.0.2-source.tar.gz",
+        "sha256": "b18e579410771bb0cb42b50cc609c51c2e1655c48ec4acbee386a090fb418c5c"
+      },
+      "platforms": {
+        "windows-x86_64": {
+          "url": "https://github.com/wolf-plugins/wolf-shaper/releases/download/v1.0.2/wolf-shaper-v1.0.2%2B20230515144200-windows-x64.zip",
+          "sha256": "42a703a5f71b19855d9213d57f2261d2182c73c73d39730775188df3e4c47da9",
+          "size": 5481008,
+          "members": [
+            {
+              "from": "bin/wolf-shaper.vst3/",
+              "to": "wolf-shaper.vst3"
+            }
+          ]
+        },
+        "linux-x86_64": {
+          "url": "https://github.com/wolf-plugins/wolf-shaper/releases/download/v1.0.2/wolf-shaper-v1.0.2-linux-x64.zip",
+          "sha256": "8b844e9b535d2b8a8a07fc6cec207beae8161f7d6da36e4a856a766aa441b848",
+          "size": 5089663,
+          "members": [
+            {
+              "from": "wolf-shaper.vst3/",
+              "to": "wolf-shaper.vst3"
             }
           ]
         }

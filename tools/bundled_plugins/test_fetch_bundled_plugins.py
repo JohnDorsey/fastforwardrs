@@ -236,17 +236,21 @@ class TheRealManifest(unittest.TestCase):
             {
                 "dragonfly-reverb-vst3": ["Dragonfly Early Reflections", "Dragonfly Hall Reverb", "Dragonfly Plate Reverb", "Dragonfly Room Reverb"],
                 "mverb-vst3": ["MVerb"],
-                "magigaverb-vst3": ["MaGigaverb"],
                 "surge-xt-effects-vst3": ["Surge XT Effects"],
                 "surge-xt-synthesizer-vst3": ["Surge XT"],
                 "kars-vst3": ["Kars"],
                 "nekobi-vst3": ["Nekobi"],
+                "dpf-mini-series-vst3": ["3BandEQ", "PingPongPan"],
+                "dpf-max-gen-vst3": ["MaBitcrush", "MaFreeverb", "MaGigaverb", "MaPitchshift"],
+                "cycleshifter-vst3": ["CycleShifter"],
+                "wolf-shaper-vst3": ["Wolf Shaper"],
             },
         )
         by_id = {s["id"]: s for s in THE_REAL_MANIFEST["sets"]}
         for vst3_id, plugin_set in vst3_sets.items():
-            clap_id = vst3_id[: -len("-vst3")]
-            clap_set = by_id[clap_id]
+            # (The set it is made from: the CLAP set of the same plugins if there is one, else the LV2 set.)
+            stem = vst3_id[: -len("-vst3")]
+            clap_set = by_id.get(stem) or by_id[stem + "-lv2"]
             # (Everything but what the plugins are is the CLAP set's: the same authors, licence, licence texts, source and the same release files, which the Bundles tab downloads once.)
             for field in ("version", "authors", "licence", "homepage", "licence_texts", "source"):
                 self.assertEqual(plugin_set[field], clap_set[field], (vst3_id, field))
@@ -266,7 +270,7 @@ class TheRealManifest(unittest.TestCase):
                 self.assertEqual(len(build["members"]), len(plugin_set["plugins"]), (vst3_id, platform_name))
         # (The VST3 builds of DPF's plugins use DPF's own headers for the interface of VST3 ("travesty", ISC), and the VST3 build of Surge XT uses the GPL-3.0 licence of the SDK that its JUCE
         # carries: the sets say where that was read.)
-        for set_id in ("dragonfly-reverb-vst3", "mverb-vst3", "magigaverb-vst3", "kars-vst3", "nekobi-vst3"):
+        for set_id in ("dragonfly-reverb-vst3", "mverb-vst3", "dpf-mini-series-vst3", "dpf-max-gen-vst3", "cycleshifter-vst3", "wolf-shaper-vst3", "kars-vst3", "nekobi-vst3"):
             self.assertIn("travesty", by_id[set_id]["licence_note"], set_id)
         for set_id in ("surge-xt-effects-vst3", "surge-xt-synthesizer-vst3"):
             self.assertIn("General Public License", by_id[set_id]["licence_note"], set_id)
@@ -274,7 +278,7 @@ class TheRealManifest(unittest.TestCase):
     def test_every_set_has_a_build_for_windows_linux_and_macos_and_the_files_it_takes_are_the_plugins_it_names(self):
         for plugin_set in THE_REAL_MANIFEST["sets"]:
             # (Every set has a build for each system, except Wolf Shaper, whose file for macOS is a zip that holds a disk image: one more layer than the program opens.)
-            wanted = {"windows-x86_64", "linux-x86_64"} | (set() if plugin_set["id"] == "wolf-shaper-lv2" else {"macos-universal"})
+            wanted = {"windows-x86_64", "linux-x86_64"} | (set() if plugin_set["id"].startswith("wolf-shaper-") else {"macos-universal"})
             if plugin_set.get("kind") == "data":
                 # (Data has no build for macOS: Surge XT looks for its data there only in the folders of the person's own Library, which the program does not write in. It takes one folder, which
                 # is the folder of the set: what is in it is not counted as plugins.)

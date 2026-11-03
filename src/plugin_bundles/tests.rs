@@ -59,11 +59,18 @@ fn the_manifest_in_the_program_is_read_and_is_fit_and_has_a_build_for_this_syste
             "Dragonfly Plate Reverb",
             "Dragonfly Room Reverb",
             "MVerb",
-            "MaGigaverb",
             "Surge XT Effects",
             "Surge XT",
             "Kars",
-            "Nekobi"
+            "Nekobi",
+            "3BandEQ",
+            "PingPongPan",
+            "MaBitcrush",
+            "MaFreeverb",
+            "MaGigaverb",
+            "MaPitchshift",
+            "CycleShifter",
+            "Wolf Shaper"
         ]
     );
     // (Every set has a build for each system, except Wolf Shaper, whose file for macOS is a zip that holds a disk image: one more layer than the program opens.)
@@ -81,7 +88,7 @@ fn the_manifest_in_the_program_is_read_and_is_fit_and_has_a_build_for_this_syste
         }
         assert_eq!(
             set.platforms.contains_key("macos-universal"),
-            set.id != "wolf-shaper-lv2",
+            !set.id.starts_with("wolf-shaper-"),
             "{}",
             set.id
         );
