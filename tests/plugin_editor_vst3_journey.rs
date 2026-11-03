@@ -191,6 +191,53 @@ fn the_window_of_a_vst3_plugin_makes_its_edit_one_step_of_the_project_in_the_pla
 }
 
 #[test]
+fn what_a_plugin_window_says_asks_the_editor_to_draw_a_frame_at_once_without_waiting_for_its_timer() {
+    // A hand that drags a knob in the plugin's window is not over the editor's window, which draws only when something asks it to. Until 2026-11-03 the only thing that asked was a
+    // timer of 30 milliseconds, and a slider that follows the knob moved in jumps of several edits (found by a person dragging a knob of Dragonfly Reverb).
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let scratch = scratch_directory();
+    let (mut journey, target, _kind) =
+        journey_with_a_vst3_plugin_on_the_clip(&toolchain, scratch.path(), "Test gain \u{e9}", true, "e");
+    // (egui keeps the cause of each request for a frame, the place in the code that made it, and says them at the next frame, whether or not it called the integration for each. The
+    // editor's timer makes one request in each frame that a window is open, always from the same place; any other request from the code of the windows is the window's own.)
+    journey.wait_until_idle();
+    journey
+        .harness
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Open editor")
+        .click();
+    let mut places_that_asked = Vec::new();
+    for _ in 0..40 {
+        journey.harness.step();
+        places_that_asked.extend(
+            journey
+                .harness
+                .ctx
+                .repaint_causes()
+                .iter()
+                .filter(|cause| cause.file.ends_with("plugin_editor_flow.rs"))
+                .map(|cause| cause.line),
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // (By now the window has said all that it had to say: the last frame has the timer's request only.)
+    let the_timer = *places_that_asked
+        .last()
+        .expect("the timer asks in each frame that a window is open");
+    let asked_by_the_window = places_that_asked.iter().filter(|line| **line != the_timer).count();
+    assert!(
+        asked_by_the_window >= 1,
+        "the window said things and the editor was asked for no frame by it, only by its timer: {places_that_asked:?}"
+    );
+    assert!(
+        journey
+            .application()
+            .is_a_plugin_window_open(target, EffectInstanceId::FIRST),
+        "(the window is the one that is open)"
+    );
+}
+
+#[test]
 fn the_state_that_a_window_says_changed_is_asked_for_and_kept_in_the_effect_with_the_hands_edit_in_it() {
     let toolchain = toolchain_or_skip!();
     let _alone = the_installed_plugins_to_myself();

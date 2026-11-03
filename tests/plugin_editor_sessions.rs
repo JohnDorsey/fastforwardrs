@@ -4,6 +4,8 @@
 //! The editor's side of the plugin windows (`plugin_editor::sessions`, phase 10 piece 10.3) with the real editor-window program, headless, and the test plugin that has a window.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use clap_test_plugins::{EDITOR, EDITOR_EDIT_VALUE, GAIN};
@@ -101,6 +103,65 @@ fn decode(text: &str) -> Vec<u8> {
         }
     }
     bytes
+}
+
+/// A counter that the interface's wake-up adds to, and the wake-up that does.
+fn a_wake_up_that_counts() -> (Arc<AtomicUsize>, impl Fn() + Send + Sync + 'static) {
+    let count = Arc::new(AtomicUsize::new(0));
+    let for_the_wake_up = Arc::clone(&count);
+    (count, move || {
+        for_the_wake_up.fetch_add(1, Ordering::SeqCst);
+    })
+}
+
+fn waited_until_the_count_is_more_than(count: &AtomicUsize, than: usize) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while count.load(Ordering::SeqCst) <= than {
+        assert!(Instant::now() < deadline, "the interface was never woken");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn what_a_window_says_wakes_the_interface_at_once_with_the_word_already_waiting_to_be_polled() {
+    // (A hand that drags a knob in the plugin's window is not over the editor's window, which draws only when something asks it to: without this it looked at the window once every
+    // 30 milliseconds, by its timer, and a slider that follows the knob moved in jumps of four or five edits.)
+    let mut windows = windows();
+    let (woken, wake_up) = a_wake_up_that_counts();
+    windows.wake_the_interface_with(wake_up);
+    windows
+        .open(the_key(), &what_to_open(EDITOR, &[(1, 2.0)], None))
+        .expect("it opens");
+
+    waited_until_the_count_is_more_than(&woken, 0);
+
+    // (The wake-up came after the word was handed over, so asking now is not asking too early.)
+    let said = windows.poll();
+    assert!(
+        !said.is_empty(),
+        "the window had said something when the interface was woken"
+    );
+    assert!(matches!(said[0].1, WindowEvent::Ready { .. }), "{said:?}");
+}
+
+#[test]
+fn a_program_that_ends_without_a_word_wakes_the_interface_to_say_so() {
+    // (A window that is closed says Closed, which wakes the interface as any word does. A program that crashes says nothing: only its end tells the editor, and the editor must be woken
+    // by it, or it would hear of the crash at its next timer.)
+    let mut windows = windows();
+    let (woken, wake_up) = a_wake_up_that_counts();
+    windows.wake_the_interface_with(wake_up);
+    windows
+        .open(the_key(), &what_to_open(EDITOR, &[], Some("YXNrPWNyYXNo")))
+        .unwrap();
+
+    let events = polled_until(&mut windows, |events| {
+        events.iter().any(|event| matches!(event, WindowEvent::Failed(_)))
+    });
+
+    // (One wake-up for each word, and one for the end: the failure is the editor's word for the end.)
+    let words = events.len() - 1;
+    waited_until_the_count_is_more_than(&woken, words);
 }
 
 #[test]

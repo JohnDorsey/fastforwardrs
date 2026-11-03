@@ -452,3 +452,101 @@ fn a_vst3_plugin_that_crashes_its_program_leaves_the_sound_as_it_was_and_is_said
     the_one_line_with(&export_notes, "the program that runs the plugin ended");
     the_one_line_with(&preview_notes, "the program that runs the plugin ended");
 }
+
+/// A second of noise that is a clip with `effects`, and then `silence` frames of nothing.
+fn a_second_of_noise_with_then_silence(effects: Vec<LayerEffect>, silence: u64) -> SoundGraphSpecification {
+    let mut specification = specification_of_a_second_with(effects);
+    let SoundItemToExport::Clip(clip) = specification.strips[0].items[0].clone() else {
+        unreachable!("the strip is one clip");
+    };
+    specification.strips[0].items = vec![
+        SoundItemToExport::Clip(clip),
+        SoundItemToExport::Silence { frame_count: silence },
+    ];
+    specification.total_frame_count = 30 + silence;
+    specification
+}
+
+/// **Ignored**: it needs the real Dragonfly Hall Reverb (`FFRS_VST3_MODULES` names a folder with `DragonflyHallReverb.vst3` below it, as the other tests of real modules do). Dragonfly says a
+/// tail of 0 (no plugin built with DPF says anything else) and rings on for a second or more; until 2026-11-03 that was read as half a second, and its reverb was cut dead 30 dB below the
+/// clip. `FFRS_VST3_MODULES=E:/s/sffrs/vst3_real cargo test --test sound_plugins_vst3_in_the_sound -- --ignored --nocapture`
+#[test]
+#[ignore = "needs the real Dragonfly Hall Reverb (FFRS_VST3_MODULES)"]
+fn the_reverb_of_dragonfly_hall_rings_on_after_its_clip_for_the_tail_that_a_reverb_is_given_in_the_export_and_in_the_preview()
+ {
+    use fastforwardrs::project::TailLength;
+
+    /// Samples in a second of the interleaved sound.
+    const A_SECOND: usize = 48_000 * 2;
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let modules = PathBuf::from(std::env::var("FFRS_VST3_MODULES").expect("FFRS_VST3_MODULES names a folder"));
+    let module = find_module_below(&modules, "DragonflyHallReverb.vst3").expect("DragonflyHallReverb.vst3 is below it");
+    let scan = vst3_host::scan_module(&module, &mut |_| {}).expect("the module is scanned");
+    let class = scan.classes.first().expect("it has a plugin").class.id;
+    let kind = the_kind_of_in(&module, class.numbers());
+    let after_the_clip_with = |tail_length: TailLength| {
+        let mut effect = an_effect(kind, None);
+        effect.tail_length = tail_length;
+        let specification = a_second_of_noise_with_then_silence(vec![effect], 150);
+        let (exported, notes) = by_the_export(
+            &toolchain,
+            &specification,
+            &sources,
+            Some(a_host_that_runs_everything()),
+        );
+        let (previewed, _) = by_the_preview(
+            &toolchain,
+            &specification,
+            &sources,
+            Some(a_host_that_runs_everything()),
+        );
+        assert_eq!(previewed, exported, "the preview makes what the export makes");
+        assert_eq!(notes, Vec::<String>::new());
+        exported[30 * 1_600 * 2..].to_vec()
+    };
+    let as_it_is = after_the_clip_with(TailLength::Automatic);
+    let for_long = after_the_clip_with(TailLength::Milliseconds(5_000));
+
+    let loud = |samples: &[f32]| samples.iter().fold(0.0_f32, |most, sample| most.max(sample.abs()));
+    assert!(
+        loud(&as_it_is[A_SECOND / 2..A_SECOND * 3 / 2]) > 0.0005,
+        "the reverb is still heard between half a second and a second and a half after the clip (it was cut at half a second)"
+    );
+    assert_eq!(
+        &as_it_is[..2 * A_SECOND],
+        &for_long[..2 * A_SECOND],
+        "for two seconds the sound is the same as with a tail of five: it is the reverb, to the sample"
+    );
+    assert!(
+        as_it_is[2 * A_SECOND..].iter().all(|sample| *sample == 0.0),
+        "and then it is over: a reverb is given two seconds"
+    );
+    assert!(
+        loud(&for_long[2 * A_SECOND..3 * A_SECOND]) > 0.0,
+        "(the control: it still rings with a tail of five seconds, so the test can tell)"
+    );
+}
+
+/// The first file called `name` below `folder`, or none.
+fn find_module_below(folder: &std::path::Path, name: &str) -> Option<PathBuf> {
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(folder)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .collect();
+    entries.sort();
+    for path in entries {
+        if path.file_name().is_some_and(|file| file == name) {
+            return Some(path);
+        }
+        if path.is_dir()
+            && let Some(found) = find_module_below(&path, name)
+        {
+            return Some(found);
+        }
+    }
+    None
+}

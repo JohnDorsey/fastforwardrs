@@ -126,7 +126,7 @@ impl FastForwardApplication {
             Command::ShowProjectSettings => self.interface.settings_windows_open.project = true,
             Command::ShowGlobalSettings => self.interface.settings_windows_open.global = true,
             Command::PluginManager(command) => self.do_what_the_plugin_manager_asked(command),
-            Command::OpenPluginEditor { target, instance } => self.open_a_plugin_editor(target, instance),
+            Command::OpenPluginEditor { target, instance } => self.open_a_plugin_editor(target, instance, context),
             Command::ClosePluginEditor { target, instance } => self.close_a_plugin_editor(target, instance),
             Command::SetProjectSettings(settings) => self.set_project_settings(settings),
             Command::SetProjectFrameRate(frame_rate) => self.set_project_frame_rate(frame_rate, now),

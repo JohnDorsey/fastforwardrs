@@ -401,6 +401,21 @@ fn real_modules_are_scanned_and_become_the_effects_a_person_is_offered() {
     assert_eq!((room.audio_inputs, room.audio_outputs), (2, 2));
     assert!(!room.descriptor.makes_sound_from_notes);
     assert!(room.descriptor.parameters.len() >= 10, "the sliders of a reverb");
+    // (It says a tail of 0, as every plugin built with DPF does, and it rings on for a second or more: it is given the most that a plugin is, and not half a second. 2026-11-03.)
+    for name in [
+        "dragonfly room reverb",
+        "dragonfly hall reverb",
+        "dragonfly plate reverb",
+        "dragonfly early reflections",
+    ] {
+        assert_eq!(
+            named(name)
+                .unwrap_or_else(|| panic!("{name} is an effect"))
+                .pre_roll_samples,
+            2 * fastforwardrs::sound_engine::SAMPLE_RATE as usize,
+            "{name}: two seconds"
+        );
+    }
     let surge = named("surge xt").expect("Surge XT is an effect");
     assert!(
         surge.descriptor.makes_sound_from_notes,

@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Stdio};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
@@ -117,10 +118,15 @@ impl Drop for Running {
     }
 }
 
+/// What is called, from the thread that reads a program, each time the program has said something (or has ended).
+type WakeUp = Arc<dyn Fn() + Send + Sync>;
+
 /// The windows that are open.
 #[derive(Default)]
 pub struct EditorWindows {
     program: Option<PathBuf>,
+    /// Asks the interface to look at the windows now: see [`Self::wake_the_interface_with`].
+    wake_up: Option<WakeUp>,
     /// Whether the program was found to have been built from the same code as the editor.
     program_is_checked: bool,
     running: HashMap<WindowKey, Running>,
@@ -137,6 +143,13 @@ impl EditorWindows {
             program: Some(program),
             ..Self::default()
         }
+    }
+
+    /// Has `wake_up` called each time a program has said something or has ended, after what it said is waiting to be polled. **An interface that draws only when something asks it to
+    /// needs it**: a hand that drags a knob in a plugin's window is not over the interface's own window, and without this the interface looked at the windows only when its timer came
+    /// (every 30 milliseconds), so a slider that follows the knob moved in jumps of several edits. It is called from another thread, and has to be quick.
+    pub fn wake_the_interface_with(&mut self, wake_up: impl Fn() + Send + Sync + 'static) {
+        self.wake_up = Some(Arc::new(wake_up));
     }
 
     /// Whether the window `key` is open (or is being opened).
@@ -181,14 +194,23 @@ impl EditorWindows {
         let input = child.stdin.take().expect("the input was piped");
         let output = child.stdout.take().expect("the output was piped");
         let (sender, said) = mpsc::channel();
+        let wake_up = self.wake_up.clone();
         std::thread::spawn(move || {
+            // (After the word is in the channel, so that whoever is woken finds it there.)
+            let wake = || {
+                if let Some(wake_up) = &wake_up {
+                    wake_up();
+                }
+            };
             for line in BufReader::new(output).lines() {
                 let Ok(line) = line else { break };
                 if let Some(message) = message_in::<FromProgram>(&line) {
                     let _ = sender.send(Said::Message(message));
+                    wake();
                 }
             }
             let _ = sender.send(Said::Ended);
+            wake();
         });
         let mut running = Running {
             child,

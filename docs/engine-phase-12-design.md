@@ -176,7 +176,7 @@ The **tail of an effect** is how long it goes on making output after its input e
 
 1. **A value the maintainer set on the effect** (the effect box's menu: "Tail...": *Automatic*, *None*, or a length). Nothing is added that is always visible.
 2. **What the plugin says**: a CLAP plugin's `tail` extension (the program already uses it as the pre-roll: [V] `pre_roll_frames_of`, "a clip with a tail says how much sound from before a clip it wants").
-3. **A default**: for a sound plugin that says nothing (CLAP without the extension, LV2, which has none) **0.5 s**, as the pre-roll has today; for a built-in effect **0** unless it declares one; for a picture effect that keeps a buffer between frames (a feedback shader)
+3. **A default**: for a sound plugin that says nothing (CLAP without the extension, LV2, which has none) **0.5 s**, as the pre-roll has today (*since 2026-11-03 a VST3 or LV2 plugin tagged Reverb or Delay that says nothing is given 2 s: section 15.1 of engine-phase-15-vst3-design.md*); for a built-in effect **0** unless it declares one; for a picture effect that keeps a buffer between frames (a feedback shader)
    **the bound of EN-14, 300 frames** [B that this is the number the code uses: read it again before building] , because such a shader never ends by itself; for a picture effect with no state, 0.
 
 The tail of a **chain** is the sum of the tails of the effects in it (a safe upper bound).

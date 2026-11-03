@@ -211,7 +211,7 @@ Asked on 2026-11-02 ("test whether Surge as a VST3 has the same bug, and don't i
 
 **A correction of what I told you.** In the question about parameters I wrote that "bypass becomes the effect's own on/off". It does not: the effect has no on/off of its own, and a VST3 plugin's bypass parameter is **a switch among its values**, as a CLAP plugin's is. (Nothing else was built on that sentence.)
 
-**A choice made, said plainly.** A tail of 0 is read as "nothing said" and given half a second of sound before a clip (`pre_roll_of_a_vst3_plugin`), where CLAP reads 0 as "no tail". Dragonfly Reverb says 0 for its reverbs. A plugin that really has no tail is then run for half a second more before a clip than it needs, which costs a little time and changes no sound.
+**A choice made, said plainly.** A tail of 0 is read as "nothing said" and given half a second of sound before a clip (`pre_roll_of_a_vst3_plugin`), where CLAP reads 0 as "no tail". Dragonfly Reverb says 0 for its reverbs. A plugin that really has no tail is then run for half a second more before a clip than it needs, which costs a little time and changes no sound. **That was too little for a reverb, and it is two seconds for one since 2026-11-03: section 15.**
 
 **What was checked [V].**
 
@@ -316,7 +316,7 @@ The cost is **linear, about 31 microseconds a value in a release build** (0.14 m
 **Not done, said plainly.**
 
 * **Linux: the first three files and the journey were not run for real on this PC's WSL**, which has ffmpeg 8 and the program asks for 9: they skip there (the three MIDI tests, which need no ffmpeg, ran and passed). **CI's Ubuntu job installs ffmpeg 9 and ran them for the first time on the push of 2026-11-03: all nine jobs of the run (Windows, Ubuntu, macOS) passed [V, read from the run's jobs]**, so these tests are verified on the three systems, though by CI and not by hand on Linux and macOS.
-* **A reverb's tail after the end of a clip** with a VST3 plugin is not tried: the test plugins have no echo (CLAP's has), and the code that plays a tail is the same for every format (its tests are in `sound_plugins_clap_in_the_sound.rs`). Dragonfly Reverb would show it; that is 15.5.
+* **A reverb's tail after the end of a clip** with a VST3 plugin is not tried: the test plugins have no echo (CLAP's has), and the code that plays a tail is the same for every format (its tests are in `sound_plugins_clap_in_the_sound.rs`). Dragonfly Reverb would show it; that is 15.5. (**It did, in use, on 2026-11-03: section 15.**)
 * **The question the editor asks about a folder** (the dialog that says "may I run plugins from here?") is tried with VST3 only as far as the host asks it (`take_wanted` gives the folder that holds the `.vst3` module, the module's name and the plugin's); the dialog itself is the same for every format.
 * **A crash during a play in the editor's window with sound coming out of the speakers** is the stream of the preview, tried above; the speakers are not.
 
@@ -340,7 +340,7 @@ The cost is **linear, about 31 microseconds a value in a release build** (0.14 m
 
 * **macOS was verified by CI and not by hand.** The members for the Mac follow the names of the CLAP and LV2 ones, which I could only believe. **The Mac job of the push (`b89a495`) fetched all 23 sets in 107 s, every VST3 module of the seven sets included, and its real scan, effect and synthesizer tests passed on what it fetched [V, read in the annotations of the run]**: the macOS builds of Dragonfly Reverb, DPF-Plugins and Surge XT as VST3 load and play with this host.
 * **The sets added the same day** (Mini-Series, Max-Gen, CycleShifter, Wolf Shaper) are in the same release files and follow the names of the others; **verified by the Mac job of the CI run of the push `d125181` [V, read in its annotations]: its listing of what it fetched has the modules of the Mini-Series, Max-Gen and CycleShifter (and none of Wolf Shaper's, which has no macOS build), its real scan test passed (5 tests; the one it skips is the data of Surge XT, with no build for macOS; the effect test asks for the 13 VST3 effects that a Mac has) and its real synthesizer tests passed (2).**
-* **A reverb's tail after a clip** was not tried with the real Dragonfly through a project (the reverb tails of a project are the same code for every format).
+* **A reverb's tail after a clip** was not tried with the real Dragonfly through a project (the reverb tails of a project are the same code for every format). (**Tried by the maintainer on 2026-11-03, and the tail was not there: section 15.**)
 * **Nobody has listened to them in the editor.** (The window of a VST3 plugin was added by piece 15.6: section 14.)
 
 
@@ -378,3 +378,39 @@ The cost is **linear, about 31 microseconds a value in a release build** (0.14 m
 * **Linux**: no knob was moved in a real window, no other desktop than WSLg was tried, and CI has no screen, so what runs on Ubuntu there is the headless program and the host crate, as on macOS.
 * **macOS**: `kPlatformTypeNSView` and the handle of an `NSView` are written, and `setContentScaleFactor` is not called there (a Mac window is in points). **Nothing was tried but the build**: the CI run of the push of this piece (`0c722f6`) was green on all its jobs, the two Mac jobs among them, so the code of the window compiles there and what the Mac jobs run (the library tests, the host tests) passes; no window was made on a Mac.
 * **A plugin whose window needs more than the ones tried**: a window that opens a second window (a menu, a file chooser) was not tried; `IComponentHandler3` (context menus) and `IPlugInterfaceSupport` are not offered, and `IPlugFrame`'s `resizeView` is answered by the host when it looks, a moment after, and not inside the call.
+
+## 15. Two things found by use, after 15.6 (2026-11-03)
+
+The maintainer used Dragonfly Hall Reverb in a project and reported two things: *its tail seems nonexistent after the clip ends*, and *when I drag a knob in its window, the slider in fastforwardrs is sometimes jerky, but that might not be our fault*.
+
+### 15.1 The tail of a reverb
+
+**Cause [V].** The engine plays a tail correctly; the **length it was given was wrong**. Dragonfly Hall Reverb says `getTailSamples() == 0` (`kNoTail`), the VST3 value of a plugin that has not thought of it, and 13 of the 14 real VST3 effects tried say it (Surge XT Effects says 96,000). A tail of 0 is read as "nothing said", which was half a second (section 9). Through the real engine, with the real plugin on a clip of noise followed by a second of silence (the export and the preview made the same sound to the sample):
+
+| Tail length of the effect | What is heard after the clip, in dB below the clip, every quarter second |
+|---|---|
+| Automatic (before) | -17, -30, then **exact silence** from half a second on |
+| 5,000 ms (set by hand) | -17, -30, -41, -52, -62, -72, -81, -90, -98 ... the whole decay |
+| No tail | exact silence from the end of the clip |
+
+**How long the real effects ring on [V]** (a burst of half a second of noise, their own default values, the level in windows of a quarter second; seconds after the input until the level is 60 dB under its loudest). All of them say a tail of 0. Dragonfly Early Reflections 0.25, Plate 0.5, Room 0.5, Hall 1.0; MaFreeverb 1.75; MVerb 1.75; **MaGigaverb 6.25**; Wolf Shaper 0.25; CycleShifter, MaPitchshift, 3 Band EQ and Ping Pong Pan about nothing (MaBitcrush gives a constant output on silence, which is a property of the plugin and not a tail). A plugin's own settings change this: the Decay of Dragonfly Hall is 1.3 s by default and goes up to 10 s.
+
+**The change.** For a VST3 plugin that says 0, and for every LV2 plugin (LV2 never says), `pre_roll_of_a_plugin_that_says_nothing` looks at what the plugin is tagged: **a *Reverb* or a *Delay* (a VST3 sub-category; the class of an LV2 plugin) is given the most that a plugin is given, two seconds; any other plugin half a second, as before.** What a plugin says (a tail that is not 0) is believed, as before. The reverbs among the real plugins tried (the four of Dragonfly, MVerb, MaFreeverb, MaGigaverb) are all tagged Reverb, and no plugin that is not a reverb is (the tags were read from the real modules). The effect of this on a project: a clip with such an effect is given up to two seconds of silence after it, and a seek into it makes the sound from up to two seconds before; nothing in a saved project changes (the length is not in the file; "Automatic" is still automatic).
+
+**Checked [V].** The unit tests (VST3: the tags, upper and lower case, a word that only starts like one, a tail that is said, an instrument; LV2: the same); the real Dragonfly Hall through the engine, after the change (`sound_plugins_vst3_in_the_sound.rs`, ignored, `FFRS_VST3_MODULES`): with the tail on Automatic the sound after the clip is **the same to the sample as with a tail of five seconds for the first two seconds** (down to -90 dB) and exact silence after, and the reverb is heard between half a second and a second and a half after the clip; the same tests fail when the rule is taken out; the Dragonfly effects of the real scan test have two seconds.
+
+**Not done, said plainly.**
+
+* **A reverb that rings on for more than two seconds at its settings is still cut at two seconds** (MaGigaverb at its defaults: 6 s; Dragonfly Hall with a Decay above about 2 s). The length of the tail is in the menu of the effect's box (*Tail length*: 100 ms to 30 s), and nobody would find it from the cut. The cap (`MOST_PRE_ROLL_SAMPLES`, two seconds) was not changed: it is also how much sound a seek makes before the playhead for such an effect (the lead-in has its own cap, ten seconds), so raising it makes a seek into a long reverb cost more. **A decision for the maintainer**, with the alternative of measuring a plugin's ring at the scan (not built).
+* **A CLAP plugin with no tail extension** is still half a second whatever it is [B]: CLAP has a *reverb* feature tag that this rule could use, and none of the bundled CLAP plugins is such a plugin (Dragonfly has no CLAP build), so it was left.
+* **A plugin that rings on and is not tagged Reverb or Delay** (a long filter, a granular effect) is half a second until the length is set by hand.
+
+### 15.2 The slider that follows a knob
+
+**What is true [V, from the code].** What the window of a plugin does reaches the editor as a line from the program, which a thread of the editor reads into a channel; the editor takes what is in the channel at its next frame. The editor draws only when something asks it to, and a hand that drags a knob in the plugin's window is not over the editor's window. **The only thing that asked was the timer of `look_after_the_plugin_editors`, 30 ms** (`request_repaint_after`; egui takes the length of the last frame off it), so the slider moved at most about thirty times a second, in jumps of the edits that came in between (a mouse gives them every 8 ms or so [B: 125 reports a second is usual, not measured here], and the program passes them on within 8 ms). **The program does not lose or merge edits [V]**: ten mouse moves posted to a real Dragonfly window gave ten `Value` edits (section 14).
+
+**Measured and ruled out [V, in the test harness with a project of one clip, so small projects only].** An edit does not cost a frame anything: three frames with a slider edit took 40.6 ms and three frames without one 41.2 ms (a release build; the frames themselves are slow in the harness because of its accessibility tree). So the project copy that each edit makes (`carry_out_all`) and the sound plan are not the cause for a small project. **For a big project the copy grows with the project [B]; not measured.**
+
+**The change.** `EditorWindows::wake_the_interface_with`: the thread that reads a program calls a function after it has put what the program said in the channel (and after it ends), and the editor gives it `context.request_repaint()`. A frame is asked for as soon as the window has said something, and the timer is left as it was. Tests: the session level (the wake-up is called, and what woke it is there to be polled; a program that crashes without a word wakes it too), and the editor with a real window (egui keeps the place in the code that asked for each frame: the window's request is told from the timer's). Three planted mistakes (the application's function does nothing; the reader does not call it for a word; the reader does not call it at the end), all noticed after the test of the end was made to use a crash (a window that is closed says *Closed*, which wakes it all the same: the first version of that test could not tell).
+
+**Not known [B].** That this is what the maintainer saw. The mechanism is certain from the code; its size is not measured in the real program with a real knob and a screen, and the plugin's own drawing (Dragonfly's window is drawn by the plugin, in its own window and rate) is not ours and is not looked at. If the slider is still jerky, the next thing to look at is the cost of a frame of the editor with the real preview and sound, and the copy of the project that each edit makes.

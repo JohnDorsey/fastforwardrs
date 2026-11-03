@@ -814,8 +814,8 @@ pub fn effect_of_an_lv2_plugin(bundle: &Path, plugin: &lv2_host::ScannedPlugin) 
         audio_inputs: inputs,
         audio_outputs: outputs,
         value_handles,
-        // (LV2 does not say how long a plugin goes on after its input stops: half a second, as for a CLAP plugin that says nothing.)
-        pre_roll_samples: SAMPLE_RATE as usize / 2,
+        // (LV2 does not say how long a plugin goes on after its input stops: half a second, as for a CLAP plugin that says nothing, and two seconds for a reverb or a delay.)
+        pre_roll_samples: pre_roll_of_a_plugin_that_says_nothing(&description.categories),
         // (An interface of this system's kind that this program can show.)
         has_a_window: lv2_host::window_of(description, crate::plugin_editor::the_kind_of_window()).is_some(),
         start_warning: None,
@@ -836,10 +836,35 @@ pub(super) fn id_of_a_vst3_value(parameter_id: u32) -> String {
     format!("param{parameter_id}")
 }
 
-/// How many samples of sound from before a clip a VST3 plugin that says its tail is `tail` samples is given: the tail, up to [`MOST_PRE_ROLL_SAMPLES`] (`u32::MAX` is for ever). **A tail
-/// of 0 is read as nothing said, which is half a second**: plugins say 0 when they have not thought of it (Dragonfly Reverb says 0 for its reverbs).
-pub fn pre_roll_of_a_vst3_plugin(tail: u32) -> usize {
-    pre_roll_of_a_clap_plugin((tail != 0).then_some(tail))
+/// How many samples of sound from before a clip a VST3 plugin that says its tail is `tail` samples and is of these `sub_categories` ("Fx", "Reverb"...) is given: the tail, up to
+/// [`MOST_PRE_ROLL_SAMPLES`] (`u32::MAX` is for ever). **A tail of 0 is read as nothing said**, because plugins say 0 when they have not thought of it: every effect that was tried
+/// except Surge XT Effects does, and a reverb among them rings on for seconds. What nothing said comes to depends on the kinds the plugin is tagged with: a reverb or a delay is given the most, any other half a second.
+pub fn pre_roll_of_a_vst3_plugin(tail: u32, sub_categories: &[String]) -> usize {
+    if tail == 0 {
+        pre_roll_of_a_plugin_that_says_nothing(sub_categories)
+    } else {
+        pre_roll_of_a_clap_plugin(Some(tail))
+    }
+}
+
+/// The kinds of plugin (a VST3 sub-category, the class of an LV2 plugin without its "Plugin") that go on making sound for seconds after their input stops, and that seldom say so.
+const KINDS_THAT_RING_ON: [&str; 2] = ["Reverb", "Delay"];
+
+/// How many samples of sound from before a clip a plugin that says nothing of how long it rings on is given, going by the kinds it is tagged with: **[`MOST_PRE_ROLL_SAMPLES`] for a reverb
+/// or a delay, half a second for any other**. (With half a second a reverb was cut dead after the clip, 30 dB below the clip: the effect of a reverb with no tail. Measured with the real
+/// plugins on 2026-11-03, with a burst of noise and their own settings: Dragonfly Hall Reverb rings to 60 dB below its loudest in 1 s, MaFreeverb in 1.75 s, MVerb in 1.75 s and MaGigaverb
+/// in 6.25 s; the tags of all of them say Reverb. A plugin that is not tagged as one of these and rings on has the length of its effect's tail to say in the menu of its box.)
+fn pre_roll_of_a_plugin_that_says_nothing(kinds: &[String]) -> usize {
+    let rings_on = kinds.iter().any(|kind| {
+        KINDS_THAT_RING_ON
+            .iter()
+            .any(|ringing| kind.eq_ignore_ascii_case(ringing))
+    });
+    if rings_on {
+        MOST_PRE_ROLL_SAMPLES
+    } else {
+        SAMPLE_RATE as usize / 2
+    }
 }
 
 /// The value that a parameter of a VST3 plugin is, or `Ok(None)` if it is not one, or why the plugin cannot be used. **A value is a parameter that is shown (not hidden), that can be
@@ -1034,7 +1059,7 @@ pub fn effect_of_a_vst3_plugin(module: &Path, scanned: &vst3_host::ScannedClass)
         audio_inputs: inputs,
         audio_outputs: outputs,
         value_handles,
-        pre_roll_samples: pre_roll_of_a_vst3_plugin(facts.tail),
+        pre_roll_samples: pre_roll_of_a_vst3_plugin(facts.tail, &class.sub_categories),
         has_a_window: scanned.has_a_window,
         start_warning: None,
         presets: Vec::new(),

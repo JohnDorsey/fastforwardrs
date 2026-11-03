@@ -223,10 +223,15 @@ impl FastForwardApplication {
     }
 
     /// Opens the window of the plugin effect `instance` of `target`, or says why it cannot be (in the box of the effect).
-    pub(super) fn open_a_plugin_editor(&mut self, target: AnimationTarget, instance: EffectInstanceId) {
+    pub(super) fn open_a_plugin_editor(
+        &mut self,
+        target: AnimationTarget,
+        instance: EffectInstanceId,
+        context: &Context,
+    ) {
         let key = WindowKey { target, instance };
         self.interface.plugin_editors.problems.remove(&key);
-        match self.start_a_plugin_editor(key) {
+        match self.start_a_plugin_editor(key, context) {
             Ok(()) => {
                 let generation = self.document.history.generation();
                 self.interface.plugin_editors.projects.insert(key, generation);
@@ -237,7 +242,7 @@ impl FastForwardApplication {
         }
     }
 
-    fn start_a_plugin_editor(&mut self, key: WindowKey) -> Result<(), String> {
+    fn start_a_plugin_editor(&mut self, key: WindowKey, context: &Context) -> Result<(), String> {
         let (kind, plugin) = self
             .the_plugin_of_an_effect(key.target, key.instance)
             .ok_or("it is not a plugin that is installed")?;
@@ -292,6 +297,12 @@ impl FastForwardApplication {
                 .headless
                 .unwrap_or_else(|| std::env::var_os(HEADLESS_VARIABLE).is_some()),
         };
+        // (A hand that drags a knob in the plugin's window is not over this one, which draws only when it is asked to: what a window says asks it to, at once, and not at its timer.)
+        let context = context.clone();
+        self.interface
+            .plugin_editors
+            .windows
+            .wake_the_interface_with(move || context.request_repaint());
         self.interface.plugin_editors.windows.open(key, &what)?;
         // (What the window begins with is what it has: the project's state is not given to it again.)
         match state {

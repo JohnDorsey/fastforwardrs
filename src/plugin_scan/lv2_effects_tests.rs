@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use lv2_host::{PluginDescription, PortDescription, PortDirection, PortKind, ScalePoint, ScannedPlugin, UiDescription};
 
-use super::effects::{effect_of_an_lv2_plugin, key_of_an_lv2_plugin, plugins_found_in};
+use super::effects::{MOST_PRE_ROLL_SAMPLES, effect_of_an_lv2_plugin, key_of_an_lv2_plugin, plugins_found_in};
 use super::folders::{folders_looked_in_with, is_an_lv2_bundle, lv2_bundles_in};
 use super::scanner::{LibraryOutcome, LibraryReport};
 use crate::project::{MOST_VALUES_OF_AN_EFFECT, ParameterControl, PluginAddress, PropertyValue, ValueScale};
@@ -157,6 +157,24 @@ fn a_plugin_has_a_window_when_it_has_an_interface_of_this_system_that_asks_for_n
         an_interface(the_class_of_this_system(), &["idleInterface", "touch", "portMap"]),
     ];
     assert!(effect_of(&plugin).unwrap().has_a_window, "one of them is enough");
+}
+
+#[test]
+fn an_lv2_reverb_or_delay_is_given_two_seconds_of_tail_where_lv2_says_nothing_and_other_plugins_half_a_second() {
+    // (LV2 never says how long a plugin rings on. Dragonfly Reverb, MVerb and Max-Gen's reverbs are the same plugins as the VST3 ones, which were measured to ring on for between half a
+    // second and six seconds; the class of the plugin is all there is to go by.)
+    let mut plugin = a_plugin_with(Vec::new());
+    for (categories, expected) in [
+        (vec!["Reverb"], MOST_PRE_ROLL_SAMPLES),
+        (vec!["Delay"], MOST_PRE_ROLL_SAMPLES),
+        (vec!["Dynamics", "Reverb"], MOST_PRE_ROLL_SAMPLES),
+        (vec!["Amplifier", "Dynamics"], 24_000),
+        (vec!["Filter"], 24_000),
+        (Vec::new(), 24_000),
+    ] {
+        plugin.description.categories = categories.iter().map(|name| (*name).to_owned()).collect();
+        assert_eq!(effect_of(&plugin).unwrap().pre_roll_samples, expected, "{categories:?}");
+    }
 }
 
 #[test]

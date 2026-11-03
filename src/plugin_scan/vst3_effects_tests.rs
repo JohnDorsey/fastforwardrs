@@ -434,22 +434,68 @@ fn a_plugin_with_more_values_than_an_effect_can_have_keeps_the_first_ones() {
     assert_eq!(effect.value_handles[0], 500);
 }
 
+fn tagged(names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| (*name).to_owned()).collect()
+}
+
 #[test]
 fn a_tail_of_nothing_is_read_as_half_a_second_and_a_longer_one_up_to_two_seconds() {
     let half_a_second = SAMPLE_RATE as usize / 2;
-    assert_eq!(pre_roll_of_a_vst3_plugin(0), half_a_second);
-    assert_eq!(pre_roll_of_a_vst3_plugin(1000), 1000);
+    assert_eq!(pre_roll_of_a_vst3_plugin(0, &tagged(&["Fx", "EQ"])), half_a_second);
+    assert_eq!(pre_roll_of_a_vst3_plugin(0, &[]), half_a_second);
+    assert_eq!(pre_roll_of_a_vst3_plugin(1000, &[]), 1000);
     assert_eq!(
-        pre_roll_of_a_vst3_plugin(u32::MAX),
+        pre_roll_of_a_vst3_plugin(u32::MAX, &[]),
         MOST_PRE_ROLL_SAMPLES,
         "for ever is the most"
     );
-    assert_eq!(pre_roll_of_a_vst3_plugin(10_000_000), MOST_PRE_ROLL_SAMPLES);
+    assert_eq!(pre_roll_of_a_vst3_plugin(10_000_000, &[]), MOST_PRE_ROLL_SAMPLES);
     let effect = the_effect(&with_facts(a_stereo_effect_with(Vec::new()), |facts| {
         facts.tail = 96_000
     }))
     .expect("an effect");
     assert_eq!(effect.pre_roll_samples, 96_000);
+}
+
+#[test]
+fn a_reverb_or_a_delay_that_says_a_tail_of_nothing_is_given_two_seconds_and_what_a_plugin_says_is_kept() {
+    // Measured with the real plugins (2026-11-03): every effect built with DPF says 0, Dragonfly Reverb's four, MVerb and the reverbs of Max-Gen among them, and they ring on for
+    // between half a second and six seconds; they are all tagged Reverb. (Half a second cut a reverb dead while it was still 30 dB below the clip: the sound of "no tail".)
+    let half_a_second = SAMPLE_RATE as usize / 2;
+    for kinds in [
+        &["Fx", "Reverb", "Stereo"][..],
+        &["Fx", "Reverb"],
+        &["Fx", "Delay"],
+        &["Fx", "reverb"],
+    ] {
+        assert_eq!(
+            pre_roll_of_a_vst3_plugin(0, &tagged(kinds)),
+            MOST_PRE_ROLL_SAMPLES,
+            "{kinds:?}"
+        );
+    }
+    for kinds in [
+        &["Fx", "EQ"][..],
+        &["Fx", "Distortion", "Stereo"],
+        &["Fx", "Spatial"],
+        &["Fx", "Reverberation"],
+        &["Instrument", "Synth"],
+    ] {
+        assert_eq!(pre_roll_of_a_vst3_plugin(0, &tagged(kinds)), half_a_second, "{kinds:?}");
+    }
+    // A reverb that says how long it rings is believed (Surge XT Effects says two seconds).
+    assert_eq!(pre_roll_of_a_vst3_plugin(1000, &tagged(&["Fx", "Reverb"])), 1000);
+    assert_eq!(pre_roll_of_a_vst3_plugin(96_000, &tagged(&["Fx", "Reverb"])), 96_000);
+
+    // And it is what the effect of a scanned class has.
+    let mut class = a_stereo_effect_with(Vec::new());
+    class.class.sub_categories = tagged(&["Fx", "Reverb", "Stereo"]);
+    assert_eq!(
+        the_effect(&class).expect("an effect").pre_roll_samples,
+        MOST_PRE_ROLL_SAMPLES
+    );
+    class.class.sub_categories = tagged(&["Fx", "Dynamics"]);
+    assert_eq!(the_effect(&class).expect("an effect").pre_roll_samples, half_a_second);
 }
 
 #[test]
