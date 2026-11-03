@@ -108,5 +108,5 @@ MUTATIONS = [
      "unsafe { controller.normalizedParamToPlain(info.id, default_normalized) },", "unsafe { controller.normalizedParamToPlain(info.id, info.defaultNormalizedValue) },", TESTS),
     # --- the scan ---
     ("scan: a sound that is not numbers is no problem", SCAN, "(!is_made_of_numbers(&outputs)).then(", "(false && !is_made_of_numbers(&outputs)).then(", TESTS),
-    ("scan: every plugin is said to have a state", SCAN, "instance.save_state().is_ok())", "true)", TESTS),
+    ("scan: every plugin is said to have a state", SCAN, "let has_state = instance.save_state().is_ok();", "let has_state = true;", TESTS),
 ]

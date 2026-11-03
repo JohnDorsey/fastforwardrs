@@ -513,7 +513,7 @@ pub fn this_thread_holds_the_list_of_installed_plugins() -> bool {
     HOLDS_THE_LIST.with(std::cell::Cell::get)
 }
 
-/// What [`the_installed_plugins_to_myself`] gives: the list is empty while it is held, and is emptied again when it is let go of.
+/// What [`the_installed_plugins_to_myself`] gives: the list is empty while it is held (and no tail is measured), and is emptied again when it is let go of.
 pub struct TheInstalledPluginsToMyself {
     _guard: std::sync::RwLockWriteGuard<'static, ()>,
 }
@@ -522,6 +522,7 @@ impl Drop for TheInstalledPluginsToMyself {
     fn drop(&mut self) {
         crate::project::set_installed_plugins(Vec::new());
         crate::project::set_installed_shaders(Vec::new());
+        crate::composition::forget_the_measured_tails();
         HOLDS_THE_LIST.with(|holds| holds.set(false));
     }
 }
@@ -540,6 +541,7 @@ pub fn the_installed_plugins_to_myself() -> TheInstalledPluginsToMyself {
     HOLDS_THE_LIST.with(|holds| holds.set(true));
     crate::project::set_installed_plugins(Vec::new());
     crate::project::set_installed_shaders(Vec::new());
+    crate::composition::forget_the_measured_tails();
     TheInstalledPluginsToMyself { _guard: guard }
 }
 

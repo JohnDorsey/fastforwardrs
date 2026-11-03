@@ -31,7 +31,7 @@ pub const A_TRACK_WITH_WINDOWS_NOTE: &str =
     "On this track groups take a window of its effects, so a tail goes into the group's effects whatever is chosen.";
 
 /// What the choices of the length of a tail say, other than a number of milliseconds.
-pub const AUTOMATIC_TAIL_LABEL: &str = "Automatic (what the plugin says)";
+pub const AUTOMATIC_TAIL_LABEL: &str = "Automatic (measured, or what the plugin says)";
 pub const NO_TAIL_LABEL: &str = "No tail";
 
 /// The lengths that the menu of an effect offers besides the two words, in thousandths of a second.

@@ -275,7 +275,10 @@ fn the_menu_of_the_box_of_an_effect_has_its_tail_length_with_the_automatic_one_m
         .center();
     window.right_click(heading);
     choose(&mut window, "Tail length");
-    assert!(is_shown(&window, "\u{2713} Automatic (what the plugin says)"));
+    assert!(is_shown(
+        &window,
+        "\u{2713} Automatic (measured, or what the plugin says)"
+    ));
     assert!(is_shown(&window, "No tail") && is_shown(&window, "500 ms") && is_shown(&window, "30 s"));
 
     choose(&mut window, "2 s");

@@ -110,6 +110,8 @@ pub struct PluginHost {
     embedded_folders: Mutex<Vec<PathBuf>>,
     /// Which plugins run in a process of their own, and the program (phase 14).
     processes: Mutex<Processes>,
+    /// Which tails are being measured, and which could not be (see `ring_outs`).
+    pub(super) ring_outs: Mutex<super::ring_outs::RingOuts>,
     /// Where the plugins of project files are written out, made when the first is. **The last field: the libraries above it are let go of before its files are removed** (a
     /// library that is loaded cannot be removed on Windows).
     embedded_cache: Mutex<Option<PluginCache>>,
@@ -142,6 +144,7 @@ impl PluginHost {
             longest_wait_for_what_is_being_let_go_of: LONGEST_WAIT_FOR_WHAT_IS_BEING_LET_GO_OF,
             embedded_folders: Mutex::new(Vec::new()),
             processes: Mutex::new(Processes::default()),
+            ring_outs: Mutex::new(super::ring_outs::RingOuts::default()),
             embedded_cache: Mutex::new(None),
         }
     }
@@ -868,16 +871,19 @@ impl PluginHost {
 /// Where a plugin says what is wrong with it: in the notes of the play, and on the board that the window reads.
 struct Voice<'a> {
     notes: &'a Notes,
-    board: &'a ProblemBoard,
+    /// Where it is written for the window of the effect to read; none for a copy that is made to be listened to (a measurement), which says nothing there.
+    board: Option<&'a ProblemBoard>,
     key: &'a str,
 }
 
 impl Voice<'_> {
     fn problem(&self, line: String) {
-        self.board
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(self.key.to_owned(), line.clone());
+        if let Some(board) = self.board {
+            board
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(self.key.to_owned(), line.clone());
+        }
         say(self.notes, line);
     }
 }
@@ -892,6 +898,32 @@ fn say(notes: &Notes, line: String) {
 impl PluginRunner for PluginHost {
     fn generation(&self) -> u64 {
         PluginHost::generation(self)
+    }
+
+    fn measure_the_ring_out_of(&self, effect: &LayerEffect) -> Option<crate::sound_engine::RingOut> {
+        let plugin = effect.kind.installed_plugin()?;
+        // (Only a plugin that is run in a program: a copy of one that is run here, made beside the copies of a play, could be a second alive at once, which some plugins do not allow.)
+        if !self.runs_in_a_process_of_its_own().includes(plugin) {
+            return None;
+        }
+        let clip = SoundClipToExport {
+            source_input: 0,
+            first_source_frame: 0,
+            end_source_frame: 1,
+            speed_factor: crate::project::SpeedFactor::new(1)?,
+            timeline_frame_count: 1,
+            loudness: crate::media::export::LoudnessToExport::UNCHANGED,
+            first_timeline_frame: 0,
+            frames_of_the_clip_before: 0,
+            effects: vec![effect.clone()],
+            sent_to: None,
+            tail_routes: Vec::new(),
+            music: None,
+        };
+        // (A play of its own, whose words nobody reads, and that writes on no board: what is wrong is said by the play that hears the plugin, and what the board says of it is not wiped.)
+        let notes = Notes::default();
+        let mut processor = self.make_a_processor(effect, &clip, FrameRate::new(30, 1).ok()?, &notes, false, false)?;
+        Some(crate::sound_engine::measure_the_ring_out(&mut *processor))
     }
 
     fn stream_is_stopping(&self, notes: &Notes) {
@@ -909,17 +941,35 @@ impl PluginRunner for PluginHost {
         notes: &Notes,
         is_for_the_preview: bool,
     ) -> Option<Box<dyn BlockProcessor>> {
+        self.make_a_processor(effect, clip, frame_rate, notes, is_for_the_preview, true)
+    }
+}
+
+impl PluginHost {
+    /// What [`PluginRunner::processor_for`] does. **`tells_the_boards` is false for a copy that is made to be listened to** (see `measure_the_ring_out_of`): it does not wipe what the board
+    /// of problems says of the plugin, does not write on it, and does not show its meters.
+    fn make_a_processor(
+        &self,
+        effect: &LayerEffect,
+        clip: &SoundClipToExport,
+        frame_rate: FrameRate,
+        notes: &Notes,
+        is_for_the_preview: bool,
+        tells_the_boards: bool,
+    ) -> Option<Box<dyn BlockProcessor>> {
         let plugin = effect.kind.installed_plugin()?;
         let voice = Voice {
             notes,
-            board: &self.problems,
+            board: tells_the_boards.then_some(&self.problems),
             key: &plugin.descriptor.key,
         };
-        // (What was wrong the last time is not known to be wrong now: it is said again if it is.)
-        self.problems
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&*plugin.descriptor.key);
+        if tells_the_boards {
+            // (What was wrong the last time is not known to be wrong now: it is said again if it is.)
+            self.problems
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&*plugin.descriptor.key);
+        }
         let layout = Layout::of(plugin.audio_inputs, plugin.audio_outputs)?;
         let folder = folder_of(&plugin.library);
         let library_name = plugin
@@ -979,10 +1029,14 @@ impl PluginRunner for PluginHost {
             std::sync::Arc::clone(notes),
         )
         .map(|made| {
-            Box::new(
-                made.reporting_problems_on(std::sync::Arc::clone(&self.problems))
-                    .showing_meters_on(std::sync::Arc::clone(&self.meters)),
-            ) as Box<dyn BlockProcessor>
+            if tells_the_boards {
+                Box::new(
+                    made.reporting_problems_on(std::sync::Arc::clone(&self.problems))
+                        .showing_meters_on(std::sync::Arc::clone(&self.meters)),
+                ) as Box<dyn BlockProcessor>
+            } else {
+                Box::new(made) as Box<dyn BlockProcessor>
+            }
         })
     }
 }

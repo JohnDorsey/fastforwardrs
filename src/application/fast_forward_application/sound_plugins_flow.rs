@@ -521,6 +521,8 @@ impl FastForwardApplication {
         // (What the host read of the bundles before is what they said then: a bundle may have changed, and the scan that has just ended is what says.)
         self.environment.plugin_host.forget_what_the_bundles_said();
         set_installed_plugins(found.effects);
+        // (A plugin that was scanned again may not be the one that was measured: every tail is measured again, in the background.)
+        crate::composition::forget_the_measured_tails();
         // (Effects of plugins that were not installed before are now: their folders are asked about, and the sound is made with them if the answer is yes.)
         self.ask_about_the_folders_the_sound_needs();
     }

@@ -106,7 +106,7 @@ pub struct Effect {
 
 /// A number that is different whenever the bytes are (to all intents and purposes): it is worked out once, when an effect is given a state, and not at every frame that the sound asks
 /// whether anything is different.
-fn fingerprint_of_a_state(state: Option<&Arc<[u8]>>) -> u64 {
+pub fn fingerprint_of_a_state(state: Option<&Arc<[u8]>>) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     state.map(|bytes| &bytes[..]).hash(&mut hasher);

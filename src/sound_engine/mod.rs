@@ -29,6 +29,7 @@ mod music;
 mod note_events;
 mod plugins;
 mod position;
+mod ring_out;
 
 pub use crate::media::export::SAMPLE_RATE;
 pub use feed::{ClipFeed, ClipFeeds, ClipRequest, SilentFeed, SoundInMemory};
@@ -40,11 +41,14 @@ pub use music::{TakesTheNotes, TimedNote, events_of, give_the_notes_of_the_block
 pub use note_events::{NoteEvent, NoteEventKind};
 pub use plugins::{Notes, PluginInsertions, PluginRunner};
 pub use position::{pre_roll_samples_of, sample_at_frame};
+pub use ring_out::{MOST_SECONDS_MEASURED, RingOut, measure_the_ring_out};
 
 /// How many samples the preview and the export ask the graph for at a time. (The graph gives the same sound for any number: this is a size, not a rule.)
 pub const BLOCK_SAMPLES: usize = 512;
 
 #[cfg(test)]
 mod note_events_tests;
+#[cfg(test)]
+mod ring_out_tests;
 #[cfg(test)]
 mod tests;

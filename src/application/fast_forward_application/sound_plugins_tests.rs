@@ -1268,3 +1268,28 @@ fn the_synthesizers_among_the_plugins_that_were_found_are_counted() {
     assert_eq!(super::sound_plugins_flow::how_many_are_synthesizers(&found[..1]), 0);
     assert_eq!(super::sound_plugins_flow::how_many_are_synthesizers(&[]), 0);
 }
+
+#[test]
+fn a_scan_that_ends_makes_the_tails_that_were_measured_be_measured_again() {
+    let _alone = the_installed_plugins_to_myself();
+    let mut window = Window::showing(super::test_window::project_of(100));
+    let plugin = crate::test_support::an_installed_sound_plugin(
+        "ladspa:a:reverb",
+        "Maker",
+        &[("decay", 1.0, Some((0.0, 10.0)))],
+    );
+    set_installed_plugins(vec![plugin]);
+    let kind = crate::project::EffectKind::installed_plugin_kinds()[0];
+    let key =
+        crate::composition::key_of_the_tail_of(kind, &kind.default_values(), None).expect("a plugin that is installed");
+    crate::composition::note_the_measured_tail(key, 480_000);
+    assert!(crate::composition::is_measured(key));
+
+    window.application_mut().pretend_the_scan_found(Vec::new());
+    window.settle();
+
+    assert!(
+        !crate::composition::is_measured(key),
+        "a plugin that was scanned again may not be the one that was measured"
+    );
+}

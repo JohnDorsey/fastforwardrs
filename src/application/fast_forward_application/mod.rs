@@ -57,6 +57,7 @@ mod embed_and_import_tests;
 #[cfg(test)]
 mod engine_window_tests;
 mod export_flow;
+mod tail_measuring_flow;
 pub(crate) use export_flow::effects_the_export_would_leave_out;
 #[cfg(test)]
 mod adjustment_clip_tests;
@@ -625,6 +626,7 @@ impl FastForwardApplication {
         self.take_what_the_scans_of_embedded_plugins_found();
         self.take_what_the_download_of_the_bundles_said();
         self.forget_what_is_gone_from_the_project();
+        self.keep_the_tails_of_the_sound_measured(context, now);
         self.synchronise_the_preview_with_the_project();
 
         let total_frames = self.document.project.total_frame_count();

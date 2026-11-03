@@ -1083,3 +1083,129 @@ fn real_vst3_plugins_are_heard_through_the_host_in_a_program() {
         "all but one plugin changed or added to the sound"
     );
 }
+
+// --- how long an effect rings on, found by running it in a program (docs/engine-phase-15-vst3-design.md, section 16) ---
+
+#[test]
+fn an_echo_in_a_program_is_found_to_ring_on_for_about_the_thousand_samples_it_takes_to_be_a_millionth() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_clap_kind_of(clap_plugins::TAIL);
+    let host = a_host_with(InAProcessOfItsOwn::Everything);
+    let effect = an_effect(kind, Vec::new(), None);
+
+    let ring = host.measure_the_ring_out_of(&effect).expect("it was run");
+
+    // (Each echo of 100 samples is half as loud: ten of them are 60 dB; the meter listens in windows of 480 samples.)
+    assert!(!ring.is_still_ringing);
+    assert!(
+        (960..=1_440).contains(&ring.samples),
+        "about a thousand samples, to a window: {}",
+        ring.samples
+    );
+}
+
+#[test]
+fn a_gain_in_a_program_is_found_to_ring_for_nothing_and_a_plugin_that_says_forever_is_found_by_what_it_does() {
+    let _alone = the_installed_plugins_to_myself();
+    let host = a_host_with(InAProcessOfItsOwn::Everything);
+    let gain = an_effect(
+        the_clap_kind_of(clap_plugins::GAIN),
+        vec![PropertyValue::Number(2.0)],
+        None,
+    );
+    assert_eq!(host.measure_the_ring_out_of(&gain).map(|ring| ring.samples), Some(0));
+
+    // It says a tail for ever (two seconds is the most the scan takes of it); what it makes after its input ends is nothing.
+    let forever = the_clap_kind_of(clap_plugins::TAIL_FOREVER);
+    assert_eq!(forever.installed_plugin().unwrap().pre_roll_samples, 96_000);
+    let forever = an_effect(forever, Vec::new(), None);
+    assert_eq!(host.measure_the_ring_out_of(&forever).map(|ring| ring.samples), Some(0));
+}
+
+#[test]
+fn a_plugin_that_runs_in_the_editors_own_process_is_not_measured_and_a_vst3_plugin_always_is() {
+    let _alone = the_installed_plugins_to_myself();
+    let in_process = a_host_with(InAProcessOfItsOwn::Nothing);
+    let echo = an_effect(the_clap_kind_of(clap_plugins::TAIL), Vec::new(), None);
+    assert_eq!(
+        in_process.measure_the_ring_out_of(&echo),
+        None,
+        "a copy made beside the ones of the preview could be a second copy alive at once: it is not measured"
+    );
+    assert!(
+        in_process.loaded_libraries().is_empty(),
+        "and its library was not loaded to find out"
+    );
+
+    let kind = the_vst3_kind_of(vst3_plugins::GAIN);
+    let effect = an_effect(kind, the_values_with_a_first_of(&kind, 1.0), None);
+    let measured = in_process
+        .measure_the_ring_out_of(&effect)
+        .expect("a VST3 plugin is run in a program");
+    assert_eq!(measured.samples, 0);
+}
+
+#[test]
+fn a_plugin_that_may_not_be_run_yet_or_is_not_installed_has_no_measurement() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_clap_kind_of(clap_plugins::TAIL);
+    let effect = an_effect(kind, Vec::new(), None);
+    // Nobody has said yes to the folder.
+    let host = PluginHost::new()
+        .running_in_a_process_of_its_own(InAProcessOfItsOwn::Everything)
+        .with_the_program_that_runs_plugins(the_program());
+    assert_eq!(host.measure_the_ring_out_of(&effect), None);
+    // Not installed any more.
+    set_installed_plugins(Vec::new());
+    assert_eq!(
+        a_host_with(InAProcessOfItsOwn::Everything).measure_the_ring_out_of(&effect),
+        None
+    );
+}
+
+#[test]
+fn a_vst3_effect_that_delays_the_sound_and_says_a_tail_is_found_to_ring_for_no_more_than_a_window_of_the_meter_by_what_it_does()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_vst3_kind_of(vst3_plugins::LATENCY);
+    let host = a_host_with(InAProcessOfItsOwn::Nothing);
+    let effect = an_effect(kind, kind.default_values(), None);
+
+    let ring = host.measure_the_ring_out_of(&effect).expect("it was run");
+
+    // (It says a tail of 1,000 samples and a latency of 64: the latency is made up for, as the graph makes up for it, and the sound it delays ends with the input. What is left is the
+    // window of 480 samples that the end of the input falls in.)
+    assert!(ring.samples <= 480, "{}", ring.samples);
+    assert!(!ring.is_still_ringing);
+}
+
+#[test]
+fn a_measurement_does_not_write_on_the_board_of_what_is_wrong_with_a_plugin_nor_wipe_it() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_vst3_kind_of(vst3_plugins::GAIN);
+    let key = kind.installed_plugin().unwrap().descriptor.key.to_string();
+    let effect = an_effect(kind, the_values_with_a_first_of(&kind, 1.0), None);
+
+    // A plugin that works: what the board says of it (from a play, say) is not wiped by a copy made to listen to.
+    let host = a_host_with(InAProcessOfItsOwn::Nothing);
+    host.note_a_problem_with(&key, "it was too slow in a play");
+    assert!(host.measure_the_ring_out_of(&effect).is_some());
+    assert_eq!(host.problem_with(&key).as_deref(), Some("it was too slow in a play"));
+
+    // A plugin that cannot be run (no program): the play says so on the board, and a measurement does not (the play will, when it is heard).
+    let without_a_program = PluginHost::new()
+        .running_in_a_process_of_its_own(InAProcessOfItsOwn::Nothing)
+        .with_the_program_that_runs_plugins(PathBuf::from("/there/is/no/program"));
+    without_a_program.allow_everything();
+    assert_eq!(without_a_program.measure_the_ring_out_of(&effect), None);
+    assert_eq!(
+        without_a_program.problem_with(&key),
+        None,
+        "a measurement says nothing on the board"
+    );
+    assert!(the_processor(&without_a_program, &effect, &Notes::default()).is_none());
+    assert!(
+        without_a_program.problem_with(&key).is_some(),
+        "(the control: a play does, so the test can tell)"
+    );
+}

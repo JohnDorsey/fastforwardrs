@@ -13,6 +13,11 @@ use std::collections::BTreeSet;
 
 use std::collections::HashMap;
 
+pub use self::measured_tails::{
+    TailToMeasure, forget_the_measured_tails, how_many_tails_have_been_measured, is_measured, key_of_the_tail_of,
+    note_the_measured_tail, the_measured_tail_of, the_tails_to_measure_in,
+};
+use self::measured_tails::{TheState, the_measured_tail_with};
 pub use self::music::{Music, NoteConsumer, PlannedControl, PlannedNote, StretchOfMusic, music_of_a_stretch};
 use self::tail_routes::{Emitter, GroupGeometry, tail_routes_of, window_routes_of};
 pub use self::tail_routes::{TailDestination, TailRoute};
@@ -201,17 +206,28 @@ pub const SOUND_SAMPLES_A_SECOND: u64 = 48_000;
 /// where they said nothing what its plugin says (the tail of a CLAP plugin, up to two seconds; half a second for an LV2 plugin, which does not say; nothing for a LADSPA plugin). An
 /// effect that is not a plugin that is installed makes the sound pass through unchanged, and has none.
 pub fn tail_samples_of(effect: &LayerEffect) -> u64 {
-    tail_samples(effect.kind, effect.tail_length)
+    tail_samples(
+        effect.kind,
+        effect.tail_length,
+        &effect.values,
+        TheState::Bytes(effect.state.as_ref()),
+    )
 }
 
-/// [`tail_samples_of`] for an effect of this kind that has this tail length.
-fn tail_samples(kind: crate::project::EffectKind, tail_length: crate::project::TailLength) -> u64 {
+/// [`tail_samples_of`] for an effect of this kind that has this tail length, these values and this state. **Where the person has said nothing: how long the effect was measured to ring on
+/// at these values** (see `measured_tails`), and, where it has not been, what the scan says.
+fn tail_samples(
+    kind: crate::project::EffectKind,
+    tail_length: crate::project::TailLength,
+    values: &[crate::project::PropertyValue],
+    state: TheState<'_>,
+) -> u64 {
     use crate::project::TailLength;
     let Some(plugin) = kind.installed_plugin() else {
         return 0;
     };
     match tail_length {
-        TailLength::Automatic => plugin.pre_roll_samples as u64,
+        TailLength::Automatic => the_measured_tail_with(kind, values, state).unwrap_or(plugin.pre_roll_samples as u64),
         TailLength::None => 0,
         TailLength::Milliseconds(milliseconds) => u64::from(milliseconds) * SOUND_SAMPLES_A_SECOND / 1000,
     }
@@ -234,7 +250,14 @@ fn lead_in_frames_before(project: &Project, effects: &HashMap<ClipId, Vec<Applie
             applied
                 .iter()
                 .filter(|applied| applied.effect.kind().domain() == EffectDomain::Sound)
-                .map(|applied| tail_samples(applied.effect.kind(), applied.effect.tail_length()))
+                .map(|applied| {
+                    tail_samples(
+                        applied.effect.kind(),
+                        applied.effect.tail_length(),
+                        applied.effect.values(),
+                        TheState::Fingerprint(applied.effect.state_fingerprint()),
+                    )
+                })
                 .sum::<u64>()
         })
         .max()
@@ -381,7 +404,7 @@ fn sound_groups_of(project: &Project, animations: &ResolvedAnimations) -> Groups
 
 /// Feeds everything that is heard of the sound effects of the clips of `project` into `hasher`, so that a number made from it is different whenever it is: for each clip that
 /// has sound effects, which they are (the kind and version, which plugin of which library stands in for it now, if one does, so that a plugin that is found by the scan is a
-/// change), their values, the keyframes of them and the state that their plugin saved. A project with no sound effects feeds nothing.
+/// change), their values, the keyframes of them, the state that their plugin saved and how long they ring on (what was said, or what was measured). A project with no sound effects feeds nothing.
 pub fn hash_the_sound_effects_into(project: &Project, hasher: &mut impl std::hash::Hasher) {
     use std::hash::Hash;
     let applied = project.effects_applied_to_every_clip();
@@ -418,6 +441,15 @@ pub fn hash_the_sound_effects_into(project: &Project, hasher: &mut impl std::has
                 effect.effect.state_fingerprint().hash(hasher);
                 // (Where the notes of a MIDI clip go is heard: a synthesizer that passes them on is a different sound.)
                 effect.effect.passes_notes_on().hash(hasher);
+                // (How long it rings on is heard: what its person said, or what was measured for its values. Found by use after 15.6: a tail length that was said was not heard until the sound
+                // was made again for another reason.)
+                tail_samples(
+                    layer.kind,
+                    layer.tail_length,
+                    &layer.values,
+                    TheState::Fingerprint(effect.effect.state_fingerprint()),
+                )
+                .hash(hasher);
             }
         }
     }
@@ -1067,6 +1099,7 @@ fn push_silence(items: &mut Vec<SoundItem>, frame_count: u64) {
     }
 }
 
+mod measured_tails;
 mod music;
 mod tail_routes;
 
@@ -1078,6 +1111,8 @@ mod buses_tests;
 mod effects_tests;
 #[cfg(test)]
 mod groups_tests;
+#[cfg(test)]
+mod measured_tails_tests;
 #[cfg(test)]
 mod music_clip_tests;
 #[cfg(test)]

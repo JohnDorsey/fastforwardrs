@@ -40,6 +40,13 @@ pub trait PluginRunner: Send + Sync {
     /// plugins of the same library alive at once, one made while another is being let go of, waits for them (see `PluginHost`).
     fn stream_is_stopping(&self, _notes: &Notes) {}
 
+    /// How long `effect` rings on after its input ends, found by running it on noise and then on silence (see [`measure_the_ring_out`](super::measure_the_ring_out)), or `None` where
+    /// this cannot or should not be found: the effect is not a plugin that is installed, it may not be run yet, it could not be made, or it is made in the process of the editor, where a
+    /// second copy beside the ones of the preview could be a second copy alive at once. The values are those the effect has when they are not animated. (A runner that makes no plugins says `None`.)
+    fn measure_the_ring_out_of(&self, _effect: &LayerEffect) -> Option<super::RingOut> {
+        None
+    }
+
     /// A number that is different whenever what this would do for the same effect has changed (a folder was approved or declined): the preview makes the sound again when it
     /// is, which is how a plugin begins to be heard when a person has said yes. A runner that never changes its mind says 0.
     fn generation(&self) -> u64 {

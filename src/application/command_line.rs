@@ -257,6 +257,8 @@ pub fn export_project(request: &ExportRequest, report: &mut dyn FnMut(Report)) -
         report(Report::Warning(words));
     }
     let toolchain = FfmpegToolchain::locate().map_err(|error| error.to_string())?;
+    // (The plan of an export has every tail known: the sound effects whose tail nobody said are run on noise and silence, for as long as they ring.)
+    plugins.measure_the_tails_now(&project);
     let plan = plan_export(&project, settings_of_the_export(request, &project)?).map_err(|error| error.to_string())?;
     for words in warnings_about(&project) {
         report(Report::Warning(words));

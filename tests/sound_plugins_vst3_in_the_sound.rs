@@ -550,3 +550,112 @@ fn find_module_below(folder: &std::path::Path, name: &str) -> Option<PathBuf> {
     }
     None
 }
+
+/// **Ignored**: it needs the real Dragonfly Hall Reverb (see the test above). The maintainer found that the tail of Dragonfly Hall is cut short with its Decay at 10 seconds, even with the
+/// tail on Automatic: a guess of two seconds cannot follow a setting. **The effect is run on noise and silence, and the tail is how long it rings** (section 16 of
+/// `docs/engine-phase-15-vst3-design.md`): at its defaults about a second, at a Decay of 10 seconds about ten, and an export with the tail on Automatic is the sound of a tail of thirty
+/// seconds up to where it was measured to ring, to the sample, and silence after.
+/// `FFRS_VST3_MODULES=E:/s/sffrs/vst3_real cargo test --test sound_plugins_vst3_in_the_sound -- --ignored --nocapture`
+#[test]
+#[ignore = "needs the real Dragonfly Hall Reverb (FFRS_VST3_MODULES)"]
+fn the_tail_of_dragonfly_hall_is_measured_at_the_decay_it_has_and_an_export_with_an_automatic_tail_rings_on_for_that_long()
+ {
+    use fastforwardrs::composition::{forget_the_measured_tails, key_of_the_tail_of, note_the_measured_tail};
+    use fastforwardrs::project::TailLength;
+
+    const A_SECOND: usize = 48_000 * 2;
+    let toolchain = toolchain_or_skip!();
+    let _alone = the_installed_plugins_to_myself();
+    forget_the_measured_tails();
+    let folder = scratch_directory();
+    let sources = the_sources(folder.path());
+    let modules = PathBuf::from(std::env::var("FFRS_VST3_MODULES").expect("FFRS_VST3_MODULES names a folder"));
+    let module = find_module_below(&modules, "DragonflyHallReverb.vst3").expect("DragonflyHallReverb.vst3 is below it");
+    let scan = vst3_host::scan_module(&module, &mut |_| {}).expect("the module is scanned");
+    let class = scan.classes.first().expect("it has a plugin").class.id;
+    let kind = the_kind_of_in(&module, class.numbers());
+    let decay_place = kind
+        .parameters()
+        .iter()
+        .position(|parameter| parameter.label.to_lowercase().contains("decay"))
+        .expect("Dragonfly Hall has a decay");
+    println!(
+        "the decay is value {decay_place}: {:?}",
+        kind.parameters()[decay_place].range
+    );
+    let host = {
+        let host = PluginHost::new().with_the_program_that_runs_plugins(the_program());
+        host.allow_everything();
+        Arc::new(host)
+    };
+    let with_a_decay_of = |seconds: f32| {
+        let mut effect = an_effect(kind, None);
+        effect.values[decay_place] = PropertyValue::Number(seconds);
+        effect
+    };
+
+    let ring_of = |effect: &LayerEffect| {
+        let started = Instant::now();
+        let ring = host.measure_the_ring_out_of(effect).expect("it was run");
+        println!(
+            "measured in {:?}: rings {:.2} s, still ringing at the end: {}",
+            started.elapsed(),
+            ring.samples as f64 / 48_000.0,
+            ring.is_still_ringing
+        );
+        ring
+    };
+    let by_default = ring_of(&an_effect(kind, None));
+    let long = with_a_decay_of(10.0);
+    let for_ten = ring_of(&long);
+
+    assert!(
+        (24_000..=96_000).contains(&by_default.samples),
+        "about a second at its defaults: {}",
+        by_default.samples
+    );
+    assert!(
+        (7 * 48_000..=14 * 48_000).contains(&for_ten.samples),
+        "about ten seconds at a decay of ten: {}",
+        for_ten.samples
+    );
+    assert!(!for_ten.is_still_ringing);
+
+    // The export with the tail on Automatic, once the tail is known: the sound of a long tail up to where the reverb was measured to ring, and then nothing.
+    note_the_measured_tail(
+        key_of_the_tail_of(kind, &long.values, None).expect("installed"),
+        for_ten.samples,
+    );
+    let after_the_clip_with = |tail_length: TailLength| {
+        let mut effect = long.clone();
+        effect.tail_length = tail_length;
+        let specification = a_second_of_noise_with_then_silence(vec![effect], 450);
+        let (exported, notes) = by_the_export(
+            &toolchain,
+            &specification,
+            &sources,
+            Some(a_host_that_runs_everything()),
+        );
+        assert_eq!(notes, Vec::<String>::new());
+        exported[30 * 1_600 * 2..].to_vec()
+    };
+    let as_it_is = after_the_clip_with(TailLength::Automatic);
+    let for_thirty_seconds = after_the_clip_with(TailLength::Milliseconds(30_000));
+    let rings_until = for_ten.samples as usize * 2;
+    assert_eq!(
+        &as_it_is[..rings_until],
+        &for_thirty_seconds[..rings_until],
+        "up to where it was measured to ring the sound is the reverb, to the sample"
+    );
+    assert!(
+        as_it_is[rings_until..].iter().all(|sample| *sample == 0.0),
+        "and then it is over"
+    );
+    assert!(
+        for_thirty_seconds[rings_until..rings_until + A_SECOND]
+            .iter()
+            .any(|sample| *sample != 0.0),
+        "(the control: the reverb rings on past that, quietly, so the test can tell)"
+    );
+    forget_the_measured_tails();
+}

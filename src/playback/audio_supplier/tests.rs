@@ -877,6 +877,58 @@ fn project_with_a_plugin_on_its_clip(
 }
 
 #[test]
+fn a_tail_length_that_is_said_or_a_tail_that_is_measured_makes_the_sound_again_while_it_plays_and_the_same_one_again_does_not()
+ {
+    use crate::project::{Member, TailLength};
+    let _alone = crate::test_support::the_installed_plugins_to_myself();
+    let (project, _, instance) = project_with_a_plugin_on_its_clip(1.0);
+    let clip = project.tracks()[0].placement_at_index(0).unwrap().id;
+    let wanted = crate::composition::the_tails_to_measure_in(&project);
+    assert_eq!(wanted.len(), 1);
+    let mut bench = Bench::with(project, 1);
+    bench.update_playing_at(3.0);
+    let mut clock = bench.play_steadily(3.0, 1.0);
+    assert_eq!(bench.streams_started(), 1);
+
+    // The person says how long the effect rings on: heard (a tail is part of the sound: it is made for that long after the clip).
+    bench
+        .project
+        .set_effect_tail_length(Member::Clip(clip), instance, TailLength::Milliseconds(2_500))
+        .unwrap();
+    clock = bench.play_steadily(clock, 0.5);
+    assert_eq!(bench.streams_started(), 2, "a tail length that is said is heard");
+    clock = bench.play_steadily(clock, 0.5);
+    assert_eq!(bench.streams_started(), 2, "and is not made again for the same");
+
+    // ... and while they have said it, a measurement of the effect is not heard (the sound is the same).
+    crate::composition::note_the_measured_tail(wanted[0].key, 480_000);
+    clock = bench.play_steadily(clock, 0.5);
+    assert_eq!(
+        bench.streams_started(),
+        2,
+        "a tail that was measured does not change a tail that was said"
+    );
+
+    // They say it is automatic again: the measurement is the tail now, and that is heard.
+    bench
+        .project
+        .set_effect_tail_length(Member::Clip(clip), instance, TailLength::Automatic)
+        .unwrap();
+    clock = bench.play_steadily(clock, 0.5);
+    assert_eq!(
+        bench.streams_started(),
+        3,
+        "automatic is the measured tail, which is another sound"
+    );
+    // Another measurement of the same effect: another tail.
+    crate::composition::note_the_measured_tail(wanted[0].key, 96_000);
+    clock = bench.play_steadily(clock, 0.5);
+    assert_eq!(bench.streams_started(), 4, "a tail that is measured again is heard");
+    bench.play_steadily(clock, 0.5);
+    assert_eq!(bench.streams_started(), 4, "and the same number does not make it again");
+}
+
+#[test]
 fn a_change_to_the_value_of_a_plugin_effect_or_its_keyframes_or_the_plugin_being_found_or_gone_makes_the_sound_again() {
     let _alone = crate::test_support::the_installed_plugins_to_myself();
     let (project, kind, instance) = project_with_a_plugin_on_its_clip(1.0);

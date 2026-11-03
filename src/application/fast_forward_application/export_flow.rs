@@ -144,6 +144,10 @@ impl FastForwardApplication {
             return;
         };
         let settings = self.effective_settings();
+        // (The plan of an export has every tail known: what the thread of the window has not measured yet is measured now, and what it is measuring is waited for. Most often nothing.)
+        self.environment
+            .plugin_host
+            .measure_the_tails_now(&self.document.project);
         let plan = plan_export(&self.document.project, settings);
         let plan = match plan {
             Ok(plan) => plan,

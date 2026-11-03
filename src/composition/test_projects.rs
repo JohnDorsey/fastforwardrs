@@ -21,7 +21,7 @@ use crate::test_support::{
 pub(super) const LONG_VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(1);
 /// A video that is short and has no sound.
 pub(super) const SHORT_SILENT_VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(2);
-pub(super) const SOUND_FILE: SourceMediaIdentifier = SourceMediaIdentifier::new(3);
+pub(crate) const SOUND_FILE: SourceMediaIdentifier = SourceMediaIdentifier::new(3);
 /// A video as long as the long one but standing upright (360 by 640, where the picture is 640 by 360),
 /// so that it does not fill the picture. It has no sound.
 pub(super) const TALL_VIDEO: SourceMediaIdentifier = SourceMediaIdentifier::new(4);
@@ -70,7 +70,7 @@ pub(super) fn the_sources() -> Vec<SourceMedia> {
     ]
 }
 
-pub(super) fn media_clip(source: SourceMediaIdentifier, first: u64, end: u64, speed: u32) -> MediaClip {
+pub(crate) fn media_clip(source: SourceMediaIdentifier, first: u64, end: u64, speed: u32) -> MediaClip {
     MediaClip::new(
         source,
         SourceFrameIndex::new(first),
@@ -82,7 +82,7 @@ pub(super) fn media_clip(source: SourceMediaIdentifier, first: u64, end: u64, sp
 
 /// A project of `tracks` (the one in front first), each a list of clips with the empty frames
 /// before each.
-pub(super) fn project_of(tracks: Vec<Vec<(u64, Clip)>>) -> Project {
+pub(crate) fn project_of(tracks: Vec<Vec<(u64, Clip)>>) -> Project {
     let tracks = tracks
         .into_iter()
         .enumerate()

@@ -17,6 +17,7 @@ mod host;
 mod instance;
 mod needs;
 mod processes;
+mod ring_outs;
 mod scanned;
 mod vst3_copy;
 
@@ -33,6 +34,8 @@ pub use processes::{InAProcessOfItsOwn, THE_PLUGINS_IN_A_PROCESS_OF_THEIR_OWN};
 pub use scanned::WhatWasScanned;
 pub use vst3_copy::{MOST_FRAMES_OF_A_VST3_PLUGIN, Vst3Copy, Vst3Maker};
 
+#[cfg(test)]
+mod ring_outs_tests;
 #[cfg(test)]
 mod synthesizer_tests;
 #[cfg(test)]

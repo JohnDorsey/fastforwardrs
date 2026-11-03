@@ -18,9 +18,10 @@ pub use pictures::{
 };
 pub use sound::{
     DecibelsAt, Loudness, Music, NoteConsumer, PlannedControl, PlannedNote, SOUND_SAMPLES_A_SECOND, SoundBus,
-    SoundClip, SoundGroup, SoundItem, SoundPlan, SoundStrip, StretchOfMusic, TailDestination, TailRoute,
-    frames_that_reach, hash_the_sound_effects_into, music_of_a_stretch, plan_sound, tail_samples_of,
-    tail_samples_of_a_chain,
+    SoundClip, SoundGroup, SoundItem, SoundPlan, SoundStrip, StretchOfMusic, TailDestination, TailRoute, TailToMeasure,
+    forget_the_measured_tails, frames_that_reach, hash_the_sound_effects_into, how_many_tails_have_been_measured,
+    is_measured, key_of_the_tail_of, music_of_a_stretch, note_the_measured_tail, plan_sound, tail_samples_of,
+    tail_samples_of_a_chain, the_measured_tail_of, the_tails_to_measure_in,
 };
 
 #[cfg(test)]

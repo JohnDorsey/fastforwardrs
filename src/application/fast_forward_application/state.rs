@@ -140,6 +140,8 @@ pub(super) struct BackgroundJobs {
     /// Whether writing the project file again without its garbage has been tried (or looked at, and was not worth it) since the window was
     /// asked to close: it is tried once.
     pub(super) tidying_before_closing_was_tried: bool,
+    /// When the tails of the sound effects are looked for (see `tail_measuring_flow`).
+    pub(super) tail_measuring: super::tail_measuring_flow::WhenToMeasureTails,
 }
 
 impl Default for BackgroundJobs {
@@ -151,6 +153,7 @@ impl Default for BackgroundJobs {
             #[cfg(test)]
             copy_gate: None,
             tidying_before_closing_was_tried: false,
+            tail_measuring: Default::default(),
         }
     }
 }

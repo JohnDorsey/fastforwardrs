@@ -6,7 +6,7 @@
 //! * [`protocol`] is what the editor and the editor-window program say to each other (P4).
 //! * [`sessions`] is the editor's side: the windows that are open, each a process of that program.
 //! * [`values`] says what a plugin's number is as a value of an effect and back (one place, for the sound and for the window).
-//! * [`backends`] is what the program does with a plugin's window, once, and how for each kind of plugin (CLAP, LV2).
+//! * [`backends`] is what the program does with a plugin's window, once, and how for each kind of plugin (CLAP, LV2, VST3).
 //! * [`program`] is the inside of that program, `fastforwardrs-plugin-editor` (P1): the plugin's window lives in a process of its own, so that a plugin whose window crashes cannot
 //!   take the editor and the project with it.
 
