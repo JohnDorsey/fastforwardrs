@@ -601,10 +601,27 @@ fn what_the_cold_messages_say_comes_back_as_it_was_said() {
         Address::Lv2 {
             uri: "urn:x".to_owned(),
         },
+        Address::Vst3 {
+            class_id: vst3_host::ClassId::from_numbers(0xABCD_EF01, 0x9182_FAEB, 0, u32::MAX),
+        },
     ] {
         assert_eq!(
             serde_json::from_slice::<Address>(&serde_json::to_vec(&address).unwrap()).unwrap(),
             address
         );
     }
+}
+
+#[test]
+fn the_address_of_a_vst3_plugin_is_said_as_the_text_of_its_id_that_a_project_keeps() {
+    let address = Address::Vst3 {
+        class_id: vst3_host::ClassId::from_numbers(0xABCD_EF01, 0x9182_FAEB, 0x0000_0002, 0xFFFF_FFFF),
+    };
+
+    assert_eq!(
+        serde_json::to_string(&address).unwrap(),
+        r#"{"Vst3":{"class_id":"ABCDEF019182FAEB00000002FFFFFFFF"}}"#
+    );
+    // An id that is not 32 digits is not an address.
+    assert!(serde_json::from_str::<Address>(r#"{"Vst3":{"class_id":"ABCD"}}"#).is_err());
 }

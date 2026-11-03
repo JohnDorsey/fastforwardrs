@@ -83,7 +83,7 @@ fn a_module_is_scanned_by_the_scan_program_and_each_of_its_plugins_says_whether_
     assert_eq!(scan.factory.vendor, "fastforwardrs tests");
     assert_eq!(
         scan.classes.len(),
-        10,
+        11,
         "the plugins; not the controllers or the compatibility class"
     );
     let of = |numbers: [u32; 4]| scan.classes.iter().find(|class| class.class.id == id(numbers)).unwrap();
@@ -122,7 +122,7 @@ fn a_folder_of_modules_is_scanned_and_kept_and_a_module_that_changed_is_scanned_
     assert_eq!(first.libraries.len(), 1, "the module is the one library of the folder");
     assert_eq!(first.libraries[0].path, module);
     assert!(!first.libraries[0].from_cache);
-    assert_eq!(scanned(first.libraries[0].outcome.clone()).classes.len(), 10);
+    assert_eq!(scanned(first.libraries[0].outcome.clone()).classes.len(), 11);
 
     // Again: from the cache, without the scan program.
     let second = scanner.scan_folders(&[folder.path().to_owned()]);
@@ -193,7 +193,7 @@ fn the_plugins_of_a_module_that_work_are_effects_and_the_others_say_why_not() {
         .iter()
         .map(|effect| effect.descriptor.key.to_string())
         .collect();
-    assert_eq!(found.effects.len(), 6, "{keys:?}");
+    assert_eq!(found.effects.len(), 7, "{keys:?}");
     for numbers in [
         plugins::GAIN,
         plugins::LATENCY,
@@ -201,6 +201,7 @@ fn the_plugins_of_a_module_that_work_are_effects_and_the_others_say_why_not() {
         plugins::SINGLE,
         plugins::SIDE_CHAIN_INSTRUMENT,
         plugins::SIDE_CHAIN_EFFECT,
+        plugins::NO_DEFAULTS,
     ] {
         effect_of(&found, numbers);
     }

@@ -15,6 +15,7 @@
 //! | [`SINGLE`] | an effect whose **component is its own controller** (one object): one parameter, `Gain` (1), the sound times the gain |
 //! | [`SIDE_CHAIN_EFFECT`] | an effect with **two audio inputs, the side chain first and the main one second** (as Surge XT Effects has them, the other way round): the sound is the main input times a half. A host has to find the main one by its type, not by its place |
 //! | [`SIDE_CHAIN_INSTRUMENT`] | the instrument as Surge XT has it: its only audio input is a **side-chain** (`kAux`), it has two more outputs of the same kind, and **it applies its state in the first block that follows, and a note in that block makes `process` fail** (the VST3 build of Surge XT hangs like that for some patches); a block with no events before the first note does not hurt. The state is text, of which `edits=N` is what it keeps: each edit makes the sound half as loud again |
+//! | [`NO_DEFAULTS`] | the gain effect whose **controller says that the default of every parameter is 0**, as the controller of Surge XT does (and, like Surge's, says that every value is 0 until it is given the component's state) |
 //! | [`COMPATIBILITY`] | a class of the category `Plugin Compatibility Class`, which a host does not make |
 //! | [`FAILS_TO_INITIALIZE`], [`FAILS_TO_ACTIVATE`], [`FAILS_TO_PROCESS`], [`NOT_NUMBERS`] | the gain effect, which misbehaves on purpose: `initialize` says no, `setActive` says no, `process` says it failed, the sound is not made of numbers |
 
@@ -53,6 +54,8 @@ pub const FAILS_TO_INITIALIZE: [u32; 4] = [0x5445_5354, 0x4641_494C, 0x0000_0001
 pub const FAILS_TO_ACTIVATE: [u32; 4] = [0x5445_5354, 0x4641_494C, 0x0000_0002, 0x0000_0001];
 pub const FAILS_TO_PROCESS: [u32; 4] = [0x5445_5354, 0x4641_494C, 0x0000_0003, 0x0000_0001];
 pub const NOT_NUMBERS: [u32; 4] = [0x5445_5354, 0x4641_494C, 0x0000_0004, 0x0000_0001];
+pub const NO_DEFAULTS: [u32; 4] = [0x5445_5354, 0x4E4F_4446, 0x0000_0001, 0x0000_0001];
+pub const NO_DEFAULTS_CONTROLLER: [u32; 4] = [0x5445_5354, 0x4E4F_4446, 0x0000_0001, 0x0000_0002];
 
 /// The ids of the parameters.
 pub const PARAMETER_GAIN: u32 = 1;
@@ -70,6 +73,56 @@ pub const TAIL_SAMPLES: u32 = 1000;
 
 /// The start of the state of [`GAIN`] and [`SINGLE`].
 const STATE_MAGIC: &[u8; 4] = b"TGN1";
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Misbehaving on request, as the other test libraries do.
+
+/// What the library is asked to do wrong, if anything: the value of the environment variable `FFRS_TEST_PLUGIN`, read once, when the library is first asked. It is for the tests of
+/// the program that runs plugins, which start it with the variable set; **in a test program the variable is never set**.
+///
+/// `crash_when_loaded`, `hang_when_loaded`, `init_says_no` (the module's start-up function returns false), `crash_when_made`, `hang_when_made` (the factory is asked for a class),
+/// `crash_when_activated`, `crash_when_run`, `hang_when_run`, `exit_when_run` (ends the program with no answer), `crash_at_every_fourth_run` (a program that counts its runs and
+/// crashes at the fourth, so a program that is started again plays three runs and crashes again: for the tests of a copy that is started again), `print_noise` (writes to the
+/// standard output while it is loaded and while it is made).
+fn misbehaviour() -> &'static str {
+    static HOW: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HOW.get_or_init(|| std::env::var("FFRS_TEST_PLUGIN").unwrap_or_default())
+}
+
+/// Does what the misbehaviour `how` says, if that is the one that was asked for: crashes, never returns, or ends the program.
+fn misbehave_if_asked(how: &str) {
+    if misbehaviour() != how {
+        return;
+    }
+    if how.starts_with("crash") {
+        std::process::abort();
+    } else if how.starts_with("hang") {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    } else if how.starts_with("exit") {
+        std::process::exit(0);
+    }
+}
+
+/// Crashes at every fourth run of the program (`crash_at_every_fourth_run`), if that is what was asked for.
+fn crash_at_every_fourth_run_if_asked() {
+    static RUNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if misbehaviour() == "crash_at_every_fourth_run" && RUNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % 4 == 3
+    {
+        std::process::abort();
+    }
+}
+
+/// What the module does when it is started: misbehaves as asked, and says whether it started.
+fn start_up() -> bool {
+    misbehave_if_asked("crash_when_loaded");
+    misbehave_if_asked("hang_when_loaded");
+    if misbehaviour() == "print_noise" {
+        println!("noise from the plugin module, while it is loaded");
+    }
+    misbehaviour() != "init_says_no"
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Text, as the interfaces want it.
@@ -114,6 +167,8 @@ enum Fault {
     Activate,
     Process,
     NotNumbers,
+    /// Not a fault of the plugin: its controller does not say what the defaults of its parameters are (it says 0 for each), as the controller of Surge XT does.
+    NoDefaults,
 }
 
 impl Kind {
@@ -183,10 +238,15 @@ struct ControllerCore {
     handler: RefCell<Option<ComPtr<IComponentHandler>>>,
     /// Whether the controller has been connected to its component: a controller of a class of its own gives nothing until it is (a controller that is the component is).
     connected: Cell<bool>,
+    /// Whether the controller has been given the state of its component (`setComponentState`, and the state was the component's). **Until it has, it says that every value is 0**, as the controller
+    /// of Surge XT does: a host that does not give it the component's state at the start has controller values that are not the plugin's.
+    synced: Cell<bool>,
+    /// Whether the controller says what the default of each parameter is (the other says 0 for each).
+    declares_defaults: bool,
 }
 
 impl ControllerCore {
-    fn new(kind: Kind, connected: bool) -> Self {
+    fn new(kind: Kind, connected: bool, declares_defaults: bool) -> Self {
         let mut values = [0.0; 32];
         for id in kind.parameters() {
             values[*id as usize] = default_normalized(*id);
@@ -196,6 +256,9 @@ impl ControllerCore {
             values: RefCell::new(values),
             handler: RefCell::new(None),
             connected: Cell::new(connected),
+            // (Only a controller whose component has a state to give has anything to wait for.)
+            synced: Cell::new(!matches!(kind, Kind::Gain | Kind::Single)),
+            declares_defaults,
         }
     }
 
@@ -236,8 +299,11 @@ impl ControllerCore {
     fn read_component_state(&self, state: *mut IBStream) -> tresult {
         let bytes = read_all(state);
         let Some(values) = values_of_a_state(&bytes) else {
+            // (A controller that is given a state it cannot read forgets what it had: some real ones do. A host that gives it the state of a component that has none is heard.)
+            *self.values.borrow_mut() = [0.0; 32];
             return kResultFalse;
         };
+        self.synced.set(true);
         let mut mine = self.values.borrow_mut();
         for (id, value) in values {
             mine[id as usize] = value;
@@ -276,7 +342,11 @@ impl ControllerCore {
         copy_wstring(title, &mut info.shortTitle);
         copy_wstring(units, &mut info.units);
         info.stepCount = steps;
-        info.defaultNormalizedValue = default_normalized(*id);
+        info.defaultNormalizedValue = if self.declares_defaults {
+            default_normalized(*id)
+        } else {
+            0.0
+        };
         info.unitId = 0;
         info.flags = flags;
         kResultOk
@@ -328,6 +398,9 @@ macro_rules! the_controller_is {
             unsafe fn getParamNormalized(&self, id: u32) -> f64 {
                 if !self.core.connected.get() {
                     return f64::NAN;
+                }
+                if !self.core.synced.get() {
+                    return 0.0;
                 }
                 self.core.values.borrow()[(id as usize).min(31)]
             }
@@ -475,7 +548,7 @@ impl<const SINGLE: bool> Plugin<SINGLE> {
         Self {
             kind,
             fault,
-            core: ControllerCore::new(kind, true),
+            core: ControllerCore::new(kind, true, true),
             values: RefCell::new(values),
             delay: RefCell::new(vec![[0.0; 2]; LATENCY_SAMPLES]),
             held: RefCell::new(Vec::new()),
@@ -627,6 +700,7 @@ fn values_of_a_state(bytes: &[u8]) -> Option<Vec<(u32, f64)>> {
 impl<const SINGLE: bool> IComponentTrait for Plugin<SINGLE> {
     unsafe fn getControllerClassId(&self, class_id: *mut TUID) -> tresult {
         let numbers = match self.kind {
+            Kind::Gain if self.fault == Fault::NoDefaults => NO_DEFAULTS_CONTROLLER,
             Kind::Gain => GAIN_CONTROLLER,
             Kind::Instrument => INSTRUMENT_CONTROLLER,
             Kind::SideChainInstrument => SIDE_CHAIN_INSTRUMENT_CONTROLLER,
@@ -704,6 +778,9 @@ impl<const SINGLE: bool> IComponentTrait for Plugin<SINGLE> {
     unsafe fn setActive(&self, state: TBool) -> tresult {
         if state != 0 && self.fault == Fault::Activate {
             return kResultFalse;
+        }
+        if state != 0 {
+            misbehave_if_asked("crash_when_activated");
         }
         if state == 0 {
             self.held.borrow_mut().clear();
@@ -815,6 +892,10 @@ impl<const SINGLE: bool> IAudioProcessorTrait for Plugin<SINGLE> {
     }
 
     unsafe fn process(&self, data: *mut ProcessData) -> tresult {
+        misbehave_if_asked("crash_when_run");
+        misbehave_if_asked("hang_when_run");
+        misbehave_if_asked("exit_when_run");
+        crash_at_every_fourth_run_if_asked();
         if self.fault == Fault::Process {
             return kResultFalse;
         }
@@ -1030,7 +1111,7 @@ const CLASSES: &[ClassEntry] = &[
         sub_categories: "Fx",
         make: || {
             unknown_of(ComWrapper::new(Controller {
-                core: ControllerCore::new(Kind::Gain, false),
+                core: ControllerCore::new(Kind::Gain, false, true),
             }))
         },
     },
@@ -1055,7 +1136,7 @@ const CLASSES: &[ClassEntry] = &[
         sub_categories: "Instrument|Synth",
         make: || {
             unknown_of(ComWrapper::new(InstrumentController {
-                core: ControllerCore::new(Kind::Instrument, false),
+                core: ControllerCore::new(Kind::Instrument, false, true),
             }))
         },
     },
@@ -1087,7 +1168,7 @@ const CLASSES: &[ClassEntry] = &[
         sub_categories: "Instrument|Synth",
         make: || {
             unknown_of(ComWrapper::new(Controller {
-                core: ControllerCore::new(Kind::SideChainInstrument, false),
+                core: ControllerCore::new(Kind::SideChainInstrument, false, true),
             }))
         },
     },
@@ -1118,6 +1199,24 @@ const CLASSES: &[ClassEntry] = &[
         name: "Test Fails To Process",
         sub_categories: "Fx",
         make: || plugin(Kind::Gain, Fault::Process),
+    },
+    ClassEntry {
+        numbers: NO_DEFAULTS,
+        category: AUDIO,
+        name: "Test Gain Without Defaults",
+        sub_categories: "Fx",
+        make: || plugin(Kind::Gain, Fault::NoDefaults),
+    },
+    ClassEntry {
+        numbers: NO_DEFAULTS_CONTROLLER,
+        category: CONTROLLER,
+        name: "Test Gain Without Defaults",
+        sub_categories: "Fx",
+        make: || {
+            unknown_of(ComWrapper::new(Controller {
+                core: ControllerCore::new(Kind::Gain, false, false),
+            }))
+        },
     },
     ClassEntry {
         numbers: NOT_NUMBERS,
@@ -1168,6 +1267,11 @@ impl IPluginFactoryTrait for Factory {
         else {
             return kInvalidArgument;
         };
+        misbehave_if_asked("crash_when_made");
+        misbehave_if_asked("hang_when_made");
+        if misbehaviour() == "print_noise" {
+            println!("noise from the plugin module, while a class is made");
+        }
         match (entry.make)() {
             Some(instance) => {
                 let pointer = instance.as_ptr();
@@ -1226,7 +1330,7 @@ impl IPluginFactory3Trait for Factory {
 #[cfg(target_os = "windows")]
 #[unsafe(no_mangle)]
 extern "system" fn InitDll() -> bool {
-    true
+    start_up()
 }
 
 #[cfg(target_os = "windows")]
@@ -1238,7 +1342,7 @@ extern "system" fn ExitDll() -> bool {
 #[cfg(target_os = "linux")]
 #[unsafe(no_mangle)]
 extern "system" fn ModuleEntry(_library_handle: *mut c_void) -> bool {
-    true
+    start_up()
 }
 
 #[cfg(target_os = "linux")]
@@ -1250,7 +1354,7 @@ extern "system" fn ModuleExit() -> bool {
 #[cfg(target_os = "macos")]
 #[unsafe(no_mangle)]
 extern "system" fn bundleEntry(_bundle: *mut c_void) -> bool {
-    true
+    start_up()
 }
 
 #[cfg(target_os = "macos")]

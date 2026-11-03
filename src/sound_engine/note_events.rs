@@ -84,6 +84,43 @@ impl From<NoteEvent> for clap_host::NoteEvent {
     }
 }
 
+impl From<NoteEvent> for vst3_host::NoteEvent {
+    fn from(note: NoteEvent) -> Self {
+        Self {
+            time: note.time,
+            what: match note.what {
+                NoteEventKind::On {
+                    channel,
+                    key,
+                    velocity,
+                    id,
+                } => vst3_host::NoteEventKind::On {
+                    channel,
+                    key,
+                    velocity,
+                    id,
+                },
+                NoteEventKind::Off {
+                    channel,
+                    key,
+                    velocity,
+                    id,
+                } => vst3_host::NoteEventKind::Off {
+                    channel,
+                    key,
+                    velocity,
+                    id,
+                },
+                NoteEventKind::Controller { channel, number, value } => {
+                    vst3_host::NoteEventKind::Controller { channel, number, value }
+                }
+                NoteEventKind::PitchBend { channel, value } => vst3_host::NoteEventKind::PitchBend { channel, value },
+                NoteEventKind::AllOff => vst3_host::NoteEventKind::AllOff,
+            },
+        }
+    }
+}
+
 impl From<NoteEvent> for lv2_host::NoteEvent {
     fn from(note: NoteEvent) -> Self {
         Self {

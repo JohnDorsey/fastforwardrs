@@ -5,6 +5,9 @@
 //! every format; the words for what goes wrong are the same words; the setting says which plugins go to a program; a program that is not there, or is not of this build, leaves the sound as
 //! it was and says why; and a plugin that crashes its program while it plays is left out of that play and does not end the test program.
 //!
+//! **A VST3 plugin is always run in a program**, whatever the setting says (phase 15, D7): its tests are here too, and cannot be a comparison with a copy in this process, which there is not;
+//! the sound is what the plugin is made to make.
+//!
 //! The list of the plugins that are installed is for the whole program, so the tests of this file do not run at the same time.
 
 use std::path::{Path, PathBuf};
@@ -17,13 +20,15 @@ use fastforwardrs::media::export::{LoudnessToExport, SoundClipToExport};
 use fastforwardrs::plugin_host::{InAProcessOfItsOwn, PluginHost};
 use fastforwardrs::plugin_process::remote::Limits;
 use fastforwardrs::plugin_scan::{
-    effect_of_a_clap_plugin, effect_of_a_plugin, effect_of_an_lv2_plugin, key_of_an_lv2_plugin,
+    effect_of_a_clap_plugin, effect_of_a_plugin, effect_of_a_vst3_plugin, effect_of_an_lv2_plugin,
+    key_of_a_vst3_plugin, key_of_an_lv2_plugin,
 };
 use fastforwardrs::project::{
     Animation, EffectInstanceId, EffectKind, FrameRate, InstalledPlugin, PropertyValue, SpeedFactor,
     set_installed_plugins,
 };
 use fastforwardrs::sound_engine::{BlockProcessor, NoteEvent, NoteEventKind, Notes, PluginRunner};
+use vst3_test_plugins as vst3_plugins;
 
 fn the_installed_plugins_to_myself() -> MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
@@ -100,6 +105,33 @@ fn the_ladspa_kind_of(label: &str) -> EffectKind {
         .map(|plugin| plugin.descriptor.key.to_string())
         .unwrap_or_else(|| panic!("no plugin called {label}"));
     the_kind_of(plugins, &key)
+}
+
+/// The plugins of the VST3 test module (the library file itself, which is a module), scanned once.
+fn the_vst3_plugins() -> Vec<InstalledPlugin> {
+    static SCANNED: std::sync::OnceLock<Vec<InstalledPlugin>> = std::sync::OnceLock::new();
+    SCANNED
+        .get_or_init(|| {
+            let path = vst3_plugins::library_file_for_tests();
+            let scan = vst3_host::scan_module(&path, &mut |_| {}).expect("the test module is scanned");
+            scan.classes
+                .iter()
+                .filter_map(|class| effect_of_a_vst3_plugin(&path, class).ok())
+                .collect()
+        })
+        .clone()
+}
+
+fn the_vst3_kind_of(numbers: [u32; 4]) -> EffectKind {
+    let id = vst3_host::ClassId::from_numbers(numbers[0], numbers[1], numbers[2], numbers[3]);
+    the_kind_of(the_vst3_plugins(), &key_of_a_vst3_plugin(id))
+}
+
+/// The values of a VST3 effect as a project makes them, with the first (the gain) as given.
+fn the_values_with_a_first_of(kind: &EffectKind, first: f32) -> Vec<PropertyValue> {
+    let mut values = kind.default_values();
+    values[0] = PropertyValue::Number(first);
+    values
 }
 
 fn an_effect(kind: EffectKind, values: Vec<PropertyValue>, state: Option<&[u8]>) -> LayerEffect {
@@ -529,28 +561,30 @@ fn a_stream_that_is_being_stopped_makes_no_instrument() {
     );
 }
 
-#[test]
-fn a_plugin_that_crashes_its_program_while_it_plays_is_left_out_of_that_play_and_said_and_the_next_one_is_made_again() {
-    let _alone = the_installed_plugins_to_myself();
+/// A host that runs the plugins that `which` says in a program of their own, whose program is made to misbehave as `how` says. (Long limits: the tests are about what a crash comes to.)
+fn a_host_whose_program_misbehaves(which: InAProcessOfItsOwn, how: &str) -> PluginHost {
     let host = PluginHost::new()
-        .running_in_a_process_of_its_own(InAProcessOfItsOwn::Instruments)
+        .running_in_a_process_of_its_own(which)
         .with_the_program_that_runs_plugins(the_program())
         .with_the_program_given(
-            vec![("FFRS_TEST_PLUGIN".to_owned(), "crash_when_run".to_owned())],
+            vec![("FFRS_TEST_PLUGIN".to_owned(), how.to_owned())],
             Limits {
-                to_connect: Duration::from_secs(30),
+                to_connect: Duration::from_secs(60),
                 to_make: Duration::from_secs(60),
                 to_run: Duration::from_secs(60),
             },
         );
     host.allow_everything();
-    let instrument = an_effect(
-        the_clap_kind_of(clap_plugins::INSTRUMENT),
-        vec![PropertyValue::Number(1.0)],
-        None,
-    );
+    host
+}
+
+fn check_that_a_crash_while_it_plays_leaves_the_plugin_out_of_that_play_and_says_so_and_the_next_play_makes_it_again(
+    instrument: &LayerEffect,
+    which: InAProcessOfItsOwn,
+) {
+    let host = a_host_whose_program_misbehaves(which, "crash_when_run");
     let notes = Notes::default();
-    let mut processor = the_processor(&host, &instrument, &notes).expect("the instrument is made");
+    let mut processor = the_processor(&host, instrument, &notes).expect("the instrument is made");
 
     let sound = play(&mut *processor, &[(64, vec![on(0, 50, 1.0)]), (64, Vec::new())]);
 
@@ -571,32 +605,31 @@ fn a_plugin_that_crashes_its_program_while_it_plays_is_left_out_of_that_play_and
     );
     assert_eq!(host.problem_with(instrument.kind.key()), Some(said[0].clone()));
     // The next play makes a new program (which crashes the same way, but is made).
-    assert!(the_processor(&host, &instrument, &Notes::default()).is_some());
+    assert!(the_processor(&host, instrument, &Notes::default()).is_some());
 }
 
 #[test]
-fn a_plugin_that_crashes_its_program_while_it_is_made_leaves_the_sound_as_it_was_and_says_so_in_these_words() {
+fn a_plugin_that_crashes_its_program_while_it_plays_is_left_out_of_that_play_and_said_and_the_next_one_is_made_again() {
     let _alone = the_installed_plugins_to_myself();
-    let host = PluginHost::new()
-        .running_in_a_process_of_its_own(InAProcessOfItsOwn::Instruments)
-        .with_the_program_that_runs_plugins(the_program())
-        .with_the_program_given(
-            vec![("FFRS_TEST_PLUGIN".to_owned(), "crash_when_made".to_owned())],
-            Limits {
-                to_connect: Duration::from_secs(30),
-                to_make: Duration::from_secs(60),
-                to_run: Duration::from_secs(60),
-            },
-        );
-    host.allow_everything();
     let instrument = an_effect(
         the_clap_kind_of(clap_plugins::INSTRUMENT),
         vec![PropertyValue::Number(1.0)],
         None,
     );
+    check_that_a_crash_while_it_plays_leaves_the_plugin_out_of_that_play_and_says_so_and_the_next_play_makes_it_again(
+        &instrument,
+        InAProcessOfItsOwn::Instruments,
+    );
+}
+
+fn check_that_a_crash_while_it_is_made_leaves_the_sound_as_it_was_and_says_so_in_these_words(
+    instrument: &LayerEffect,
+    which: InAProcessOfItsOwn,
+) {
+    let host = a_host_whose_program_misbehaves(which, "crash_when_made");
     let notes = Notes::default();
 
-    let processor = the_processor(&host, &instrument, &notes);
+    let processor = the_processor(&host, instrument, &notes);
 
     assert!(
         processor.is_none(),
@@ -615,26 +648,25 @@ fn a_plugin_that_crashes_its_program_while_it_is_made_leaves_the_sound_as_it_was
 }
 
 #[test]
-fn an_instrument_whose_program_crashes_now_and_then_is_heard_as_if_it_did_not_and_the_person_is_told_each_time() {
+fn a_plugin_that_crashes_its_program_while_it_is_made_leaves_the_sound_as_it_was_and_says_so_in_these_words() {
     let _alone = the_installed_plugins_to_myself();
-    let crashing = PluginHost::new()
-        .running_in_a_process_of_its_own(InAProcessOfItsOwn::Instruments)
-        .with_the_program_that_runs_plugins(the_program())
-        .with_the_program_given(
-            vec![("FFRS_TEST_PLUGIN".to_owned(), "crash_at_every_fourth_run".to_owned())],
-            Limits {
-                to_connect: Duration::from_secs(60),
-                to_make: Duration::from_secs(60),
-                to_run: Duration::from_secs(60),
-            },
-        );
-    crashing.allow_everything();
-    let plain = a_host_with(InAProcessOfItsOwn::Nothing);
     let instrument = an_effect(
         the_clap_kind_of(clap_plugins::INSTRUMENT),
         vec![PropertyValue::Number(1.0)],
         None,
     );
+    check_that_a_crash_while_it_is_made_leaves_the_sound_as_it_was_and_says_so_in_these_words(
+        &instrument,
+        InAProcessOfItsOwn::Instruments,
+    );
+}
+
+fn check_that_an_instrument_whose_program_crashes_now_and_then_is_heard_as_if_it_did_not(
+    instrument: &LayerEffect,
+    which: InAProcessOfItsOwn,
+) {
+    let crashing = a_host_whose_program_misbehaves(which, "crash_at_every_fourth_run");
+    let plain = a_host_with(which);
     // Twelve blocks with notes that are held across the blocks the program crashes in (the fourth, the seventh and the tenth).
     let blocks: Vec<(usize, Vec<NoteEvent>)> = vec![
         (512, vec![on(10, 60, 0.5)]),
@@ -651,8 +683,8 @@ fn an_instrument_whose_program_crashes_now_and_then_is_heard_as_if_it_did_not_an
         (512, vec![off(100, 55)]),
     ];
     let (notes_crashing, notes_plain) = (Notes::default(), Notes::default());
-    let mut processor_crashing = the_processor(&crashing, &instrument, &notes_crashing).expect("the instrument is run");
-    let mut processor_plain = the_processor(&plain, &instrument, &notes_plain).expect("the instrument is run");
+    let mut processor_crashing = the_processor(&crashing, instrument, &notes_crashing).expect("the instrument is run");
+    let mut processor_plain = the_processor(&plain, instrument, &notes_plain).expect("the instrument is run");
 
     let heard = play(&mut *processor_crashing, &blocks);
     let wanted = play(&mut *processor_plain, &blocks);
@@ -678,5 +710,376 @@ fn an_instrument_whose_program_crashes_now_and_then_is_heard_as_if_it_did_not_an
         crashing.problem_with(instrument.kind.key()),
         None,
         "an instrument that was started again is not left out"
+    );
+}
+
+#[test]
+fn an_instrument_whose_program_crashes_now_and_then_is_heard_as_if_it_did_not_and_the_person_is_told_each_time() {
+    let _alone = the_installed_plugins_to_myself();
+    let instrument = an_effect(
+        the_clap_kind_of(clap_plugins::INSTRUMENT),
+        vec![PropertyValue::Number(1.0)],
+        None,
+    );
+    check_that_an_instrument_whose_program_crashes_now_and_then_is_heard_as_if_it_did_not(
+        &instrument,
+        InAProcessOfItsOwn::Instruments,
+    );
+}
+
+// --- VST3: always in a program ---
+
+#[test]
+fn a_vst3_effect_is_run_in_a_program_whatever_the_setting_says_and_the_editor_loads_no_module() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_vst3_kind_of(vst3_plugins::GAIN);
+    let plugin = kind.installed_plugin().unwrap();
+    let passing = the_sound_passing_by(0, 512);
+
+    for which in [
+        InAProcessOfItsOwn::Nothing,
+        InAProcessOfItsOwn::Instruments,
+        InAProcessOfItsOwn::Everything,
+    ] {
+        assert!(
+            which.includes(plugin),
+            "{which:?}: a VST3 plugin is always in a program"
+        );
+        let host = a_host_with(which);
+        let sound_with = |gain: f32| {
+            let effect = an_effect(kind, the_values_with_a_first_of(&kind, gain), None);
+            let mut processor = the_processor(&host, &effect, &Notes::default()).expect("the plugin is run");
+            play(&mut *processor, &[(512, Vec::new()), (100, Vec::new())])
+        };
+
+        let loud = sound_with(2.5);
+
+        // (Not a comparison of two silences: the plugin's sound is the sound that passes by times the gain; the left and the right.)
+        assert_eq!(f32::from_bits(loud[0].0[5]), passing.0[5] * 2.5, "{which:?}");
+        assert_eq!(f32::from_bits(loud[0].1[5]), passing.1[5] * 2.5, "{which:?}");
+        assert_eq!(loud[1].0.len(), 100, "{which:?}");
+        assert!(
+            host.loaded_libraries().is_empty(),
+            "{which:?}: the program loaded the module"
+        );
+        assert_eq!(host.runs_in_a_process_of_its_own(), which, "the setting is as it was");
+    }
+}
+
+#[test]
+fn a_vst3_instrument_plays_notes_in_a_program_and_its_sound_is_added_to_the_sound_that_passes_by() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_vst3_kind_of(vst3_plugins::INSTRUMENT);
+    let effect = an_effect(kind, kind.default_values(), None);
+    let host = a_host_with(InAProcessOfItsOwn::Nothing);
+    let mut processor = the_processor(&host, &effect, &Notes::default()).expect("the instrument is run");
+
+    let heard = play(&mut *processor, &a_script_of_notes());
+
+    // (Key 60 at 0.5 is 0.3 from sample 10, and key 72 at 1.0 is 0.72 more from sample 300; the notes are held into the next block, and the first of them is let go of at sample 50 of the
+    // third.)
+    let near = |block: usize, sample: usize, held: f32| {
+        let passing = the_sound_passing_by(block, [512, 512, 200, 512][block]);
+        let (left, right) = (
+            f32::from_bits(heard[block].0[sample]),
+            f32::from_bits(heard[block].1[sample]),
+        );
+        assert!(
+            (left - (passing.0[sample] + held)).abs() < 1e-5,
+            "block {block}, sample {sample}: {left}"
+        );
+        assert!(
+            (right - (passing.1[sample] + held)).abs() < 1e-5,
+            "block {block}, sample {sample}: {right}"
+        );
+    };
+    near(0, 5, 0.0);
+    near(0, 20, 0.3);
+    near(0, 350, 0.3 + 0.72);
+    near(1, 10, 0.3 + 0.72);
+    near(2, 40, 0.3 + 0.72);
+    near(2, 100, 0.72);
+    assert!(host.loaded_libraries().is_empty());
+}
+
+#[test]
+fn a_vst3_plugin_in_a_folder_nobody_has_answered_for_is_not_run_and_is_asked_about_and_runs_when_the_folder_is_approved()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_vst3_kind_of(vst3_plugins::GAIN);
+    let effect = an_effect(kind, the_values_with_a_first_of(&kind, 2.0), None);
+    let module = vst3_plugins::library_file_for_tests();
+    let folder = fastforwardrs::plugin_trust::folder_of(&module);
+    let host = PluginHost::new().with_the_program_that_runs_plugins(the_program());
+    let notes = Notes::default();
+
+    assert!(the_processor(&host, &effect, &notes).is_none(), "nobody said yes");
+    assert!(the_processor(&host, &effect, &notes).is_none(), "and it is asked once");
+
+    let wanted = host.take_wanted();
+    assert_eq!(wanted.len(), 1, "{wanted:?}");
+    assert_eq!(wanted[0].folder, folder);
+    assert_eq!(
+        wanted[0].libraries,
+        vec![module.file_name().unwrap().to_string_lossy().into_owned()]
+    );
+    assert_eq!(
+        wanted[0].plugins,
+        vec![kind.installed_plugin().unwrap().descriptor.name.to_string()]
+    );
+    assert!(the_notes_of(&notes).is_empty(), "the question is not an error");
+
+    host.decline_folder(&folder);
+    assert!(the_processor(&host, &effect, &notes).is_none(), "declined");
+    assert!(host.take_wanted().is_empty(), "and not asked again");
+
+    host.approve_folder(&folder);
+    let mut processor = the_processor(&host, &effect, &notes).expect("approved, the plugin is run");
+    let sound = play(&mut *processor, &[(64, Vec::new())]);
+    assert_eq!(f32::from_bits(sound[0].0[5]), the_sound_passing_by(0, 64).0[5] * 2.0);
+}
+
+#[test]
+fn the_words_for_what_goes_wrong_with_a_vst3_plugin_say_module_and_name_what_is_wrong() {
+    type Change = fn(&mut InstalledPlugin);
+    let cases: [(&str, Change, &str); 4] = [
+        (
+            "a module that is not there",
+            |plugin| plugin.library = PathBuf::from("/there/is/no/module.vst3"),
+            "could not be loaded from",
+        ),
+        (
+            "other ports than were scanned",
+            |plugin| plugin.audio_outputs = 1,
+            "is not what it was when the plugins were scanned (the module",
+        ),
+        (
+            "a parameter that it has not",
+            |plugin| plugin.value_handles.push(99),
+            "is not what it was when the plugins were scanned (the module",
+        ),
+        (
+            "a plugin that is not in the module",
+            |plugin| {
+                plugin.address = fastforwardrs::project::PluginAddress::Vst3 {
+                    class_id: vst3_host::ClassId::from_numbers(1, 2, 3, 4),
+                }
+            },
+            "does not have a plugin",
+        ),
+    ];
+    for (what, change, words) in cases {
+        let _alone = the_installed_plugins_to_myself();
+        let mut plugins = the_vst3_plugins();
+        let key = key_of_a_vst3_plugin(vst3_host::ClassId::from_numbers(
+            vst3_plugins::GAIN[0],
+            vst3_plugins::GAIN[1],
+            vst3_plugins::GAIN[2],
+            vst3_plugins::GAIN[3],
+        ));
+        let gain = plugins
+            .iter_mut()
+            .find(|plugin| plugin.descriptor.key.as_ref() == key)
+            .unwrap();
+        change(gain);
+        let kind = the_kind_of(plugins, &key);
+        let effect = an_effect(kind, the_values_with_a_first_of(&kind, 1.0), None);
+        let host = a_host_with(InAProcessOfItsOwn::Nothing);
+        let notes = Notes::default();
+
+        let made = the_processor(&host, &effect, &notes).is_some();
+
+        let said = the_notes_of(&notes);
+        assert!(!made, "{what}: no processor is made");
+        assert_eq!(said.len(), 1, "{what}: {said:?}");
+        assert!(said[0].contains(words), "{what}: {said:?}");
+        assert_eq!(host.problem_with(kind.key()), Some(said[0].clone()), "{what}");
+    }
+}
+
+#[test]
+fn the_state_that_the_project_keeps_reaches_a_vst3_plugin_and_one_it_cannot_read_is_run_all_the_same_and_said() {
+    let _alone = the_installed_plugins_to_myself();
+    // (The instrument with a side chain keeps `edits=N` in its state, and each edit makes it half as loud again: a state that is not one of the values of the effect, and is heard. It is
+    // also the one that applies its state in the first block that follows, in which a note is: the host runs a silent block first.)
+    let kind = the_vst3_kind_of(vst3_plugins::SIDE_CHAIN_INSTRUMENT);
+    let blocks = [(64, vec![on(0, 50, 1.0)])];
+    let sound_with = |state: Option<&[u8]>| {
+        let effect = an_effect(kind, kind.default_values(), state);
+        let host = a_host_with(InAProcessOfItsOwn::Nothing);
+        let notes = Notes::default();
+        let mut processor = the_processor(&host, &effect, &notes).expect("the plugin is run");
+        let sound = play(&mut *processor, &blocks);
+        (f32::from_bits(sound[0].0[10]), the_notes_of(&notes))
+    };
+    let state = vst3_host::encode_state(b"edits=2", &[]);
+    let passing = the_sound_passing_by(0, 64).0[10];
+
+    let (without, said_without) = sound_with(None);
+    let (with, said_with) = sound_with(Some(&state));
+    let (unreadable, said_unreadable) = sound_with(Some(&[0xFF, 0xFE, 0xFD]));
+
+    // (Key 50 at full velocity is 0.5, added to the sound that passes by; two edits make it a quarter of that.)
+    assert!((without - (passing + 0.5)).abs() < 1e-5, "{without}");
+    assert!((with - (passing + 0.125)).abs() < 1e-5, "{with}");
+    assert_eq!(unreadable, without, "the plugin goes on as it was");
+    assert!(
+        said_without.is_empty() && said_with.is_empty(),
+        "{said_without:?} {said_with:?}"
+    );
+    assert!(
+        said_unreadable.len() == 1 && said_unreadable[0].contains("did not take the state"),
+        "{said_unreadable:?}"
+    );
+}
+
+#[test]
+fn a_program_that_is_not_there_leaves_the_sound_of_a_vst3_plugin_as_it_was_and_says_why_whatever_the_setting() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_vst3_kind_of(vst3_plugins::GAIN);
+    let effect = an_effect(kind, the_values_with_a_first_of(&kind, 2.0), None);
+    let host = PluginHost::new()
+        .running_in_a_process_of_its_own(InAProcessOfItsOwn::Nothing)
+        .with_the_program_that_runs_plugins(PathBuf::from("/there/is/no/program"));
+    host.allow_everything();
+    let notes = Notes::default();
+
+    assert!(
+        the_processor(&host, &effect, &notes).is_none(),
+        "the plugin is not run in this process instead"
+    );
+
+    assert!(host.loaded_libraries().is_empty());
+    let said = the_notes_of(&notes);
+    assert!(
+        said.len() == 1
+            && said[0].contains("could not be run")
+            && said[0].contains("The sound goes through it unchanged"),
+        "{said:?}"
+    );
+}
+
+#[test]
+fn a_crash_of_the_program_of_a_vst3_instrument_while_it_plays_is_left_out_of_that_play_and_said_and_the_next_one_is_made_again()
+ {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_vst3_kind_of(vst3_plugins::INSTRUMENT);
+    let instrument = an_effect(kind, kind.default_values(), None);
+    check_that_a_crash_while_it_plays_leaves_the_plugin_out_of_that_play_and_says_so_and_the_next_play_makes_it_again(
+        &instrument,
+        InAProcessOfItsOwn::Nothing,
+    );
+}
+
+#[test]
+fn a_crash_of_the_program_of_a_vst3_instrument_while_it_is_made_leaves_the_sound_as_it_was_and_says_so_in_these_words()
+{
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_vst3_kind_of(vst3_plugins::INSTRUMENT);
+    let instrument = an_effect(kind, kind.default_values(), None);
+    check_that_a_crash_while_it_is_made_leaves_the_sound_as_it_was_and_says_so_in_these_words(
+        &instrument,
+        InAProcessOfItsOwn::Nothing,
+    );
+}
+
+#[test]
+fn a_vst3_instrument_whose_program_crashes_now_and_then_is_heard_as_if_it_did_not_and_the_person_is_told_each_time() {
+    let _alone = the_installed_plugins_to_myself();
+    let kind = the_vst3_kind_of(vst3_plugins::INSTRUMENT);
+    let instrument = an_effect(kind, kind.default_values(), None);
+    check_that_an_instrument_whose_program_crashes_now_and_then_is_heard_as_if_it_did_not(
+        &instrument,
+        InAProcessOfItsOwn::Nothing,
+    );
+}
+
+/// Real VST3 modules through the host and the program: **ignored**, it needs a folder with real `.vst3` modules (`FFRS_VST3_MODULES`), which CI does not have. Each effect is played on a
+/// sound that passes by, and each instrument on notes; the test asks that the program did not end, that the sound is made of numbers, and that the plugin changed the sound (an
+/// effect) or added to it (an instrument). It prints what it heard and how long a block of 512 samples took.
+/// `FFRS_VST3_MODULES=E:/s/sffrs/vst3_real cargo test --test plugin_host_processes real_vst3 -- --ignored --nocapture`
+#[test]
+#[ignore = "needs real VST3 modules (FFRS_VST3_MODULES)"]
+fn real_vst3_plugins_are_heard_through_the_host_in_a_program() {
+    let _alone = the_installed_plugins_to_myself();
+    let folder =
+        PathBuf::from(std::env::var("FFRS_VST3_MODULES").expect("FFRS_VST3_MODULES names a folder with .vst3 modules"));
+    let mut scanner = fastforwardrs::plugin_scan::PluginScanner::new(
+        PathBuf::from(env!("CARGO_BIN_EXE_fastforwardrs-plugin-scan")),
+        fastforwardrs::plugin_scan::ScanCache::in_memory(),
+    )
+    .with_time_limit(Duration::from_secs(60));
+    let scan = scanner.scan_folders(&[folder]);
+    assert_eq!(scan.problems, Vec::<String>::new());
+    let effects: Vec<InstalledPlugin> = fastforwardrs::plugin_scan::plugins_found_in(&scan.libraries)
+        .effects
+        .into_iter()
+        .filter(|effect| effect.descriptor.key.starts_with("vst3:"))
+        .collect();
+    assert!(!effects.is_empty(), "the folder has VST3 plugins");
+    set_installed_plugins(effects.clone());
+    let host = a_host_with(InAProcessOfItsOwn::Nothing);
+    let mut heard_something = 0;
+    for installed in &effects {
+        let kind = EffectKind::installed_plugin_kinds()
+            .into_iter()
+            .find(|kind| kind.key() == &*installed.descriptor.key)
+            .unwrap();
+        let effect = an_effect(kind, kind.default_values(), None);
+        let notes = Notes::default();
+        let began = std::time::Instant::now();
+        let Some(mut processor) = the_processor(&host, &effect, &notes) else {
+            panic!("{}: not run: {:?}", installed.descriptor.name, the_notes_of(&notes));
+        };
+        let made_in = began.elapsed();
+        let is_an_instrument = installed.descriptor.makes_sound_from_notes;
+        let blocks: Vec<(usize, Vec<NoteEvent>)> = (0..60)
+            .map(|number| {
+                let notes = match number {
+                    2 => vec![on(0, 60, 0.8), on(100, 67, 0.8)],
+                    30 => vec![off(0, 60), off(0, 67)],
+                    _ => Vec::new(),
+                };
+                (512, if is_an_instrument { notes } else { Vec::new() })
+            })
+            .collect();
+        let began = std::time::Instant::now();
+        let sound = play(&mut *processor, &blocks);
+        let per_block = began.elapsed() / 60;
+        let mut changed = 0.0_f64;
+        let mut peak = 0.0_f32;
+        for (number, block) in sound.iter().enumerate() {
+            let passing = the_sound_passing_by(number, 512);
+            for (heard, was) in block.0.iter().zip(&passing.0) {
+                let heard = f32::from_bits(*heard);
+                assert!(
+                    heard.is_finite(),
+                    "{}: a sound that is not a number",
+                    installed.descriptor.name
+                );
+                peak = peak.max(heard.abs());
+                changed += f64::from((heard - was).abs());
+            }
+        }
+        println!(
+            "{} ({} values): made in {made_in:?}, {per_block:?} a block, peak {peak:.3}, the sound is changed by {changed:.1} in all, said {:?}",
+            installed.descriptor.name,
+            installed.descriptor.parameters.len(),
+            the_notes_of(&notes),
+        );
+        if changed > 1.0 {
+            heard_something += 1;
+        } else {
+            // (Surge XT Effects, with no state, has no effect in its slots, I believe, and passes the sound as it is: that is not a failure of the host.)
+            assert!(
+                installed.descriptor.name.contains("effects"),
+                "{}: the sound is not changed at all",
+                installed.descriptor.name
+            );
+        }
+    }
+    assert!(
+        heard_something + 1 >= effects.len(),
+        "all but one plugin changed or added to the sound"
     );
 }

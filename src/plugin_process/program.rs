@@ -19,7 +19,7 @@ use super::protocol::{
     put_samples, read_frame, take_samples, write_frame,
 };
 use crate::plugin_host::{
-    ClapCopy, ClapMaker, LadspaCopy, Lives, Lv2Copy, MOST_FRAMES_OF_AN_LV2_PLUGIN, PluginInstance,
+    ClapCopy, ClapMaker, LadspaCopy, Lives, Lv2Copy, MOST_FRAMES_OF_AN_LV2_PLUGIN, PluginInstance, Vst3Copy, Vst3Maker,
 };
 use crate::sound_engine::SAMPLE_RATE;
 
@@ -166,6 +166,7 @@ pub fn make_the_copy(make: &Make, state: Option<Arc<[u8]>>) -> Result<(Box<dyn P
         Address::Clap { id } => make_a_clap_copy(make, id, state)?,
         Address::Lv2 { uri } => make_an_lv2_copy(make, uri, state.as_deref())?,
         Address::Ladspa { index } => (make_a_ladspa_copy(make, *index)?, None),
+        Address::Vst3 { class_id } => make_a_vst3_copy(make, *class_id, state)?,
     };
     // (What the plugin asked for while it was made is done before anyone is told: the editor's first question is answered with it.)
     let done_between_blocks = what_was_done_by(copy.as_mut());
@@ -234,6 +235,36 @@ fn make_an_lv2_copy(
         .and_then(|bytes| instance.restore_state(bytes).err())
         .map(|error| error.to_string());
     Ok((Box::new(Lv2Copy(instance)), state_not_taken))
+}
+
+fn make_a_vst3_copy(
+    make: &Make,
+    class_id: vst3_host::ClassId,
+    state: Option<Arc<[u8]>>,
+) -> Result<(Box<dyn PluginInstance>, Option<String>), Refused> {
+    let module =
+        vst3_host::Module::open(&make.library).map_err(|error| Refused::CouldNotBeLoaded(error.to_string()))?;
+    if !module
+        .classes()
+        .iter()
+        .any(|class| class.id == class_id && class.is_a_plugin())
+    {
+        return Err(Refused::CouldNotBeLoaded(format!(
+            "the module does not have a plugin with the id {class_id} any more"
+        )));
+    }
+    let maker = Vst3Maker {
+        module,
+        class_id,
+        state,
+    };
+    let (instance, state_not_taken) = maker
+        .make_and_say_if_the_state_was_not_taken()
+        .map_err(|error| Refused::CouldNotBeMade(error.to_string()))?;
+    if !make.scanned.is_this_vst3_plugin(&instance) {
+        return Err(Refused::NotWhatWasScanned);
+    }
+    Ok((Box::new(Vst3Copy::new(instance, maker)), state_not_taken))
 }
 
 fn make_a_ladspa_copy(make: &Make, index: usize) -> Result<Box<dyn PluginInstance>, Refused> {

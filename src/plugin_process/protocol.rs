@@ -152,16 +152,26 @@ pub struct Hello {
 /// Which plugin of a library, in the way the format says.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Address {
-    Ladspa { index: usize },
-    Clap { id: String },
-    Lv2 { uri: String },
+    Ladspa {
+        index: usize,
+    },
+    Clap {
+        id: String,
+    },
+    Lv2 {
+        uri: String,
+    },
+    /// A class of a VST3 module, by the four numbers of its id (the same on every system).
+    Vst3 {
+        class_id: vst3_host::ClassId,
+    },
 }
 
 /// What the editor asks the program to make. The plugin's state, if the project has one, is the raw rest of the frame.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Make {
     pub address: Address,
-    /// A library file, or an LV2 bundle's folder.
+    /// A library file, an LV2 bundle's folder, or a VST3 module (a folder or a file).
     pub library: PathBuf,
     /// What the scan said the plugin is: the copy that is made must be that.
     pub scanned: WhatWasScanned,

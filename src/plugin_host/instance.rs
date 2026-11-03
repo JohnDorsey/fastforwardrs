@@ -205,7 +205,7 @@ fn run_a_silent_block_so_that_the_state_is_applied_before_any_note(instance: &mu
     let _ = instance.run_with_notes(&mut inputs, &mut outputs, &[], &[]);
 }
 
-/// How many times a copy of a CLAP plugin is made again because it asks to be: a plugin that asks every time it is made would be made again at every block for ever, and the
+/// How many times a copy of a CLAP or VST3 plugin is made again because it asks to be: a plugin that asks every time it is made would be made again at every block for ever, and the
 /// sound would be a gap after a gap.
 pub const MOST_RESTARTS_OF_A_COPY: usize = 5;
 

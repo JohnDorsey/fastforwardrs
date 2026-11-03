@@ -174,6 +174,17 @@ fn buses_of(component: &ComPtr<IComponent>, media: MediaTypes, direction: BusDir
         .collect()
 }
 
+/// The default of a parameter, as a normalised number: what the plugin declares, **unless it declares 0 and its controller's value is not 0**, and then that value. A plugin that does not
+/// declare defaults (the VST3 build of Surge XT says 0 for each of its 2,855 values) has its defaults taken from the values its controller has when the plugin is made (after it has been
+/// given the state of its component), which are the plugin's own: a host that takes 0 for them pushes 0 into every value and silences the plugin.
+pub(crate) fn default_of_a_parameter(declared: f64, in_the_controller_now: f64) -> f64 {
+    if declared == 0.0 && in_the_controller_now.is_finite() && in_the_controller_now != 0.0 {
+        in_the_controller_now.clamp(0.0, 1.0)
+    } else {
+        declared
+    }
+}
+
 fn parameters_of(controller: &ComPtr<IEditController>) -> Vec<ParameterDescription> {
     // SAFETY: the controller is a live COM object; counting its parameters has no pointers.
     let count = unsafe { controller.getParameterCount() }.max(0);
@@ -193,6 +204,10 @@ fn parameters_of(controller: &ComPtr<IEditController>) -> Vec<ParameterDescripti
                 controller.normalizedParamToPlain(info.id, 1.0),
             )
         };
+        // SAFETY: the controller is live; the call has numbers only.
+        let default_normalized = default_of_a_parameter(info.defaultNormalizedValue, unsafe {
+            controller.getParamNormalized(info.id)
+        });
         let texts = if info.stepCount > 0 && info.stepCount <= MOST_STEPS_WITH_TEXTS {
             (0..=info.stepCount)
                 .map(|step| {
@@ -221,9 +236,9 @@ fn parameters_of(controller: &ComPtr<IEditController>) -> Vec<ParameterDescripti
             short_title: wide_text_of(&info.shortTitle),
             units: wide_text_of(&info.units),
             step_count: info.stepCount,
-            default_normalized: info.defaultNormalizedValue,
+            default_normalized,
             // SAFETY: the controller is live; converting a value is a call with numbers only.
-            default_plain: unsafe { controller.normalizedParamToPlain(info.id, info.defaultNormalizedValue) },
+            default_plain: unsafe { controller.normalizedParamToPlain(info.id, default_normalized) },
             plain_minimum,
             plain_maximum,
             texts,
@@ -305,6 +320,9 @@ impl Instance {
                     b.connect(a.as_ptr());
                 }
             }
+        }
+        if let Some(controller) = &controller {
+            give_the_controller_the_state_of_the_component(&component, controller);
         }
         let mapping = controller
             .as_ref()
@@ -714,7 +732,7 @@ impl Instance {
             .collect()
     }
 
-    /// Makes the plugin forget what it has heard (the values it was given are kept in the plugin).
+    /// Makes the plugin forget what it has heard. **The values it was given are kept**, those it has had in a block and those that wait for the next one.
     pub fn reset(&mut self) {
         // SAFETY: the processor and the component are live; the calls have numbers only. (Switching a plugin off and on is how VST3 has a host make it forget.)
         unsafe {
@@ -723,7 +741,6 @@ impl Instance {
             self.component.setActive(1);
             self.processor.setProcessing(1);
         }
-        self.pending.clear();
         self.time_in_samples = 0;
     }
 
@@ -794,6 +811,26 @@ impl Instance {
         }
         Ok(())
     }
+}
+
+/// Gives the controller the state that the component has as it is made: **what a VST3 host does with a plugin it has just made**, so that the values the controller reports are the
+/// component's. Without it the controller of Surge XT says that each of its 2,855 values is 0, and a host that gives those values back to the plugin silences it. A component that has
+/// no state to give, or a controller that does not take it, is left as it is.
+fn give_the_controller_the_state_of_the_component(
+    component: &ComPtr<IComponent>,
+    controller: &ComPtr<IEditController>,
+) {
+    let stream = MemoryStream::new(Vec::new());
+    let Some(pointer) = stream.to_com_ptr::<IBStream>() else {
+        return;
+    };
+    // SAFETY: the component is live; the stream lives through the call.
+    if unsafe { component.getState(pointer.as_ptr()) } != kResultOk {
+        return;
+    }
+    stream.rewind();
+    // SAFETY: the controller is live; the stream lives through the call. (A controller that does not take it says so; that is not a failure.)
+    unsafe { controller.setComponentState(pointer.as_ptr()) };
 }
 
 /// Ends a component that was initialized and will not be used, and its controller if it is a class of its own.

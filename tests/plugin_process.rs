@@ -15,15 +15,16 @@ use std::time::{Duration, Instant};
 
 use clap_test_plugins as clap_plugins;
 use fastforwardrs::plugin_host::{
-    BetweenBlocks, ClapCopy, ClapMaker, LadspaCopy, Lives, Lv2Copy, PluginInstance, WhatWasScanned,
+    BetweenBlocks, ClapCopy, ClapMaker, LadspaCopy, Lives, Lv2Copy, PluginInstance, Vst3Copy, Vst3Maker, WhatWasScanned,
 };
 use fastforwardrs::plugin_process::protocol::{
     Address, FrameKind, Hello, Make, Refused, TOKEN_VARIABLE, read_frame, write_frame,
 };
 use fastforwardrs::plugin_process::remote::{Launcher, Limits, NotStarted, RemoteCopy};
-use fastforwardrs::plugin_scan::{effect_of_a_plugin, effect_of_an_lv2_plugin};
+use fastforwardrs::plugin_scan::{effect_of_a_plugin, effect_of_a_vst3_plugin, effect_of_an_lv2_plugin};
 use fastforwardrs::project::PluginAddress;
 use fastforwardrs::sound_engine::{NoteEvent, NoteEventKind};
+use vst3_test_plugins as vst3_plugins;
 
 fn the_program() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_fastforwardrs-plugin-process"))
@@ -1235,6 +1236,789 @@ fn a_state_and_a_note_in_the_first_block_make_the_same_sound_in_the_program_and_
         0.5,
         "no state, no edits, and the sound is half as loud"
     );
+}
+
+// --- VST3: the same in the program ---
+
+struct Vst3Plugin {
+    /// A module: a library file, or a `.vst3` folder.
+    library: PathBuf,
+    class_id: vst3_host::ClassId,
+    scanned: WhatWasScanned,
+}
+
+fn the_class_id(numbers: [u32; 4]) -> vst3_host::ClassId {
+    vst3_host::ClassId::from_numbers(numbers[0], numbers[1], numbers[2], numbers[3])
+}
+
+fn a_vst3_plugin(numbers: [u32; 4], inputs: usize, outputs: usize, value_handles: &[u32]) -> Vst3Plugin {
+    Vst3Plugin {
+        library: vst3_plugins::library_file_for_tests(),
+        class_id: the_class_id(numbers),
+        scanned: WhatWasScanned {
+            audio_inputs: inputs,
+            audio_outputs: outputs,
+            value_handles: value_handles.to_vec(),
+            ladspa_label: None,
+        },
+    }
+}
+
+impl Subject for Vst3Plugin {
+    fn in_this_process(&self, state: Option<&[u8]>) -> (Box<dyn PluginInstance>, Option<String>) {
+        let module = vst3_host::Module::open(&self.library).expect("the test module is loaded");
+        let maker = Vst3Maker {
+            module,
+            class_id: self.class_id,
+            state: state.map(Arc::from),
+        };
+        let (instance, state_not_taken) = maker
+            .make_and_say_if_the_state_was_not_taken()
+            .expect("the test plugin is made");
+        (Box::new(Vst3Copy::new(instance, maker)), state_not_taken)
+    }
+
+    fn what_to_make(&self, has_state: bool) -> Make {
+        Make {
+            address: Address::Vst3 {
+                class_id: self.class_id,
+            },
+            library: self.library.clone(),
+            scanned: self.scanned.clone(),
+            has_state,
+        }
+    }
+}
+
+/// The values of the effect `GAIN` of the test plugins, in the order the scan lists them: the gain, the mode (a list of three) and the bypass.
+const THE_VALUES_OF_THE_GAIN: [u32; 3] = [
+    vst3_plugins::PARAMETER_GAIN,
+    vst3_plugins::PARAMETER_MODE,
+    vst3_plugins::PARAMETER_BYPASS,
+];
+
+fn a_vst3_gain() -> Vst3Plugin {
+    a_vst3_plugin(vst3_plugins::GAIN, 2, 2, &THE_VALUES_OF_THE_GAIN)
+}
+
+fn a_vst3_instrument() -> Vst3Plugin {
+    a_vst3_plugin(
+        vst3_plugins::INSTRUMENT,
+        0,
+        2,
+        &[
+            vst3_plugins::PARAMETER_BEND,
+            vst3_plugins::PARAMETER_WHEEL,
+            vst3_plugins::PARAMETER_ALL_NOTES_OFF,
+        ],
+    )
+}
+
+/// The state of the gain effect that a project keeps: the component's own bytes (the gain, the mode, the secret and the bypass, each a normalised number) and what its controller is
+/// told (the controller of the test plugin does something when it hears one of a few words).
+fn the_state_of_a_gain(normalized_gain: f64, controller_hears: &[u8]) -> Vec<u8> {
+    let mut component = b"TGN1".to_vec();
+    for value in [normalized_gain, 0.0, 0.0, 0.0] {
+        component.extend_from_slice(&value.to_le_bytes());
+    }
+    vst3_host::encode_state(&component, controller_hears)
+}
+
+fn controller_one(time: u32, value: u8) -> NoteEvent {
+    a_note(
+        time,
+        NoteEventKind::Controller {
+            channel: 0,
+            number: 1,
+            value,
+        },
+    )
+}
+
+fn pitch_bend(time: u32, value: u16) -> NoteEvent {
+    a_note(time, NoteEventKind::PitchBend { channel: 0, value })
+}
+
+fn close(heard: f32, wanted: f32) {
+    assert!((heard - wanted).abs() < 1e-5, "{heard} is not {wanted}");
+}
+
+#[test]
+fn a_vst3_instrument_plays_the_same_notes_in_the_program_as_in_this_process_through_holds_releases_resets_values_controllers_and_the_pitch_wheel()
+ {
+    let instrument = a_vst3_instrument();
+    let script = [
+        block_with_notes(512, 2, vec![on(10, 60, 0.5), on(200, 72, 1.0)]),
+        Step::Value {
+            handle: vst3_plugins::PARAMETER_BEND,
+            value: 0.75,
+            at_sample: 100,
+        },
+        block_with_notes(512, 2, Vec::new()),
+        // The wheel (controller 1) and the pitch wheel reach the plugin as the parameters its controller maps them to.
+        block_with_notes(512, 2, vec![controller_one(5, 127), pitch_bend(6, 16_383)]),
+        block_with_notes(512, 2, vec![off(50, 60)]),
+        block_with_notes(
+            512,
+            2,
+            vec![
+                NoteEvent {
+                    time: 3,
+                    what: NoteEventKind::AllOff,
+                },
+                on(4, 40, 0.75),
+            ],
+        ),
+        Step::Reset,
+        block_with_notes(64, 2, vec![on(0, 48, 0.25)]),
+        block_with_notes(64, 2, Vec::new()),
+    ];
+
+    let seen = the_same_in_the_program(&instrument, None, &script);
+
+    // (Not silence against silence: the sound is the sum over the notes that are held of velocity * key / 100, plus half of what the pitch wheel is away from the middle, plus a quarter of
+    // the wheel while a note is held.)
+    let sound = |number: usize| the_sound(&seen[number]).remove(0);
+    close(sound(0)[20], 0.3);
+    close(sound(0)[250], 0.3 + 0.72);
+    close(sound(1)[50], 0.3 + 0.72);
+    close(sound(1)[150], 0.3 + 0.72 + 0.125);
+    close(sound(2)[10], 0.3 + 0.72 + 0.25 + 0.25);
+    close(sound(3)[100], 0.72 + 0.25 + 0.25);
+    // All off silences the note of key 72 and the new note of key 40 is the only one held.
+    close(sound(4)[2], 0.72 + 0.25 + 0.25);
+    close(sound(4)[10], 0.3 + 0.25 + 0.25);
+    // A reset makes the plugin forget its voices and keeps its values.
+    close(sound(5)[0], 0.12 + 0.25 + 0.25);
+    close(sound(6)[10], 0.12 + 0.25 + 0.25);
+}
+
+#[test]
+fn a_vst3_effect_gives_the_same_sound_in_the_program_as_in_this_process_with_values_at_samples_a_list_and_a_switch() {
+    let gain = a_vst3_gain();
+    let script = [
+        block(512, 2, 2),
+        Step::Value {
+            handle: vst3_plugins::PARAMETER_GAIN,
+            value: 0.25,
+            at_sample: 0,
+        },
+        Step::Value {
+            handle: vst3_plugins::PARAMETER_GAIN,
+            value: 3.0,
+            at_sample: 200,
+        },
+        block(512, 2, 2),
+        Step::Value {
+            handle: vst3_plugins::PARAMETER_MODE,
+            value: 1.0,
+            at_sample: 0,
+        },
+        block(100, 2, 2),
+        Step::Value {
+            handle: vst3_plugins::PARAMETER_BYPASS,
+            value: 1.0,
+            at_sample: 0,
+        },
+        block(512, 2, 2),
+        Step::Reset,
+        block(512, 2, 2),
+    ];
+
+    let seen = the_same_in_the_program(&gain, None, &script);
+
+    // (The numbers of the blocks in the script, which the input is made from: 0, 3, 5, 7 and 9.)
+    let (first, second, third, fourth) = (
+        the_sound(&seen[0]),
+        the_sound(&seen[1]),
+        the_sound(&seen[2]),
+        the_sound(&seen[3]),
+    );
+    assert_eq!(first[0], input_of(0, 512, 0), "the default gain is 1");
+    let input = input_of(0, 512, 3);
+    assert_eq!(second[0][199], input[199] * 0.25);
+    assert_eq!(second[0][200], input[200] * 3.0);
+    let input = input_of(1, 100, 5);
+    assert_eq!(third[1][7], input[7] * 6.0, "the gain 3 and the mode Double");
+    assert_eq!(fourth[0], input_of(0, 512, 7), "bypassed, the sound passes as it is");
+}
+
+#[test]
+fn a_vst3_effect_with_a_latency_says_it_and_does_the_same_in_the_program() {
+    let latency = a_vst3_plugin(vst3_plugins::LATENCY, 2, 2, &[]);
+
+    let seen = the_same_in_the_program(&latency, None, &[block(512, 2, 2), block(512, 2, 2)]);
+
+    assert_eq!(seen[0].latency, vst3_plugins::LATENCY_SAMPLES);
+    let (first, second) = (the_sound(&seen[0]), the_sound(&seen[1]));
+    let input = input_of(0, 512, 0);
+    assert_eq!(first[0][0], 0.0);
+    assert_eq!(first[0][vst3_plugins::LATENCY_SAMPLES], input[0]);
+    assert_eq!(
+        second[0][0],
+        input[512 - vst3_plugins::LATENCY_SAMPLES],
+        "the delay goes on from one block into the next"
+    );
+}
+
+#[test]
+fn a_vst3_effect_of_one_class_and_one_with_a_side_chain_before_its_main_input_are_the_same_in_the_program() {
+    let single = a_vst3_plugin(vst3_plugins::SINGLE, 2, 2, &[vst3_plugins::PARAMETER_GAIN]);
+    let seen = the_same_in_the_program(
+        &single,
+        None,
+        &[
+            Step::Value {
+                handle: vst3_plugins::PARAMETER_GAIN,
+                value: 2.0,
+                at_sample: 0,
+            },
+            block(64, 2, 2),
+        ],
+    );
+    assert_eq!(the_sound(&seen[0])[0][9], input_of(0, 64, 1)[9] * 2.0);
+
+    let side_chain = a_vst3_plugin(vst3_plugins::SIDE_CHAIN_EFFECT, 2, 2, &[]);
+    let seen = the_same_in_the_program(&side_chain, None, &[block(512, 2, 2), block(64, 2, 2)]);
+    // (The side chain is first and is left off; the sound is the main input, which is second, times a half.)
+    assert_eq!(the_sound(&seen[0])[0][9], input_of(0, 512, 0)[9] * 0.5);
+}
+
+#[test]
+fn a_vst3_instrument_whose_only_audio_input_is_a_side_chain_plays_the_same_in_the_program() {
+    let side_chain = a_vst3_plugin(vst3_plugins::SIDE_CHAIN_INSTRUMENT, 0, 2, &[]);
+
+    let seen = the_same_in_the_program(
+        &side_chain,
+        None,
+        &[
+            block_with_notes(512, 2, vec![on(0, 64, 0.5), on(100, 67, 0.5), off(300, 64)]),
+            block_with_notes(512, 2, Vec::new()),
+        ],
+    );
+
+    close(the_sound(&seen[0])[0][10], 0.32);
+    close(the_sound(&seen[1])[0][10], 0.335);
+}
+
+#[test]
+fn a_vst3_plugin_that_says_it_could_not_run_says_the_same_words_from_the_program() {
+    let fails = a_vst3_plugin(vst3_plugins::FAILS_TO_PROCESS, 2, 2, &THE_VALUES_OF_THE_GAIN);
+
+    let seen = the_same_in_the_program(&fails, None, &[block(512, 2, 2), block(512, 2, 2)]);
+
+    let error = seen[0].sound.as_ref().unwrap_err();
+    assert!(error.contains("process said it failed"), "{error}");
+}
+
+#[test]
+fn the_state_of_a_vst3_plugin_reaches_the_copy_in_the_program_and_what_is_said_of_a_state_it_cannot_read_is_the_same() {
+    let gain = a_vst3_gain();
+    let script = [block(512, 2, 2)];
+
+    let plain = the_same_in_the_program(&gain, None, &script);
+    // A state with a gain of 2 (a normalised number of a half).
+    let state_with_a_gain_of_two = the_state_of_a_gain(0.5, &[]);
+    let with_a_gain_of_two = the_same_in_the_program(&gain, Some(&state_with_a_gain_of_two), &script);
+    let (_, said_here) = gain.in_this_process(Some(&state_with_a_gain_of_two));
+
+    assert_eq!(the_sound(&plain[0])[0][5], input_of(0, 512, 0)[5]);
+    assert_eq!(the_sound(&with_a_gain_of_two[0])[0][5], input_of(0, 512, 0)[5] * 2.0);
+    assert!(said_here.is_none(), "the plugin took its own state");
+    // Bytes that are not a state of this host's making, and no bytes at all, are not taken, and the plugin goes on as it was.
+    for bytes in [&[0xFF_u8, 0xFE, 0xFD][..], &[][..]] {
+        let (_, said) = gain.in_this_process(Some(bytes));
+        assert!(said.is_some(), "{bytes:?}: the host said it could not take it");
+        let unreadable = the_same_in_the_program(&gain, Some(bytes), &script);
+        assert_eq!(unreadable, plain, "{bytes:?}: the plugin goes on as it was");
+    }
+    // A state that has the right shape and that the component cannot read is not taken either.
+    let not_a_state_of_the_plugin = vst3_host::encode_state(b"not a state", &[]);
+    let (_, said) = gain.in_this_process(Some(&not_a_state_of_the_plugin));
+    assert!(said.is_some_and(|words| words.contains("did not take the state")));
+    the_same_in_the_program(&gain, Some(&not_a_state_of_the_plugin), &script);
+}
+
+#[test]
+fn what_a_vst3_plugin_edits_by_itself_reaches_its_next_block_in_the_program_and_is_not_said_to_be_a_change_of_latency()
+{
+    // (The controller is told "EDIT": it does what a window does when a hand turns the gain to three quarters, and says that its latency changed, which is the same number.)
+    let gain = a_vst3_gain();
+
+    let state = the_state_of_a_gain(0.25, b"EDIT");
+
+    let seen = the_same_in_the_program(&gain, Some(&state), &[block(512, 2, 2), block(512, 2, 2)]);
+
+    assert_eq!(the_sound(&seen[0])[0][5], input_of(0, 512, 0)[5] * 3.0);
+    assert_eq!(
+        seen.iter()
+            .map(|block| block.between_blocks.note.clone())
+            .collect::<Vec<_>>(),
+        vec![None, None],
+        "a latency that did not change is not told"
+    );
+    assert!(seen.iter().all(|block| !block.between_blocks.was_restarted));
+}
+
+#[test]
+fn a_vst3_plugin_that_asks_to_be_made_again_is_made_again_in_the_program_as_often_as_in_this_process_and_then_it_is_said_once_that_it_is_not()
+ {
+    let gain = a_vst3_gain();
+    let script: Vec<Step> = std::iter::repeat_n(block(512, 2, 2), 9).collect();
+
+    for (asks, restarts) in [(&b"RELOAD"[..], 5), (&b"IO"[..], 5), (&b"VALUES"[..], 0)] {
+        let state = the_state_of_a_gain(0.25, asks);
+        let seen = the_same_in_the_program(&gain, Some(&state), &script);
+
+        // (Not a test of nothing against nothing: it was made again at each of the first five blocks and then not any more.)
+        let made_again = seen.iter().filter(|block| block.between_blocks.was_restarted).count();
+        assert_eq!(made_again, restarts, "{}", String::from_utf8_lossy(asks));
+        let words: Vec<&str> = seen
+            .iter()
+            .filter_map(|block| block.between_blocks.note.as_deref())
+            .collect();
+        if restarts == 0 {
+            assert!(words.is_empty(), "{words:?}");
+        } else {
+            assert_eq!(words.len(), 1, "{words:?}");
+            assert!(
+                words[0].contains("asked to be made again more than 5 times"),
+                "{words:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn controllers_that_a_vst3_plugin_has_no_parameter_for_are_left_out_and_it_is_said_once_and_the_same_in_the_program() {
+    // (The test instrument maps the pitch wheel, controller 1 and controller 123; the pedal, 64, it has no parameter for.)
+    let instrument = a_vst3_instrument();
+    let pedal = a_note(
+        5,
+        NoteEventKind::Controller {
+            channel: 0,
+            number: 64,
+            value: 127,
+        },
+    );
+
+    let seen = the_same_in_the_program(
+        &instrument,
+        None,
+        &[
+            block_with_notes(512, 2, vec![on(0, 60, 0.5), pedal]),
+            block_with_notes(512, 2, vec![pedal]),
+            block_with_notes(512, 2, vec![pedal]),
+        ],
+    );
+
+    let words: Vec<Option<&str>> = seen.iter().map(|block| block.between_blocks.note.as_deref()).collect();
+    assert_eq!(words[0], None);
+    assert!(
+        words[1].is_some_and(|words| words.contains("no parameter for some of the controllers")),
+        "{words:?}"
+    );
+    assert_eq!(words[2], None, "once, and not at every block");
+    close(the_sound(&seen[0])[0][20], 0.3);
+}
+
+#[test]
+fn a_vst3_module_that_is_a_folder_is_made_in_the_program_and_makes_the_same_sound() {
+    let folder = tempfile::tempdir().unwrap();
+    let mut gain = a_vst3_gain();
+    gain.library = vst3_plugins::write_module(folder.path());
+    assert!(gain.library.is_dir(), "a module of the usual shape: a folder");
+
+    let seen = the_same_in_the_program(
+        &gain,
+        None,
+        &[
+            Step::Value {
+                handle: vst3_plugins::PARAMETER_GAIN,
+                value: 2.0,
+                at_sample: 0,
+            },
+            block(512, 2, 2),
+        ],
+    );
+
+    assert_eq!(the_sound(&seen[0])[0][5], input_of(0, 512, 1)[5] * 2.0);
+}
+
+#[test]
+fn every_vst3_class_that_the_scan_makes_an_effect_of_is_accepted_by_the_program_as_what_was_scanned() {
+    // (The scan and the program have to agree about what a plugin is: the channels of its main buses, and a parameter for each value.)
+    let module = vst3_plugins::library_file_for_tests();
+    let scan = vst3_host::scan_module(&module, &mut |_| {}).expect("the test module is scanned");
+    let mut accepted = Vec::new();
+    for scanned in &scan.classes {
+        let Ok(installed) = effect_of_a_vst3_plugin(&module, scanned) else {
+            continue;
+        };
+        let PluginAddress::Vst3 { class_id } = installed.address else {
+            panic!("a VST3 plugin has a VST3 address");
+        };
+        let plugin = Vst3Plugin {
+            library: module.clone(),
+            class_id,
+            scanned: WhatWasScanned::of(&installed),
+        };
+        let (copy, _) = started(&launcher(), &plugin, None)
+            .unwrap_or_else(|error| panic!("{}: {error}", installed.descriptor.name));
+        drop(copy);
+        accepted.push(installed.descriptor.name.to_string());
+    }
+    accepted.sort();
+    assert_eq!(
+        accepted.len(),
+        7,
+        "the gain, the gain without defaults, the latency, the instrument, the one class, and the two with a side chain: {accepted:?}"
+    );
+}
+
+#[test]
+fn a_vst3_plugin_that_is_not_there_is_not_what_was_scanned_or_cannot_be_made_is_refused_with_the_reason() {
+    let refused = |subject: &Vst3Plugin| match started(&launcher(), subject, None) {
+        Err(NotStarted::Refused(refused)) => refused,
+        other => panic!("{:?}", other.map(|_| ())),
+    };
+    let folder = tempfile::tempdir().unwrap();
+
+    let mut no_such_module = a_vst3_gain();
+    no_such_module.library = PathBuf::from("/there/is/no/such/module.vst3");
+    assert!(matches!(refused(&no_such_module), Refused::CouldNotBeLoaded(_)));
+
+    let mut not_a_library = a_vst3_gain();
+    not_a_library.library = folder.path().join("text.vst3");
+    std::fs::write(&not_a_library.library, "this is not a library").unwrap();
+    assert!(matches!(refused(&not_a_library), Refused::CouldNotBeLoaded(_)));
+
+    // A class that is not in the module, one that is not a plugin (a controller, and a class for old hosts) are not plugins of the module.
+    for (what, numbers) in [
+        ("an id the module does not have", [1, 2, 3, 4]),
+        ("the class of a controller", vst3_plugins::GAIN_CONTROLLER),
+        ("a class for old hosts", vst3_plugins::COMPATIBILITY),
+    ] {
+        let Refused::CouldNotBeLoaded(why) = refused(&a_vst3_plugin(numbers, 2, 2, &[])) else {
+            panic!("{what}");
+        };
+        assert!(why.contains("does not have a plugin"), "{what}: {why}");
+    }
+
+    let Refused::CouldNotBeMade(why) = refused(&a_vst3_plugin(
+        vst3_plugins::FAILS_TO_INITIALIZE,
+        2,
+        2,
+        &THE_VALUES_OF_THE_GAIN,
+    )) else {
+        panic!("a plugin that would not initialize");
+    };
+    assert!(why.contains("would not initialize"), "{why}");
+    let Refused::CouldNotBeMade(why) = refused(&a_vst3_plugin(
+        vst3_plugins::FAILS_TO_ACTIVATE,
+        2,
+        2,
+        &THE_VALUES_OF_THE_GAIN,
+    )) else {
+        panic!("a plugin that would not become active");
+    };
+    assert!(why.contains("would not become active"), "{why}");
+
+    for (what, inputs, outputs, handles) in [
+        ("other inputs", 1, 2, &THE_VALUES_OF_THE_GAIN[..]),
+        ("other outputs", 2, 1, &THE_VALUES_OF_THE_GAIN[..]),
+        ("a value it has no parameter for", 2, 2, &[1, 2, 5, 99][..]),
+    ] {
+        assert_eq!(
+            refused(&a_vst3_plugin(vst3_plugins::GAIN, inputs, outputs, handles)),
+            Refused::NotWhatWasScanned,
+            "{what}"
+        );
+    }
+    // (An instrument is scanned with no inputs: a copy with a main input is another plugin.)
+    assert_eq!(
+        refused(&a_vst3_plugin(vst3_plugins::INSTRUMENT, 2, 2, &[])),
+        Refused::NotWhatWasScanned
+    );
+}
+
+#[test]
+fn a_big_state_of_a_vst3_plugin_is_sent_whole() {
+    // (The state of the instrument with a side chain is text, of which `edits=N` is what it keeps, so the edits are at the far end of 20 MiB of spaces.)
+    let instrument = a_vst3_plugin(vst3_plugins::SIDE_CHAIN_INSTRUMENT, 0, 2, &[]);
+    let mut text = vec![b' '; 20 * 1024 * 1024];
+    text.extend_from_slice(b"edits=2");
+    let state = vst3_host::encode_state(&text, &[]);
+    let script = [block_with_notes(64, 2, vec![on(0, 50, 1.0)])];
+
+    let with_edits = the_same_in_the_program(&instrument, Some(&state), &script);
+
+    // Key 50 at full velocity is 0.5; two edits make it half as loud twice.
+    close(the_sound(&with_edits[0])[0][10], 0.125);
+}
+
+#[test]
+fn a_note_in_the_first_block_of_a_vst3_plugin_that_applies_its_state_in_the_audio_thread_does_not_end_the_program() {
+    // (The test instrument made like Surge XT applies the state it is given in the first block that follows, and a note in that block makes its `process` fail; Surge XT as a VST3 hangs
+    // like that for some patches. The host runs a silent block first, in this process and in the program.)
+    let like_surge = a_vst3_plugin(vst3_plugins::SIDE_CHAIN_INSTRUMENT, 0, 2, &[]);
+    let state = vst3_host::encode_state(b"edits=2", &[]);
+    let (mut copy, _) = started(&launcher(), &like_surge, Some(&state[..])).expect("the program makes the plugin");
+    let (mut left, mut right) = ([0.0_f32; 512], [0.0_f32; 512]);
+
+    copy.run_with_notes(&mut [], &mut [&mut left, &mut right], 512, &[on(0, 50, 1.0)])
+        .expect("the first block, with a note, is run");
+
+    close(left[10], 0.125);
+    assert_eq!(copy.times_started_again(), 0);
+    let seen = the_same_in_the_program(
+        &like_surge,
+        Some(&state),
+        &[
+            block_with_notes(512, 2, vec![on(0, 50, 1.0)]),
+            block_with_notes(512, 2, Vec::new()),
+        ],
+    );
+    close(the_sound(&seen[0])[0][10], 0.125);
+    let without_a_state = the_same_in_the_program(&like_surge, None, &[block_with_notes(512, 2, vec![on(0, 50, 1.0)])]);
+    close(the_sound(&without_a_state[0])[0][10], 0.5);
+}
+
+// --- VST3: what a plugin can do to its process ---
+
+#[test]
+fn a_vst3_plugin_that_crashes_ends_or_hangs_its_process_while_it_runs_is_an_error_of_that_run_and_the_editor_is_still_here()
+ {
+    let gain = a_vst3_gain();
+    let (mut left, mut right) = ([0.0_f32; 512], [0.0_f32; 512]);
+    let mut run = |copy: &mut RemoteCopy| {
+        copy.run(
+            &mut [&mut [0.5; 512], &mut [0.5; 512]],
+            &mut [&mut left, &mut right],
+            512,
+        )
+    };
+
+    let (mut copy, _) = started(&a_launcher_for_a_plugin_that_misbehaves("crash_when_run"), &gain, None).unwrap();
+    let pid = copy.process_id().expect("the program is there");
+    let error = run(&mut copy).unwrap_err();
+    assert!(error.contains("the program that runs the plugin ended"), "{error}");
+    assert_eq!(
+        run(&mut copy).unwrap_err(),
+        error,
+        "every call after that says the same"
+    );
+    assert!(wait_until_the_process_is_gone(pid), "the program is gone");
+
+    let (mut copy, _) = started(&a_launcher_for_a_plugin_that_misbehaves("exit_when_run"), &gain, None).unwrap();
+    let error = run(&mut copy).unwrap_err();
+    assert!(error.contains("ended (exit code 0)"), "{error}");
+
+    let (mut copy, _) = started(&a_launcher_for_a_plugin_that_misbehaves("hang_when_run"), &gain, None).unwrap();
+    let pid = copy.process_id().unwrap();
+    let error = run(&mut copy).unwrap_err();
+    assert!(
+        error.contains("did not answer within 2 seconds, and was stopped"),
+        "{error}"
+    );
+    assert!(wait_until_the_process_is_gone(pid), "the hung program is stopped");
+}
+
+#[test]
+fn a_program_that_crashes_or_hangs_when_the_vst3_module_is_loaded_or_when_the_plugin_is_made_is_a_copy_that_was_not_started()
+ {
+    let gain = a_vst3_gain();
+    for (how, words) in [
+        ("crash_when_loaded", "ended"),
+        ("crash_when_made", "ended"),
+        ("crash_when_activated", "ended"),
+        ("hang_when_made", "did not answer within 2 seconds"),
+        ("hang_when_loaded", "did not answer within 2 seconds"),
+    ] {
+        let Err(not_started) = started(&a_launcher_for_a_plugin_that_misbehaves(how), &gain, None) else {
+            panic!("{how}: the copy was made")
+        };
+        let NotStarted::TheProgram(why) = not_started else {
+            panic!("{how}: {not_started:?}")
+        };
+        assert!(why.contains(words), "{how}: {why}");
+    }
+    // A module whose start-up function says no is a module that could not be loaded, which the program says in its own words.
+    let Err(NotStarted::Refused(Refused::CouldNotBeLoaded(why))) =
+        started(&a_launcher_for_a_plugin_that_misbehaves("init_says_no"), &gain, None)
+    else {
+        panic!("start-up says no")
+    };
+    assert!(why.contains("said it could not start"), "{why}");
+}
+
+#[test]
+fn what_a_vst3_plugin_prints_while_it_is_loaded_and_made_does_not_get_in_the_way() {
+    let instrument = a_vst3_instrument();
+    let (mut copy, _) = started(
+        &a_launcher_for_a_plugin_that_misbehaves("print_noise"),
+        &instrument,
+        None,
+    )
+    .unwrap();
+    let (mut left, mut right) = ([0.0_f32; 512], [0.0_f32; 512]);
+
+    copy.run_with_notes(&mut [], &mut [&mut left, &mut right], 512, &[on(0, 60, 1.0)])
+        .unwrap();
+
+    close(left[10], 0.6);
+}
+
+#[test]
+fn a_vst3_instrument_whose_program_crashes_at_every_fourth_run_is_started_again_and_makes_the_sound_that_it_makes_without_a_crash()
+ {
+    // (The pitch wheel is left out of this script: a value of the same parameter and a pitch wheel position that came before it would be put back in the order values-then-controllers.)
+    let script = [
+        Step::Value {
+            handle: vst3_plugins::PARAMETER_BEND,
+            value: 0.6,
+            at_sample: 0,
+        },
+        // 1: a note, and the wheel, which a program that is started again must be given again
+        block_with_notes(512, 2, vec![on(10, 60, 0.5), controller_one(20, 127)]),
+        block_with_notes(512, 2, Vec::new()),
+        block_with_notes(512, 2, vec![on(100, 72, 1.0)]),
+        // 4: the program crashes here; two notes are held, and the wheel is where it was put
+        block_with_notes(512, 2, vec![off(50, 60)]),
+        block_with_notes(512, 2, Vec::new()),
+        Step::Value {
+            handle: vst3_plugins::PARAMETER_BEND,
+            value: 0.9,
+            at_sample: 100,
+        },
+        block_with_notes(512, 2, Vec::new()),
+        // 7: it crashes again, in the block that has a new note
+        block_with_notes(512, 2, vec![on(0, 48, 0.25)]),
+        block_with_notes(512, 2, vec![off(300, 72)]),
+        block_with_notes(512, 2, vec![controller_one(10, 0)]),
+        // 10: a seek (a reset), and then it crashes in the block with the first note after it
+        Step::Reset,
+        block_with_notes(512, 2, vec![on(5, 55, 0.8)]),
+        block_with_notes(512, 2, Vec::new()),
+        block_with_notes(512, 2, vec![off(100, 55)]),
+    ];
+    let instrument = a_vst3_instrument();
+    let (mut without_a_crash, _) = instrument.in_this_process(None);
+    let crashing = launcher().with_environment(vec![(
+        "FFRS_TEST_PLUGIN".to_owned(),
+        "crash_at_every_fourth_run".to_owned(),
+    )]);
+    let (mut with_crashes, _) =
+        started_again_when_it_ends(&crashing, &instrument, None).expect("the program makes the plugin");
+    let first_program = with_crashes.process_id().unwrap();
+
+    let wanted = play(without_a_crash.as_mut(), &script);
+    let heard = play(&mut with_crashes, &script);
+
+    assert_eq!(heard.len(), 12);
+    for (number, (heard, wanted)) in heard.iter().zip(&wanted).enumerate() {
+        // (Compared as the samples that differ, so that a failure says where.)
+        let differences: Vec<(usize, f32, f32)> = the_sound(heard)[0]
+            .iter()
+            .zip(&the_sound(wanted)[0])
+            .enumerate()
+            .filter(|(_, (heard, wanted))| heard.to_bits() != wanted.to_bits())
+            .map(|(sample, (heard, wanted))| (sample, *heard, *wanted))
+            .take(3)
+            .collect();
+        assert!(
+            differences.is_empty(),
+            "block {number}: the sound is not the sound of a program that does not crash, bit for bit: (sample, heard, wanted) {differences:?}"
+        );
+        assert_eq!(heard.sound, wanted.sound, "block {number}: both channels");
+    }
+    assert_eq!(
+        with_crashes.times_started_again(),
+        3,
+        "runs 4, 7 and 10 of the program that counts its own"
+    );
+    assert_ne!(
+        with_crashes.process_id().unwrap(),
+        first_program,
+        "it is another program"
+    );
+    let said: Vec<&str> = heard
+        .iter()
+        .filter_map(|block| block.between_blocks.note.as_deref())
+        .collect();
+    assert_eq!(said.len(), 3, "it is said between the blocks, once for each: {said:?}");
+    assert!(
+        said.iter()
+            .all(|words| words.contains("the program that runs the plugin ended")
+                && words.contains("and was started again; the notes that were held are played again from here")),
+        "{said:?}"
+    );
+    // (Not silence against silence: the notes are heard in the blocks the crashes were in, with the wheel put back.)
+    close(the_sound(&heard[3])[0][10], 0.72 + 0.3 + 0.25 + 0.05);
+    // (After the seek: the note of key 55 at 0.8, and the pitch wheel value of 0.9 that the program was given again.)
+    close(the_sound(&heard[9])[0][100], 0.44 + 0.2);
+}
+
+#[test]
+fn a_vst3_effect_whose_program_crashes_is_started_again_with_its_values_and_makes_the_sound_that_it_makes_without_a_crash()
+ {
+    let gain = a_vst3_gain();
+    let mut script = vec![Step::Value {
+        handle: vst3_plugins::PARAMETER_GAIN,
+        value: 0.25,
+        at_sample: 0,
+    }];
+    for number in 0..9 {
+        if number == 4 {
+            script.push(Step::Value {
+                handle: vst3_plugins::PARAMETER_GAIN,
+                value: 3.0,
+                at_sample: 200,
+            });
+        }
+        script.push(block(512, 2, 2));
+    }
+    let (mut without_a_crash, _) = gain.in_this_process(None);
+    let crashing = launcher().with_environment(vec![(
+        "FFRS_TEST_PLUGIN".to_owned(),
+        "crash_at_every_fourth_run".to_owned(),
+    )]);
+    let (mut with_crashes, _) =
+        started_again_when_it_ends(&crashing, &gain, None).expect("the program makes the plugin");
+
+    let wanted = play(without_a_crash.as_mut(), &script);
+    let heard = play(&mut with_crashes, &script);
+
+    assert_eq!(
+        heard.iter().map(|block| &block.sound).collect::<Vec<_>>(),
+        wanted.iter().map(|block| &block.sound).collect::<Vec<_>>()
+    );
+    assert_eq!(with_crashes.times_started_again(), 2, "runs 4 and 7");
+}
+
+#[test]
+fn a_vst3_program_that_crashes_at_every_run_is_started_again_so_often_and_then_the_copy_is_gone_and_the_editor_is_still_here()
+ {
+    let gain = a_vst3_gain();
+    let (mut copy, _) =
+        started_again_when_it_ends(&a_launcher_for_a_plugin_that_misbehaves("crash_when_run"), &gain, None).unwrap();
+    let (mut left, mut right) = ([0.0_f32; 512], [0.0_f32; 512]);
+
+    let error = copy
+        .run(
+            &mut [&mut [0.5; 512], &mut [0.5; 512]],
+            &mut [&mut left, &mut right],
+            512,
+        )
+        .unwrap_err();
+
+    assert!(
+        error.contains("the program that runs the plugin ended")
+            && error.contains("it was started again 5 times, and is not any more"),
+        "{error}"
+    );
+    assert_eq!(copy.times_started_again(), 5);
+    assert!(copy.process_id().is_none(), "no program is left");
 }
 
 // --- what it costs (a report, not a check) ---

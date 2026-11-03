@@ -252,7 +252,7 @@ fn the_factory_says_who_made_it() {
 #[test]
 fn the_classes_of_a_module_are_listed_with_their_categories_names_and_ids() {
     let classes = the_module().classes();
-    assert_eq!(classes.len(), 14);
+    assert_eq!(classes.len(), 16);
     let gain = classes
         .iter()
         .find(|class| class.id == id(plugins::GAIN))
@@ -285,7 +285,7 @@ fn the_classes_of_a_module_are_listed_with_their_categories_names_and_ids() {
         compatibility.sub_categories.is_empty(),
         "an empty text is no sub-category"
     );
-    assert_eq!(classes.iter().filter(|class| class.is_a_plugin()).count(), 10);
+    assert_eq!(classes.iter().filter(|class| class.is_a_plugin()).count(), 11);
 }
 
 #[test]
@@ -295,7 +295,7 @@ fn the_scan_lists_the_plugins_and_what_each_is_and_not_the_other_classes() {
         scan_module(the_module_folder(), &mut |step| steps.push(step.to_owned())).expect("the module is scanned");
     assert_eq!(scan.factory.vendor, "fastforwardrs tests");
     let names: Vec<&str> = scan.classes.iter().map(|scanned| scanned.class.name.as_str()).collect();
-    assert_eq!(names.len(), 10, "{names:?}");
+    assert_eq!(names.len(), 11, "{names:?}");
     assert!(!names.iter().any(|name| name.contains("Compatibility")), "{names:?}");
     // The healthy ones have what they are, and no problem; the others say why not.
     for numbers in [
@@ -305,6 +305,7 @@ fn the_scan_lists_the_plugins_and_what_each_is_and_not_the_other_classes() {
         plugins::SINGLE,
         plugins::SIDE_CHAIN_INSTRUMENT,
         plugins::SIDE_CHAIN_EFFECT,
+        plugins::NO_DEFAULTS,
     ] {
         let scanned = scan
             .classes
@@ -564,6 +565,80 @@ fn a_meter_of_the_plugin_is_given_back_as_a_control_output_in_plain_values() {
         (outputs[0].1 - f64::from(peak)).abs() < 1e-7,
         "{outputs:?} against {peak}"
     );
+}
+
+#[test]
+fn a_plugin_whose_controller_says_every_value_is_nothing_until_it_is_given_the_state_of_its_component_is_given_it_when_it_is_made()
+ {
+    // (Surge XT's controller does: 2,855 values of 0, and defaults of 0 beside, until the host gives it the component's state, as VST3 hosts do when they make a plugin. The test
+    // plugin's controller is made like that, and the gain that a host sees is the gain the component has: 1, which is a quarter of the way up the range 0 to 4.)
+    let instance = make(plugins::GAIN);
+
+    assert_eq!(instance.plain_value(plugins::PARAMETER_GAIN), Some(1.0));
+    assert_eq!(instance.plain_value(plugins::PARAMETER_MODE), Some(0.0));
+}
+
+#[test]
+fn a_component_that_has_no_state_to_give_is_not_asked_to_give_one_to_its_controller() {
+    // (The instrument's component says "not implemented" when it is asked for its state, and its controller forgets its values when it is handed a state it cannot read, as some real
+    // ones do: the pitch wheel is in the middle, and stays there.)
+    let instance = make(plugins::INSTRUMENT);
+
+    assert_eq!(instance.plain_value(plugins::PARAMETER_BEND), Some(0.5));
+    assert_eq!(
+        parameter(instance.facts(), plugins::PARAMETER_BEND).default_plain,
+        0.5,
+        "and the default is as the controller declares it"
+    );
+}
+
+#[test]
+fn a_plugin_that_declares_no_defaults_has_for_its_defaults_the_values_its_controller_has_when_it_is_made() {
+    // (The controller of this class says 0 for the default of each parameter, as Surge XT's does for its 2,855; the gain the plugin has is 1, a quarter of the way up the range 0 to 4.)
+    let instance = make(plugins::NO_DEFAULTS);
+    let gain = parameter(instance.facts(), plugins::PARAMETER_GAIN);
+
+    assert_eq!(gain.default_normalized, 0.25);
+    assert_eq!(gain.default_plain, 1.0);
+    assert_eq!(parameter(instance.facts(), plugins::PARAMETER_MODE).default_plain, 0.0);
+    // (One that declares them is as it was: see the test of the gain's facts.)
+    assert_eq!(
+        parameter(make(plugins::GAIN).facts(), plugins::PARAMETER_GAIN).default_plain,
+        1.0
+    );
+}
+
+#[test]
+fn the_default_of_a_parameter_is_what_is_declared_unless_that_is_nothing_and_the_controller_has_a_value() {
+    use crate::instance::default_of_a_parameter;
+    // What is declared, when it is something.
+    assert_eq!(default_of_a_parameter(0.25, 0.5), 0.25);
+    assert_eq!(default_of_a_parameter(0.3, 0.0), 0.3);
+    // Nothing declared, and a value in the controller.
+    assert_eq!(default_of_a_parameter(0.0, 0.5), 0.5);
+    assert_eq!(default_of_a_parameter(0.0, 1.0), 1.0);
+    // Nothing declared, and nothing in the controller, or a value that is not a number or not a position in the range.
+    assert_eq!(default_of_a_parameter(0.0, 0.0), 0.0);
+    assert_eq!(default_of_a_parameter(0.0, f64::NAN), 0.0);
+    assert_eq!(default_of_a_parameter(0.0, f64::INFINITY), 0.0);
+    assert_eq!(default_of_a_parameter(0.0, 1.5), 1.0);
+    assert_eq!(default_of_a_parameter(0.0, -0.5), 0.0);
+}
+
+#[test]
+fn a_value_that_was_given_before_a_reset_and_not_yet_to_a_block_is_still_given_to_the_next_block() {
+    // (A reset makes the plugin forget what it heard and keeps the values it was given, as the other formats' copies do. A program that is started again is given its values, and then the
+    // reset of the run it ended in.)
+    let mut instance = make(plugins::GAIN);
+    let silent_gain = run_effect(&mut instance, A_BLOCK);
+    instance.set_value(plugins::PARAMETER_GAIN, 2.0, 0);
+
+    instance.reset();
+    let after_the_reset = run_effect(&mut instance, A_BLOCK);
+
+    // (The gain of 1 at the start is the sound itself; the gain of 2 that was given before the reset is twice that.)
+    assert_eq!(after_the_reset[40], a_sound(A_BLOCK)[40] * 2.0);
+    assert_eq!(silent_gain[40], a_sound(A_BLOCK)[40]);
 }
 
 #[test]

@@ -66,8 +66,9 @@ pub struct ParameterDescription {
     pub units: String,
     /// 0 for a continuous parameter; for a stepped one the number of steps (a switch has 1, a list of three has 2): its values are the `step_count + 1` whole numbers.
     pub step_count: i32,
+    /// The default: what the plugin declares, or, when it declares 0 and its controller has a value that is not 0 when the plugin is made, that value (Surge XT declares 0 for each of its values).
     pub default_normalized: f64,
-    /// What the plugin says the default is as a plain value (not worked out from the range: a parameter need not be linear).
+    /// The same default as a plain value (what the plugin says it is, not worked out from the range: a parameter need not be linear).
     pub default_plain: f64,
     /// What the plugin says the value is at the bottom and at the top of the normalised range (the plain value).
     pub plain_minimum: f64,

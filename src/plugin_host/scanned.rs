@@ -47,6 +47,19 @@ impl WhatWasScanned {
                 .all(|handle| instance.parameters().iter().any(|parameter| parameter.id == *handle))
     }
 
+    /// Whether what the module gave for the VST3 plugin is the plugin that was scanned: the main buses have the channels that were scanned, and the plugin has every parameter that a
+    /// value of the effect is the value of (it may have more).
+    pub fn is_this_vst3_plugin(&self, instance: &vst3_host::Instance) -> bool {
+        instance.channels() == (self.audio_inputs, self.audio_outputs)
+            && self.value_handles.iter().all(|handle| {
+                instance
+                    .facts()
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.id == *handle)
+            })
+    }
+
     /// Whether what the bundle says now of the LV2 plugin is the plugin that was scanned: the same audio ports and the same control inputs for the values.
     pub fn is_this_lv2_plugin(&self, description: &lv2_host::PluginDescription) -> bool {
         use lv2_host::{PortDirection, PortKind};

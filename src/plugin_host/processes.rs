@@ -8,12 +8,13 @@ use std::path::PathBuf;
 use crate::plugin_process::remote::{
     Launcher, Limits, PROGRAM_NAME, check_that_the_program_is_of_this_build, program_beside_this_program,
 };
-use crate::project::InstalledPlugin;
+use crate::project::{InstalledPlugin, PluginAddress};
 
 /// Which plugins run in a process of their own, and not in the editor's: **a plugin that crashes ends the process it runs in**, and in the editor's that is the editor and the project.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum InAProcessOfItsOwn {
-    /// None: every plugin runs in the editor's process. (What `PluginHost::new()` does; the tests of the host that was made before processes were run in the editor's.)
+    /// None: every plugin runs in the editor's process, **except the VST3 plugins, which are never run there** (see [`Self::includes`]). (What `PluginHost::new()` does; the tests of
+    /// the host that was made before processes were run in the editor's.)
     #[default]
     Nothing,
     /// The instruments (the plugins that make sound from notes). What the editor and the export program do, because Surge XT, which is one, was measured to crash at random when a patch is
@@ -24,8 +25,12 @@ pub enum InAProcessOfItsOwn {
 }
 
 impl InAProcessOfItsOwn {
-    /// Whether `plugin` is one of those that run in a process of their own.
+    /// Whether `plugin` is one of those that run in a process of their own. **A VST3 plugin always is**, whatever the setting says (phase 15, D7 of `docs/engine-phase-15-vst3-design.md`):
+    /// a plugin that crashes ends the process it runs in, and for these the editor's is not to be it.
     pub fn includes(self, plugin: &InstalledPlugin) -> bool {
+        if matches!(plugin.address, PluginAddress::Vst3 { .. }) {
+            return true;
+        }
         match self {
             Self::Nothing => false,
             Self::Instruments => plugin.descriptor.makes_sound_from_notes,

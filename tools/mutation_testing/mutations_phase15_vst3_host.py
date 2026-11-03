@@ -11,7 +11,7 @@ buses switched on, the channels given):
 Mistakes that cannot be seen by these tests, said plainly (left out of the list, not forgotten):
 
 * `InitDll` / `ModuleEntry` saying no: no test plugin can say it (the entry points are the library's, not the class's).
-* The latency read again when a plugin says it changed: the test plugin's latency does not change.
+* The latency read again when a plugin says it changed: the test plugin's latency does not change (nor does the note that says so in `Vst3Copy`).
 * A channel slice that is shorter than the block being used all the same: that is a read past the end of a buffer, which no test should do.
 """
 
@@ -85,6 +85,27 @@ MUTATIONS = [
     # --- after a restart ---
     ("reset: the plugin is not made inactive and active again", INSTANCE,
      "            self.component.setActive(0);\n            self.component.setActive(1);\n", "", TESTS),
+    ("reset: the values that wait for the next block are forgotten (found in piece 15.3: a program started again is given its values and then the reset)", INSTANCE,
+     "        self.time_in_samples = 0;\n    }\n\n    /// What the plugin asked of the host since this was last asked",
+     "        self.pending.clear();\n        self.time_in_samples = 0;\n    }\n\n    /// What the plugin asked of the host since this was last asked", TESTS),
+    # --- the controller is given the state of the component when the plugin is made (found in piece 15.3: Surge XT's controller says 0 for each value until then) ---
+    ("sync: the controller is not given the state of its component when the plugin is made", INSTANCE,
+     "            give_the_controller_the_state_of_the_component(&component, controller);\n", "            let _ = controller;\n", TESTS),
+    ("sync: the state is given from where the stream ended, not from the start", INSTANCE,
+     "    stream.rewind();\n    // SAFETY: the controller is live; the stream lives through the call. (A controller that does not take it says so; that is not a failure.)",
+     "    // SAFETY: the controller is live; the stream lives through the call. (A controller that does not take it says so; that is not a failure.)", TESTS),
+    ("sync: a component that cannot give its state is given to the controller all the same", INSTANCE,
+     "    if unsafe { component.getState(pointer.as_ptr()) } != kResultOk {\n        return;\n    }\n    stream.rewind();",
+     "    unsafe { component.getState(pointer.as_ptr()) };\n    stream.rewind();", TESTS),
+    # --- the default of a parameter ---
+    ("default: the controller's value is always the default", INSTANCE,
+     "    if declared == 0.0 && in_the_controller_now.is_finite()", "    if in_the_controller_now.is_finite()", TESTS),
+    ("default: a value that is not a number is the default", INSTANCE,
+     "    if declared == 0.0 && in_the_controller_now.is_finite() && in_the_controller_now != 0.0 {", "    if declared == 0.0 && in_the_controller_now != 0.0 {", TESTS),
+    ("default: the controller's value is not held to the range", INSTANCE,
+     "        in_the_controller_now.clamp(0.0, 1.0)\n", "        in_the_controller_now\n", TESTS),
+    ("default: the plain default is worked out from the declared one", INSTANCE,
+     "unsafe { controller.normalizedParamToPlain(info.id, default_normalized) },", "unsafe { controller.normalizedParamToPlain(info.id, info.defaultNormalizedValue) },", TESTS),
     # --- the scan ---
     ("scan: a sound that is not numbers is no problem", SCAN, "(!is_made_of_numbers(&outputs)).then(", "(false && !is_made_of_numbers(&outputs)).then(", TESTS),
     ("scan: every plugin is said to have a state", SCAN, "instance.save_state().is_ok())", "true)", TESTS),
