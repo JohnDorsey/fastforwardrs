@@ -5,7 +5,7 @@
 //! of the LV2 test plugins, and the editor's side of the windows (`EditorWindows`) with that program. What is tried is the protocol: the order of what the program says, what it does with
 //! what it is told, what the interface of the plugin is told and says, and how it ends. (A real window is `plugin_editor_lv2_real_window.rs`.)
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
@@ -93,10 +93,16 @@ impl Running {
         }
     }
 
+    /// Tells the program a message. A program that has already ended cannot be told (a plugin that cannot work makes it say `Failed` and end before it reads anything, which on a slow
+    /// machine happens before the first line is written): that is not a failure of this call, the test reads what the program said and how it ended. (The same as `editor_program::Running::tell`.)
     fn tell(&mut self, message: &ToProgram) {
         let stdin = self.stdin.as_mut().expect("the input is open");
-        writeln!(stdin, "{}", line_of(message)).expect("the program is told");
-        stdin.flush().expect("the program is told");
+        let written = writeln!(stdin, "{}", line_of(message)).and_then(|()| stdin.flush());
+        match written {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::BrokenPipe => {}
+            Err(error) => panic!("the program is told: {error:?}"),
+        }
     }
 
     fn next(&self) -> FromProgram {

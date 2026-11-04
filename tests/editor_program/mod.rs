@@ -6,7 +6,7 @@
 
 #![allow(dead_code)]
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
@@ -67,10 +67,17 @@ impl Running {
         }
     }
 
+    /// Tells the program a message. **A program that has already ended cannot be told** (a plugin that cannot work makes the program say `Failed` and end before it reads anything, and on a
+    /// slow machine that has happened before the test writes its first line: the write is a broken pipe): that is not a failure of this call, what the program said and how it ended are what
+    /// the test reads and asserts after it. Any other failure to write is one.
     pub fn tell(&mut self, message: &ToProgram) {
         let stdin = self.stdin.as_mut().expect("the input is open");
-        writeln!(stdin, "{}", line_of(message)).expect("the program is told");
-        stdin.flush().expect("the program is told");
+        let written = writeln!(stdin, "{}", line_of(message)).and_then(|()| stdin.flush());
+        match written {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::BrokenPipe => {}
+            Err(error) => panic!("the program is told: {error:?}"),
+        }
     }
 
     pub fn next(&self) -> FromProgram {
