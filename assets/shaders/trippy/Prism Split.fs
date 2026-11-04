@@ -2,23 +2,23 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The picture seen through a prism: the red, green and blue of it are pulled apart (in one direction, away from a point, or round it), and copies of it ring the middle, each in a colour of its own, so that every edge grows a rainbow.",
+	"DESCRIPTION": "The picture seen through a prism: the red, green and blue of it are pulled apart (in one direction, away from a point, or round it), and copies of it ring the middle, each in a colour of its own, so that every edge grows a rainbow. Speeds and rates are in turns a second, unless said otherwise.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "inputImage", "TYPE": "image" },
 		{ "NAME": "spread", "LABEL": "Colour split", "TYPE": "float", "MIN": 0.0, "MAX": 0.15, "DEFAULT": 0.02 },
-		{ "NAME": "pullDirection", "LABEL": "Direction of the split", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["One direction", "Away from the centre", "Round the centre"], "DEFAULT": 1 },
-		{ "NAME": "angle", "LABEL": "Angle of the pull (degrees)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "angleSpin", "LABEL": "Angle spin (degrees a second)", "TYPE": "float", "MIN": -360.0, "MAX": 360.0, "DEFAULT": 20.0 },
+		{ "NAME": "pullDirection", "LABEL": "Split direction", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["One direction", "Away from the centre", "Round the centre"], "DEFAULT": 1 },
+		{ "NAME": "angle", "LABEL": "Angle °", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
+		{ "NAME": "angleSpin", "LABEL": "Angle (°/s)", "TYPE": "float", "MIN": -360.0, "MAX": 360.0, "DEFAULT": 20.0 },
 		{ "NAME": "copies", "LABEL": "Copies round the middle", "TYPE": "long", "VALUES": [0, 2, 3, 4, 5, 6], "LABELS": ["None", "2", "3", "4", "5", "6"], "DEFAULT": 3 },
-		{ "NAME": "copyDistance", "LABEL": "Distance of the copies", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.12 },
-		{ "NAME": "copyStrength", "LABEL": "How strong the copies are", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "copySpin", "LABEL": "Copy spin (turns a second)", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.08 },
-		{ "NAME": "centerX", "LABEL": "Centre across", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "centerY", "LABEL": "Centre up", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "amount", "LABEL": "Amount of the effect", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
+		{ "NAME": "copyDistance", "LABEL": "Copy radius", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.12 },
+		{ "NAME": "copyStrength", "LABEL": "Copy power", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "copySpin", "LABEL": "Copy spin", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.08 },
+		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
 	]
 }*/
 

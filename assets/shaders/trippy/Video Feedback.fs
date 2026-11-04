@@ -2,23 +2,23 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "What a camera pointed at its own screen makes: every frame is the frame before it, a little larger and turned, with its colours turned a little and a little of it faded, and the live picture is let in at the middle, so that tunnels, spirals and trails of the picture go on for ever. It remembers the frames before it, so the preview is only exact when it is played from the start, and the export always is.",
+	"DESCRIPTION": "What a camera pointed at its own screen makes: every frame is the frame before it, a little larger and turned, with its colours turned a little and a little of it faded, and the live picture is let in at the middle, so that tunnels, spirals and trails of the picture go on for ever. It remembers the frames before it, so the preview is only exact when it is played from the start, and the export always is. Echo zoom, Echo spin (in degrees) and Slide are for each second, and Echo kept is how much of the echo is left after a second.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "inputImage", "TYPE": "image" },
-		{ "NAME": "zoomIn", "LABEL": "Echo growth (a second)", "TYPE": "float", "MIN": 0.5, "MAX": 3.0, "DEFAULT": 1.4 },
-		{ "NAME": "spinSpeed", "LABEL": "Echo turn (degrees a second)", "TYPE": "float", "MIN": -360.0, "MAX": 360.0, "DEFAULT": 35.0 },
-		{ "NAME": "hueSpeed", "LABEL": "Colour turn (degrees a second)", "TYPE": "float", "MIN": -720.0, "MAX": 720.0, "DEFAULT": 90.0 },
-		{ "NAME": "shiftX", "LABEL": "Echo slide across (a second)", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "shiftY", "LABEL": "Echo slide up (a second)", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "keep", "LABEL": "Echo kept after a second", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.55 },
-		{ "NAME": "inputMix", "LABEL": "Live picture let in (a frame)", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.12 },
-		{ "NAME": "combine", "LABEL": "How the live picture is let in", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["Blended into the echo", "The lighter of the two", "Over the echo where it is not dark"], "DEFAULT": 0 },
-		{ "NAME": "centerX", "LABEL": "Centre across", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "centerY", "LABEL": "Centre up", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "amount", "LABEL": "Amount of the effect", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
+		{ "NAME": "zoomIn", "LABEL": "Echo zoom", "TYPE": "float", "MIN": 0.5, "MAX": 3.0, "DEFAULT": 1.4 },
+		{ "NAME": "spinSpeed", "LABEL": "Echo spin", "TYPE": "float", "MIN": -360.0, "MAX": 360.0, "DEFAULT": 35.0 },
+		{ "NAME": "hueSpeed", "LABEL": "Hue turn °/s", "TYPE": "float", "MIN": -720.0, "MAX": 720.0, "DEFAULT": 90.0 },
+		{ "NAME": "shiftX", "LABEL": "Slide x", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.0 },
+		{ "NAME": "shiftY", "LABEL": "Slide y", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.0 },
+		{ "NAME": "keep", "LABEL": "Echo kept", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.55 },
+		{ "NAME": "inputMix", "LABEL": "Live mix", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.12 },
+		{ "NAME": "combine", "LABEL": "Live mode", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["Blended in", "The lighter of the two", "On top where not dark"], "DEFAULT": 0 },
+		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
 	],
 	"PASSES": [
 		{ "TARGET": "echo", "PERSISTENT": true, "FLOAT": true },

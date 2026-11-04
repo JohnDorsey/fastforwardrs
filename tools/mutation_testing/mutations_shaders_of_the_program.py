@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 """Planted mistakes for the shaders that come with the program (docs/own-shaders.md): the drawing of a shader to a picture (`shader_files::pictures`), the list and the scan of the
-program's own shaders, how the editor installs them, and **the tests of the shaders themselves**: a mistake planted in a shader that makes one of its inputs do nothing must be noticed by
-the test that says that every input changes the picture, and a copy of a shared block that is not the true text must be noticed by the test that compares them.
+program's own shaders, how the editor installs them and shows one of them in its preview, and **the tests of the shaders themselves**: a mistake planted in a shader that makes one of its inputs do nothing must be noticed by
+the test that says that every input changes the picture, a copy of a shared block that is not the true text must be noticed by the test that compares them, and a label or the words of a choice that
+are too long for the properties panel must be noticed by the test that looks at the boxes as they are drawn.
 
     py tools/mutation_testing/mutate.py tools/mutation_testing/mutations_shaders_of_the_program.py --no-controls --results first.jsonl
 
@@ -20,6 +21,7 @@ PICTURES_RS = "src/shader_files/pictures.rs"
 SCAN_RS = "src/shader_files/scan.rs"
 OWN_RS = "src/shader_files/shaders_of_the_program.rs"
 FLOW_RS = "src/application/fast_forward_application/sound_plugins_flow.rs"
+LAYERS_RS = "src/composition/pictures.rs"
 
 MUTATIONS = [
     # --- the scan of the program's own shaders ---
@@ -48,6 +50,10 @@ MUTATIONS = [
     ("flow: the shaders of the folders come before those of the program", FLOW_RS,
      "                    shaders = scan_of_the_shaders_of_the_program().followed_by(shaders);",
      "                    shaders = shaders.followed_by(scan_of_the_shaders_of_the_program());", WINDOW),
+    # --- a generator of the program in the preview of a window whose picture is made by the engine ---
+    ("layers: a generator clip makes no layer, so there is nothing of it for the engine to draw", LAYERS_RS,
+     "                Clip::Generator(_) => layers.push(candidate.entry(LayerContent::Generator)),",
+     "                Clip::Generator(_) => {}", WINDOW),
     # --- drawing a shader to a picture ---
     ("pictures: a colour with no opacity is clear", PICTURES_RS,
      "            let opacity = if digits.len() == 8 { channel(6)? } else { 255 };",
@@ -95,4 +101,9 @@ MUTATIONS = [
      "return clamp(vec3(3.0 * x, 3.0 * x - 1.0, 3.0 * x - 2.0), 0.0, 1.0);", "return clamp(vec3(3.0 * x, 3.0 * x - 1.0, 3.0 * x - 1.9), 0.0, 1.0);", OWN),
     ("shared: an input is named like a word of a block", "assets/shaders/trippy/Liquid Warp.fs",
      '{ "NAME": "fineness",', '{ "NAME": "strength",', OWN),
+    # --- what a person reads and reaches in the box of a shader stays in the panel (the test looks at the box as it is drawn) ---
+    ("shader: the label of a number is so long that its box is under the buttons of its row", "assets/shaders/trippy/Plasma Storm.fs",
+     '"LABEL": "Cycle speed"', '"LABEL": "Speed of the colour cycling"', WINDOW),
+    ("shader: the words of a choice are so long that they make the box wider than the panel", "assets/shaders/trippy/Neon Edges.fs",
+     '"The way the edge faces"', '"The way the edge faces, which is the way that it points"', WINDOW),
 ]

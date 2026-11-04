@@ -2,24 +2,24 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "A plasma: waves added to waves, bent by waves, until the whole picture is a slow storm of colour. Every layer of bending makes it more tangled; the palette runs through it and cycles with the time.",
+	"DESCRIPTION": "A plasma: waves added to waves, bent by waves, until the whole picture is a slow storm of colour. Every layer of bending makes it more tangled; the palette runs through it and cycles with the time. Speeds and rates are in turns a second, unless said otherwise.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
-		{ "NAME": "scale", "LABEL": "Wave size (higher: smaller)", "TYPE": "float", "MIN": 0.5, "MAX": 12.0, "DEFAULT": 3.0 },
+		{ "NAME": "scale", "LABEL": "Wave scale", "TYPE": "float", "MIN": 0.5, "MAX": 12.0, "DEFAULT": 3.0 },
 		{ "NAME": "bendLayers", "LABEL": "Layers of bending", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4], "LABELS": ["None", "1", "2", "3", "4"], "DEFAULT": 2 },
-		{ "NAME": "bendAmount", "LABEL": "How much each layer bends", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 1.2 },
+		{ "NAME": "bendAmount", "LABEL": "Bend", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 1.2 },
 		{ "NAME": "swirl", "LABEL": "Swirl", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.6 },
-		{ "NAME": "speed", "LABEL": "Speed of the storm", "TYPE": "float", "MIN": 0.0, "MAX": 4.0, "DEFAULT": 0.6 },
-		{ "NAME": "centerX", "LABEL": "Centre across", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "centerY", "LABEL": "Centre up", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "speed", "LABEL": "Speed", "TYPE": "float", "MIN": 0.0, "MAX": 4.0, "DEFAULT": 0.6 },
+		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "palette", "LABEL": "Palette", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 3 },
-		{ "NAME": "colourA", "LABEL": "Colour A (two-colour palette)", "TYPE": "color", "DEFAULT": [0.05, 0.0, 0.3, 1.0] },
-		{ "NAME": "colourB", "LABEL": "Colour B (two-colour palette)", "TYPE": "color", "DEFAULT": [1.0, 0.4, 0.8, 1.0] },
-		{ "NAME": "colourScale", "LABEL": "Colour bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.2 },
+		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.05, 0.0, 0.3, 1.0] },
+		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.4, 0.8, 1.0] },
+		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.2 },
 		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "colourCycle", "LABEL": "Colour cycling (turns a second)", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.06 }
+		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.06 }
 	]
 }*/
 

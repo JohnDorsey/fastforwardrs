@@ -2,23 +2,23 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The edges of the picture drawn in glowing colours, as if it were made of neon tubes: where the picture changes quickly a line lights up, in a colour that goes with the way the edge faces, how strong it is or where it is, and the colours cycle with the time. The picture under the lines can be dimmed or kept.",
+	"DESCRIPTION": "The edges of the picture drawn in glowing colours, as if it were made of neon tubes: where the picture changes quickly a line lights up (an edge weaker than the cut-off does not), in a colour that goes with the way the edge faces, how strong it is or where it is, and the colours cycle with the time. The picture under the lines can be dimmed or kept. Speeds and rates are in turns a second, unless said otherwise.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "inputImage", "TYPE": "image" },
-		{ "NAME": "edgeWidth", "LABEL": "Width of the lines (pixels)", "TYPE": "float", "MIN": 0.5, "MAX": 6.0, "DEFAULT": 1.5 },
-		{ "NAME": "gain", "LABEL": "How bright the lines are", "TYPE": "float", "MIN": 0.0, "MAX": 10.0, "DEFAULT": 4.0 },
-		{ "NAME": "cutOff", "LABEL": "Least edge that shows", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.05 },
-		{ "NAME": "colourBy", "LABEL": "Colour the lines by", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["The way the edge faces", "How strong the edge is", "Where the line is"], "DEFAULT": 0 },
+		{ "NAME": "edgeWidth", "LABEL": "Line width", "TYPE": "float", "MIN": 0.5, "MAX": 6.0, "DEFAULT": 1.5 },
+		{ "NAME": "gain", "LABEL": "Brightness", "TYPE": "float", "MIN": 0.0, "MAX": 10.0, "DEFAULT": 4.0 },
+		{ "NAME": "cutOff", "LABEL": "Cut-off", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.05 },
+		{ "NAME": "colourBy", "LABEL": "Colour by", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["The way the edge faces", "How strong the edge is", "Where the line is"], "DEFAULT": 0 },
 		{ "NAME": "palette", "LABEL": "Palette", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 2 },
-		{ "NAME": "colourA", "LABEL": "Colour A (two-colour palette)", "TYPE": "color", "DEFAULT": [0.0, 0.8, 1.0, 1.0] },
-		{ "NAME": "colourB", "LABEL": "Colour B (two-colour palette)", "TYPE": "color", "DEFAULT": [1.0, 0.1, 0.8, 1.0] },
-		{ "NAME": "colourScale", "LABEL": "Colour bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.0 },
-		{ "NAME": "cycle", "LABEL": "Colour cycling (turns a second)", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.2 },
-		{ "NAME": "keepPicture", "LABEL": "Picture kept under the lines", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.15 },
-		{ "NAME": "amount", "LABEL": "Amount of the effect", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
+		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.0, 0.8, 1.0, 1.0] },
+		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.1, 0.8, 1.0] },
+		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.0 },
+		{ "NAME": "cycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.2 },
+		{ "NAME": "keepPicture", "LABEL": "Picture", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.15 },
+		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
 	]
 }*/
 

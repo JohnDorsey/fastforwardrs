@@ -2,24 +2,24 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The picture repainted in a palette: how light each place is picks its colour, so that a face is made of fire or ice or all the colours of the rainbow, and the colours run through the picture as waves and cycle with the time. Solarize and posterize it as well, and keep as much of the real colours as you like.",
+	"DESCRIPTION": "The picture repainted in a palette: how light each place is picks its colour, so that a face is made of fire or ice or all the colours of the rainbow, and the colours run through the picture as waves and cycle with the time. Solarize it, posterize it (the number is how many steps of lightness there are, and under 1 is none), and keep as much of the real colours as you like. Speeds and rates are in turns a second, unless said otherwise.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "inputImage", "TYPE": "image" },
 		{ "NAME": "palette", "LABEL": "Palette", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 3 },
-		{ "NAME": "colourA", "LABEL": "Colour A (two-colour palette)", "TYPE": "color", "DEFAULT": [0.05, 0.02, 0.4, 1.0] },
-		{ "NAME": "colourB", "LABEL": "Colour B (two-colour palette)", "TYPE": "color", "DEFAULT": [1.0, 0.85, 0.3, 1.0] },
-		{ "NAME": "bands", "LABEL": "Palette repeats", "TYPE": "float", "MIN": 0.2, "MAX": 8.0, "DEFAULT": 1.5 },
+		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.05, 0.02, 0.4, 1.0] },
+		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.85, 0.3, 1.0] },
+		{ "NAME": "bands", "LABEL": "Repeats", "TYPE": "float", "MIN": 0.2, "MAX": 8.0, "DEFAULT": 1.5 },
 		{ "NAME": "shift", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "cycle", "LABEL": "Colour cycling (turns a second)", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.15 },
-		{ "NAME": "waves", "LABEL": "Waves of colour", "TYPE": "float", "MIN": 0.0, "MAX": 4.0, "DEFAULT": 0.6 },
-		{ "NAME": "waveSpeed", "LABEL": "Wave speed (turns a second)", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.2 },
+		{ "NAME": "cycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.15 },
+		{ "NAME": "waves", "LABEL": "Waves", "TYPE": "float", "MIN": 0.0, "MAX": 4.0, "DEFAULT": 0.6 },
+		{ "NAME": "waveSpeed", "LABEL": "Wave speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.2 },
 		{ "NAME": "solarize", "LABEL": "Solarize", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "posterize", "LABEL": "Posterize (steps; 0 = none)", "TYPE": "float", "MIN": 0.0, "MAX": 16.0, "DEFAULT": 0.0 },
-		{ "NAME": "keepColour", "LABEL": "Real colour kept", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.2 },
-		{ "NAME": "amount", "LABEL": "Amount of the effect", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
+		{ "NAME": "posterize", "LABEL": "Posterize", "TYPE": "float", "MIN": 0.0, "MAX": 16.0, "DEFAULT": 0.0 },
+		{ "NAME": "keepColour", "LABEL": "Keep colour", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.2 },
+		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
 	]
 }*/
 

@@ -2,26 +2,26 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "A tiling of the hyperbolic plane, drawn in a disc, in which the tiles are all the same size and shape and are squeezed smaller and smaller towards the rim, where there is no end of them. The disc is slid about inside itself as the clip plays, so that the tiles stream past and shrink away into the edge.",
+	"DESCRIPTION": "A tiling of the hyperbolic plane, drawn in a disc, in which the tiles are all the same size and shape and are squeezed smaller and smaller towards the rim, where there is no end of them. The disc is slid about inside itself as the clip plays, so that the tiles stream past and shrink away into the edge. Speeds and rates are in turns a second, unless said otherwise.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "tiling", "LABEL": "Tiling", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "LABELS": ["3 sides, 7 at a corner", "3 sides, 8 at a corner", "4 sides, 5 at a corner", "4 sides, 6 at a corner", "5 sides, 4 at a corner", "5 sides, 5 at a corner", "6 sides, 4 at a corner", "7 sides, 3 at a corner", "8 sides, 3 at a corner", "4 sides, 8 at a corner"], "DEFAULT": 4 },
-		{ "NAME": "driftSize", "LABEL": "Slide of the disc", "TYPE": "float", "MIN": 0.0, "MAX": 0.9, "DEFAULT": 0.5 },
-		{ "NAME": "driftSpeed", "LABEL": "Slide speed (turns a second)", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.06 },
-		{ "NAME": "discSize", "LABEL": "Size of the disc", "TYPE": "float", "MIN": 0.2, "MAX": 1.2, "DEFAULT": 0.47 },
-		{ "NAME": "rotation", "LABEL": "Rotation (degrees)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Spin (degrees a second)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 5.0 },
-		{ "NAME": "foldLimit", "LABEL": "Folds (more: nearer the rim)", "TYPE": "float", "MIN": 6.0, "MAX": 60.0, "DEFAULT": 40.0 },
-		{ "NAME": "lineWidth", "LABEL": "Width of the lines", "TYPE": "float", "MIN": 0.0, "MAX": 0.2, "DEFAULT": 0.035 },
-		{ "NAME": "lineDarkness", "LABEL": "How dark the lines are", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.8 },
+		{ "NAME": "driftSize", "LABEL": "Slide", "TYPE": "float", "MIN": 0.0, "MAX": 0.9, "DEFAULT": 0.5 },
+		{ "NAME": "driftSpeed", "LABEL": "Slide speed", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.06 },
+		{ "NAME": "discSize", "LABEL": "Disc size", "TYPE": "float", "MIN": 0.2, "MAX": 1.2, "DEFAULT": 0.47 },
+		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
+		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 5.0 },
+		{ "NAME": "foldLimit", "LABEL": "Folds", "TYPE": "float", "MIN": 6.0, "MAX": 60.0, "DEFAULT": 40.0 },
+		{ "NAME": "lineWidth", "LABEL": "Line width", "TYPE": "float", "MIN": 0.0, "MAX": 0.2, "DEFAULT": 0.035 },
+		{ "NAME": "lineDarkness", "LABEL": "Line shade", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.8 },
 		{ "NAME": "palette", "LABEL": "Palette", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 2 },
-		{ "NAME": "colourA", "LABEL": "Colour A (two-colour palette)", "TYPE": "color", "DEFAULT": [0.05, 0.05, 0.4, 1.0] },
-		{ "NAME": "colourB", "LABEL": "Colour B (two-colour palette)", "TYPE": "color", "DEFAULT": [1.0, 0.7, 0.3, 1.0] },
-		{ "NAME": "colourScale", "LABEL": "Colour bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.0 },
-		{ "NAME": "colourCycle", "LABEL": "Colour cycling (turns a second)", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.05 },
-		{ "NAME": "outsideColour", "LABEL": "Colour outside the disc", "TYPE": "color", "DEFAULT": [0.02, 0.02, 0.06, 1.0] }
+		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.05, 0.05, 0.4, 1.0] },
+		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.7, 0.3, 1.0] },
+		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.0 },
+		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.05 },
+		{ "NAME": "outsideColour", "LABEL": "Outside colour", "TYPE": "color", "DEFAULT": [0.02, 0.02, 0.06, 1.0] }
 	]
 }*/
 

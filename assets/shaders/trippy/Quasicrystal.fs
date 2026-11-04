@@ -2,25 +2,25 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "A quasicrystal: waves that run in several directions at once, evenly spread round the circle, added together. Where they agree the picture lights up, and the sum makes patterns that have a symmetry of five or seven or twelve and never repeat; the waves move and the pattern breathes.",
+	"DESCRIPTION": "A quasicrystal: waves that run in several directions at once, evenly spread round the circle, added together. Where they agree the picture lights up, and the sum makes patterns that have a symmetry of five or seven or twelve and never repeat; the waves move and the pattern breathes. Speeds and rates are in turns a second, unless said otherwise.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "directions", "LABEL": "Directions (symmetry)", "TYPE": "long", "VALUES": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "LABELS": ["3", "4", "5", "6", "7", "8", "9", "10", "11", "12"], "DEFAULT": 7 },
-		{ "NAME": "waveSize", "LABEL": "Wave size (higher: smaller)", "TYPE": "float", "MIN": 2.0, "MAX": 80.0, "DEFAULT": 18.0 },
-		{ "NAME": "speed", "LABEL": "Speed of the waves", "TYPE": "float", "MIN": -4.0, "MAX": 4.0, "DEFAULT": 0.8 },
-		{ "NAME": "breathing", "LABEL": "Breathing of the waves", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.12 },
-		{ "NAME": "rotation", "LABEL": "Rotation (degrees)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Spin (degrees a second)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 3.0 },
-		{ "NAME": "sharpness", "LABEL": "How sharp the pattern is", "TYPE": "float", "MIN": 0.2, "MAX": 6.0, "DEFAULT": 1.5 },
-		{ "NAME": "centerX", "LABEL": "Centre across", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "centerY", "LABEL": "Centre up", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "waveSize", "LABEL": "Wave scale", "TYPE": "float", "MIN": 2.0, "MAX": 80.0, "DEFAULT": 18.0 },
+		{ "NAME": "speed", "LABEL": "Speed", "TYPE": "float", "MIN": -4.0, "MAX": 4.0, "DEFAULT": 0.8 },
+		{ "NAME": "breathing", "LABEL": "Breathing", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.12 },
+		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
+		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 3.0 },
+		{ "NAME": "sharpness", "LABEL": "Sharpness", "TYPE": "float", "MIN": 0.2, "MAX": 6.0, "DEFAULT": 1.5 },
+		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "palette", "LABEL": "Palette", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 2 },
-		{ "NAME": "colourA", "LABEL": "Colour A (two-colour palette)", "TYPE": "color", "DEFAULT": [0.0, 0.05, 0.3, 1.0] },
-		{ "NAME": "colourB", "LABEL": "Colour B (two-colour palette)", "TYPE": "color", "DEFAULT": [1.0, 0.9, 0.5, 1.0] },
-		{ "NAME": "colourScale", "LABEL": "Colour bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.0 },
-		{ "NAME": "colourCycle", "LABEL": "Colour cycling (turns a second)", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.05 }
+		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.0, 0.05, 0.3, 1.0] },
+		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.9, 0.5, 1.0] },
+		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.0 },
+		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.05 }
 	]
 }*/
 

@@ -8,17 +8,17 @@
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "inputImage", "TYPE": "image" },
-		{ "NAME": "speed", "LABEL": "Speed down the tunnel", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.6 },
-		{ "NAME": "twist", "LABEL": "Twist of the tunnel", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.8 },
+		{ "NAME": "speed", "LABEL": "Speed", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.6 },
+		{ "NAME": "twist", "LABEL": "Twist", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.8 },
 		{ "NAME": "wraps", "LABEL": "Copies round the tunnel", "TYPE": "long", "VALUES": [1, 2, 3, 4, 5, 6], "LABELS": ["1", "2", "3", "4", "5", "6"], "DEFAULT": 2 },
-		{ "NAME": "tunnelLength", "LABEL": "How long the tunnel looks", "TYPE": "float", "MIN": 0.1, "MAX": 3.0, "DEFAULT": 0.5 },
-		{ "NAME": "pictureSize", "LABEL": "Picture along each stretch", "TYPE": "float", "MIN": 0.2, "MAX": 3.0, "DEFAULT": 1.0 },
-		{ "NAME": "darkness", "LABEL": "How dark the far end is", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.7 },
-		{ "NAME": "centerX", "LABEL": "Centre across", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "centerY", "LABEL": "Centre up", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "rotation", "LABEL": "Rotation (degrees)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Spin (degrees a second)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 6.0 },
-		{ "NAME": "amount", "LABEL": "Amount of the effect", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
+		{ "NAME": "tunnelLength", "LABEL": "Length", "TYPE": "float", "MIN": 0.1, "MAX": 3.0, "DEFAULT": 0.5 },
+		{ "NAME": "pictureSize", "LABEL": "Picture size", "TYPE": "float", "MIN": 0.2, "MAX": 3.0, "DEFAULT": 1.0 },
+		{ "NAME": "darkness", "LABEL": "Far darkness", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.7 },
+		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
+		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 6.0 },
+		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
 	]
 }*/
 

@@ -2,31 +2,31 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The basins of Newton's method for z to the power n, less one: every point of the picture is walked towards one of the roots, and is coloured by the root it reaches and how long the walk took. A relaxation that wobbles with the time, and a point that is added at each step, turn the basins into a slow flow of shapes.",
+	"DESCRIPTION": "The basins of Newton's method for z to the power n, less one: every point of the picture is walked towards one of the roots, and is coloured by the root it reaches and how long the walk took. A relaxation (1 is Newton's method) that wobbles with the time, and a point that is added at each step, turn the basins into a slow flow of shapes. The zoom is counted in octaves, which are doublings. Speeds and rates are in turns a second, unless said otherwise.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Fractal"],
 	"INPUTS": [
 		{ "NAME": "roots", "LABEL": "Roots", "TYPE": "long", "VALUES": [3, 4, 5, 6, 7, 8], "LABELS": ["3", "4", "5", "6", "7", "8"], "DEFAULT": 5 },
-		{ "NAME": "relaxation", "LABEL": "Relaxation (1 = Newton)", "TYPE": "float", "MIN": 0.2, "MAX": 2.2, "DEFAULT": 1.0 },
-		{ "NAME": "wobble", "LABEL": "How far the relaxation wobbles", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.3 },
-		{ "NAME": "wobbleSpeed", "LABEL": "Wobble speed (turns a second)", "TYPE": "float", "MIN": 0.0, "MAX": 2.0, "DEFAULT": 0.12 },
-		{ "NAME": "addX", "LABEL": "Point added at each step, across", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "addY", "LABEL": "Point added at each step, up", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "zoom", "LABEL": "Zoom (powers of two)", "TYPE": "float", "MIN": -2.0, "MAX": 10.0, "DEFAULT": 0.0 },
-		{ "NAME": "centerX", "LABEL": "Centre across", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.0 },
-		{ "NAME": "centerY", "LABEL": "Centre up", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.0 },
-		{ "NAME": "rotation", "LABEL": "Rotation (degrees)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Spin (degrees a second)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 3.0 },
-		{ "NAME": "iterations", "LABEL": "Steps of the walk", "TYPE": "float", "MIN": 8.0, "MAX": 150.0, "DEFAULT": 40.0 },
-		{ "NAME": "shade", "LABEL": "Darkening of long walks", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 0.8 },
-		{ "NAME": "palette", "LABEL": "Palette of the roots", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 2 },
-		{ "NAME": "colourA", "LABEL": "Colour A (two-colour palette)", "TYPE": "color", "DEFAULT": [0.05, 0.1, 0.6, 1.0] },
-		{ "NAME": "colourB", "LABEL": "Colour B (two-colour palette)", "TYPE": "color", "DEFAULT": [1.0, 0.7, 0.2, 1.0] },
+		{ "NAME": "relaxation", "LABEL": "Relaxation", "TYPE": "float", "MIN": 0.2, "MAX": 2.2, "DEFAULT": 1.0 },
+		{ "NAME": "wobble", "LABEL": "Wobble", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.3 },
+		{ "NAME": "wobbleSpeed", "LABEL": "Wobble rate", "TYPE": "float", "MIN": 0.0, "MAX": 2.0, "DEFAULT": 0.12 },
+		{ "NAME": "addX", "LABEL": "Added x", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.0 },
+		{ "NAME": "addY", "LABEL": "Added y", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.0 },
+		{ "NAME": "zoom", "LABEL": "Zoom", "TYPE": "float", "MIN": -2.0, "MAX": 10.0, "DEFAULT": 0.0 },
+		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.0 },
+		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.0 },
+		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
+		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 3.0 },
+		{ "NAME": "iterations", "LABEL": "Walk steps", "TYPE": "float", "MIN": 8.0, "MAX": 150.0, "DEFAULT": 40.0 },
+		{ "NAME": "shade", "LABEL": "Shading", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 0.8 },
+		{ "NAME": "palette", "LABEL": "Palette of roots", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 2 },
+		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.05, 0.1, 0.6, 1.0] },
+		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.7, 0.2, 1.0] },
 		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "colourCycle", "LABEL": "Colour cycling (turns a second)", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.04 },
-		{ "NAME": "lostColour", "LABEL": "Colour of lost points", "TYPE": "color", "DEFAULT": [0.0, 0.0, 0.0, 1.0] },
-		{ "NAME": "samples", "LABEL": "Smoothing of the edges", "TYPE": "long", "VALUES": [1, 2, 3], "LABELS": ["None", "4 samples a pixel", "9 samples a pixel"], "DEFAULT": 2 }
+		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.04 },
+		{ "NAME": "lostColour", "LABEL": "Lost colour", "TYPE": "color", "DEFAULT": [0.0, 0.0, 0.0, 1.0] },
+		{ "NAME": "samples", "LABEL": "Edge smoothing", "TYPE": "long", "VALUES": [1, 2, 3], "LABELS": ["None", "4 samples a pixel", "9 samples a pixel"], "DEFAULT": 2 }
 	]
 }*/
 

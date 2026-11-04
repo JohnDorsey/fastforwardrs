@@ -2,25 +2,25 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The picture seen through a kaleidoscope: it is cut into wedges that are mirrors of one another, round a point, and the picture inside them turns and drifts on its own, so that the pattern flows and does not just spin. Mirrors within mirrors, and a different turn of the colours in alternate wedges, make it a mandala.",
+	"DESCRIPTION": "The picture seen through a kaleidoscope: it is cut into wedges that are mirrors of one another, round a point, and the picture inside them turns (Image turn, and Image spin in degrees a second) and drifts on its own, so that the pattern flows and does not just spin. Mirrors within mirrors, and a different turn of the colours in alternate wedges, make it a mandala.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "inputImage", "TYPE": "image" },
-		{ "NAME": "wedges", "LABEL": "Wedges (a whole number)", "TYPE": "float", "MIN": 2.0, "MAX": 24.0, "DEFAULT": 8.0 },
+		{ "NAME": "wedges", "LABEL": "Wedges", "TYPE": "float", "MIN": 2.0, "MAX": 24.0, "DEFAULT": 8.0 },
 		{ "NAME": "mirrorsWithin", "LABEL": "Mirrors within mirrors", "TYPE": "long", "VALUES": [1, 2, 3], "LABELS": ["One set", "Two sets", "Three sets"], "DEFAULT": 2 },
-		{ "NAME": "centerX", "LABEL": "Centre across", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "centerY", "LABEL": "Centre up", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "rotation", "LABEL": "Rotation of the wedges (degrees)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Wedge spin (degrees a second)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 12.0 },
-		{ "NAME": "pictureTurn", "LABEL": "Picture turn (degrees)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "pictureSpin", "LABEL": "Picture spin (degrees a second)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": -7.0 },
-		{ "NAME": "zoom", "LABEL": "Zoom into the picture", "TYPE": "float", "MIN": 0.2, "MAX": 4.0, "DEFAULT": 1.2 },
-		{ "NAME": "driftSize", "LABEL": "How far the picture drifts", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.1 },
-		{ "NAME": "driftSpeed", "LABEL": "Drift speed (turns a second)", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.05 },
-		{ "NAME": "wedgeHue", "LABEL": "Colour turn of odd wedges", "TYPE": "float", "MIN": 0.0, "MAX": 180.0, "DEFAULT": 40.0 },
-		{ "NAME": "amount", "LABEL": "Amount of the effect", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
+		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
+		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 12.0 },
+		{ "NAME": "pictureTurn", "LABEL": "Image turn °", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
+		{ "NAME": "pictureSpin", "LABEL": "Image spin", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": -7.0 },
+		{ "NAME": "zoom", "LABEL": "Zoom", "TYPE": "float", "MIN": 0.2, "MAX": 4.0, "DEFAULT": 1.2 },
+		{ "NAME": "driftSize", "LABEL": "Drift", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.1 },
+		{ "NAME": "driftSpeed", "LABEL": "Drift turns/s", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.05 },
+		{ "NAME": "wedgeHue", "LABEL": "Odd hue", "TYPE": "float", "MIN": 0.0, "MAX": 180.0, "DEFAULT": 40.0 },
+		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
 	]
 }*/
 

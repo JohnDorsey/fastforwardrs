@@ -8,13 +8,13 @@
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "inputImage", "TYPE": "image" },
-		{ "NAME": "amountOfWarp", "LABEL": "How far the picture is pushed", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.08 },
-		{ "NAME": "fineness", "LABEL": "Ripple size (higher: smaller)", "TYPE": "float", "MIN": 0.5, "MAX": 12.0, "DEFAULT": 3.0 },
-		{ "NAME": "flowSpeed", "LABEL": "Speed of the flow", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 0.35 },
-		{ "NAME": "detailLevels", "LABEL": "Fine ripples on the big ones", "TYPE": "long", "VALUES": [1, 2, 3, 4, 5], "LABELS": ["None", "1", "2", "3", "4"], "DEFAULT": 3 },
-		{ "NAME": "warpOfWarp", "LABEL": "Noise pushed by noise", "TYPE": "float", "MIN": 0.0, "MAX": 2.0, "DEFAULT": 0.8 },
+		{ "NAME": "amountOfWarp", "LABEL": "Warp", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.08 },
+		{ "NAME": "fineness", "LABEL": "Ripple scale", "TYPE": "float", "MIN": 0.5, "MAX": 12.0, "DEFAULT": 3.0 },
+		{ "NAME": "flowSpeed", "LABEL": "Flow speed", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 0.35 },
+		{ "NAME": "detailLevels", "LABEL": "Fine ripples", "TYPE": "long", "VALUES": [1, 2, 3, 4, 5], "LABELS": ["None", "1", "2", "3", "4"], "DEFAULT": 3 },
+		{ "NAME": "warpOfWarp", "LABEL": "Push", "TYPE": "float", "MIN": 0.0, "MAX": 2.0, "DEFAULT": 0.8 },
 		{ "NAME": "splitColours", "LABEL": "Colour split", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.3 },
-		{ "NAME": "amount", "LABEL": "Amount of the effect", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
+		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
 	]
 }*/
 

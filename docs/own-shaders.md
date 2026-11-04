@@ -54,8 +54,7 @@ Mandelbrot set into blocks (the description of the shader says so).
 
 ## The other trippy shaders
 
-Four **generators** (they read no picture, and are made into clips with *New > Generator*) and nine **filters** (they work on the picture of the clip, track or group that they are on; every one has *Amount of
-the effect*, which is 0 for the picture as it is, so that the effect can be faded in with the stopwatch).
+Four **generators** (they read no picture, and are made into clips with *New > Generator*) and nine **filters** (they work on the picture of the clip, track or group that they are on; every one has *Amount*, which is 0 for the picture as it is, so that the effect can be faded in with the stopwatch).
 
 | Shader | What it does | What can be set |
 |---|---|---|
@@ -86,6 +85,21 @@ instead, and the same shader drew **the same picture on all five adapters, the s
 * **Looking.** `cargo run --release --example shader_pictures -- --out <folder> --adapter 2 --size 1280x720 --times 0,3,6 --values "palette=2;palette=5" <shader or folder> ...` writes a PNG of each shader at each time
   with each set of values, and `sheet.png` with all of them; `--measure N` says how long a frame takes on that adapter, `--wgsl` writes the WGSL that the graphics library is given, `--list` says which adapters there are.
   It is `shader_files::pictures` (nine tests of its own). **Look at the pictures on a real adapter**, and then on `--software` (see below).
+* **In the editor** (`application/fast_forward_application/shaders_of_the_program_tests.rs`): that they are installed when the editor is told to and not otherwise, that the editor of a person does tell it to, that the plugin
+  manager counts them, that a generator is made into a clip with its text in the project, and that **the Mandelbrot explorer put on a track is drawn by the picture engine in the preview of a window** (a window with the engine, on the
+  software graphics adapter: the test looks at the frame that the preview shows, which has many colours in it, and a generator clip that makes no layer fails it), and that **nothing in the box of any shader is under the buttons of its
+  row or makes the box wider than the panel** (`nothing_in_the_box_of_a_shader_of_the_program_is_under_the_buttons_of_its_row_or_makes_the_box_wider_than_the_panel`: it puts each shader on a clip, as it begins and then with the
+  longest words of every choice chosen, and measures the controls that are drawn; a number may be 8 points under the buttons, which is the margin of its own box). The window of the screenshot tests has no engine, so the
+  preview in the picture of the box of a generator that it makes is black. **Not tried: the window of a person, on a real graphics card, with a real mouse.**
+* **The boxes fit the panel.** The properties panel is 340 points wide, and what whoever writes a shader writes for it (the labels of its inputs, and the words of its choices) has to fit in it. **A number with a long label has its box
+  under the buttons that come out of the end of its row while the pointer is on it** (the one that reads the number from a mask, and those of its keyframes), which hide the number while its slider is dragged; and **a choice with
+  long words makes the whole box wider than the panel**, so that all of its rows go on past the edge, where they are cut off. Both were found by looking at pictures of the box of the Mandelbrot explorer
+  (`write_screenshots_of_a_generator_that_comes_with_the_program` in `tests/application_screenshots.rs`, run by hand: its labels were of up to 31 characters, and one of its words had 43), and then by a test that looks at
+  every box as it is drawn (see *In the editor*), which found more: the box of Julia Dance **began 18 points wider than the panel**, which no picture of the first generator had shown. A label of more than about ten or eleven letters
+  is too long for a number (it depends on the letters: *Rotation (°)* fits, *Colour bands* did not), and a label and the words of a choice together should be no more than about 35 characters. The labels and words are short now
+  (`°` for degrees, `x` and `y` for a place, *speed* or *spin* for how fast), and what they cannot say is said by the description of the shader (speeds and rates are in turns a second unless it says otherwise; the zoom is counted
+  in octaves, which are doublings). (A panel that wraps a long label was tried and **changed the program's own boxes**: the text field of a text object moved under its label, and 33 of the 120 other pictures that the screenshot
+  tests draw were different when they were drawn before and after and compared; it was taken out again.)
 * **Tests of every shader** (`shader_files/shaders_of_the_program/tests.rs`): that the folder and the list are the same files; that each begins with the two lines of SPDX; that each reads, compiles, can be used, has a
   description, a category, a label on every input, a range that holds its first value and at most 60 numbers of inputs; that the fractals are generators; that each draws a picture with colours in it at two times; and that
   **every input of every shader changes the picture** in at least one way of setting the shader up (the test has a list of those ways for each shader: the Julia point is only used while Julia is on, an orbit trap only

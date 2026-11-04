@@ -2,24 +2,24 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "Rings that run out across the picture from one point, two or three, as if drops fell on water that the picture is under: it bends and shines where the waves are, the colours can be pulled apart along them, and they fade with the distance.",
+	"DESCRIPTION": "Rings that run out across the picture from one point, two or three, as if drops fell on water that the picture is under: it bends and shines where the waves are, the colours can be pulled apart along them, and they fade with the distance. Speeds and rates are in turns a second, unless said otherwise.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "inputImage", "TYPE": "image" },
-		{ "NAME": "waveHeight", "LABEL": "Height of the waves", "TYPE": "float", "MIN": 0.0, "MAX": 0.1, "DEFAULT": 0.02 },
-		{ "NAME": "waveLength", "LABEL": "Distance between the rings", "TYPE": "float", "MIN": 0.01, "MAX": 0.5, "DEFAULT": 0.09 },
-		{ "NAME": "speed", "LABEL": "Ring speed (rings a second)", "TYPE": "float", "MIN": -4.0, "MAX": 4.0, "DEFAULT": 0.6 },
-		{ "NAME": "fadeAway", "LABEL": "Fading of the rings", "TYPE": "float", "MIN": 0.0, "MAX": 5.0, "DEFAULT": 0.9 },
-		{ "NAME": "sources", "LABEL": "Places the rings run out from", "TYPE": "long", "VALUES": [1, 2, 3], "LABELS": ["1", "2", "3"], "DEFAULT": 2 },
-		{ "NAME": "sourceSpread", "LABEL": "Distance of the places", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.18 },
-		{ "NAME": "sourceSpin", "LABEL": "Source spin (turns a second)", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.05 },
-		{ "NAME": "centerX", "LABEL": "Centre across", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "centerY", "LABEL": "Centre up", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "shine", "LABEL": "Shine of the waves", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.35 },
+		{ "NAME": "waveHeight", "LABEL": "Height", "TYPE": "float", "MIN": 0.0, "MAX": 0.1, "DEFAULT": 0.02 },
+		{ "NAME": "waveLength", "LABEL": "Spacing", "TYPE": "float", "MIN": 0.01, "MAX": 0.5, "DEFAULT": 0.09 },
+		{ "NAME": "speed", "LABEL": "Speed", "TYPE": "float", "MIN": -4.0, "MAX": 4.0, "DEFAULT": 0.6 },
+		{ "NAME": "fadeAway", "LABEL": "Fade", "TYPE": "float", "MIN": 0.0, "MAX": 5.0, "DEFAULT": 0.9 },
+		{ "NAME": "sources", "LABEL": "Sources", "TYPE": "long", "VALUES": [1, 2, 3], "LABELS": ["1", "2", "3"], "DEFAULT": 2 },
+		{ "NAME": "sourceSpread", "LABEL": "Source dist.", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.18 },
+		{ "NAME": "sourceSpin", "LABEL": "Source spin", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.05 },
+		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "shine", "LABEL": "Shine", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.35 },
 		{ "NAME": "splitColours", "LABEL": "Colour split", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.25 },
-		{ "NAME": "amount", "LABEL": "Amount of the effect", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
+		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
 	]
 }*/
 

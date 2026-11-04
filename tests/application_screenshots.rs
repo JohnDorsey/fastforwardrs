@@ -1499,3 +1499,63 @@ fn write_screenshots_of_a_midi_file_imported() {
         "40_a_midi_file_imported_two_clips_without_a_synthesizer",
     );
 }
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_a_generator_that_comes_with_the_program() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let mut journey = Journey::start(&toolchain);
+    // The editor of a person has the shaders that come with the program; a test has them when it says so.
+    journey.application_mut().install_the_shaders_of_the_program();
+    while journey.application().is_scanning_plugins() {
+        journey.keep_drawing_for(std::time::Duration::from_millis(50));
+    }
+    journey.add_a_track();
+    journey.settle();
+
+    // New, then Generator: a list of the generators that there are, by name.
+    let empty_part = journey.point_on_the_strip_at_frame(0, 30);
+    journey.right_click(empty_part);
+    journey.harness.get_by_label_contains("New").click();
+    journey.settle();
+    journey.harness.get_by_label("Generator \u{23f5}").click();
+    journey.settle();
+    save_what_is_drawn(&mut journey, &folder, "130_the_list_of_the_generators_in_the_new_menu");
+
+    // One of them is a clip, selected, and its box is in the properties panel: a slider for each input, the longest labels beside them.
+    journey.harness.get_by_label("Mandelbrot explorer").click();
+    journey.settle();
+    // (The preview is black: the window of this test has no picture engine, which a window drawn by the graphics card has. What the engine draws of a generator is the business of
+    // `a_generator_of_the_program_is_drawn_by_the_engine_in_the_preview_of_the_window_as_the_picture_it_makes` among the tests of the library.)
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save(
+        &mut journey,
+        &folder,
+        "131_the_box_of_a_generator_that_comes_with_the_program",
+    );
+
+    // The buttons of the keyframes float to the right of a row while the pointer is on it: what they cover of a row whose number has the widest box (its label is short, and the number has seven characters) and of another.
+    for (label, name) in [
+        ("Target x", "132_the_pointer_on_a_row_whose_number_has_the_widest_box"),
+        ("Zoom speed", "133_the_pointer_on_a_row_with_a_label_of_ten_characters"),
+    ] {
+        let on_the_row = journey.rectangle_of(label).center();
+        journey.move_pointer_to(on_the_row);
+        journey.settle();
+        save(&mut journey, &folder, name);
+    }
+
+    // Another generator, on the track below, whose lists once had words so long that its box was wider than the panel from the start.
+    let on_the_track_below = journey.point_on_the_strip_at_frame(1, 30);
+    journey.right_click(on_the_track_below);
+    journey.harness.get_by_label_contains("New").click();
+    journey.settle();
+    journey.harness.get_by_label("Generator \u{23f5}").click();
+    journey.settle();
+    journey.harness.get_by_label("Julia dance").click();
+    journey.settle();
+    journey.move_pointer_to(egui::pos2(5.0, 5.0));
+    save(&mut journey, &folder, "134_the_box_of_another_generator");
+}

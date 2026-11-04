@@ -2,31 +2,31 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "Circles inside circles inside circles: the plane is folded into a tile and turned inside out again and again, and what is left is a gasket of circles that never ends. The strength of the turning inside out and the drift of the tile make it flow.",
+	"DESCRIPTION": "Circles inside circles inside circles: the plane is folded into a tile and turned inside out again and again, and what is left is a gasket of circles that never ends. The strength of the turning inside out and the drift of the tile make it flow. The zoom is counted in octaves, which are doublings. Speeds and rates are in turns a second, unless said otherwise.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Fractal"],
 	"INPUTS": [
-		{ "NAME": "inversion", "LABEL": "Inversion strength", "TYPE": "float", "MIN": 1.0, "MAX": 1.6, "DEFAULT": 1.18 },
-		{ "NAME": "inversionWobble", "LABEL": "How far that wobbles", "TYPE": "float", "MIN": 0.0, "MAX": 0.3, "DEFAULT": 0.06 },
-		{ "NAME": "wobbleSpeed", "LABEL": "Wobble speed (turns a second)", "TYPE": "float", "MIN": 0.0, "MAX": 2.0, "DEFAULT": 0.1 },
-		{ "NAME": "driftSize", "LABEL": "How far the tile drifts", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.2 },
-		{ "NAME": "driftSpeed", "LABEL": "Drift speed (turns a second)", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.05 },
+		{ "NAME": "inversion", "LABEL": "Inversion", "TYPE": "float", "MIN": 1.0, "MAX": 1.6, "DEFAULT": 1.18 },
+		{ "NAME": "inversionWobble", "LABEL": "Wobble", "TYPE": "float", "MIN": 0.0, "MAX": 0.3, "DEFAULT": 0.06 },
+		{ "NAME": "wobbleSpeed", "LABEL": "Wobble rate", "TYPE": "float", "MIN": 0.0, "MAX": 2.0, "DEFAULT": 0.1 },
+		{ "NAME": "driftSize", "LABEL": "Drift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.2 },
+		{ "NAME": "driftSpeed", "LABEL": "Drift turns/s", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.05 },
 		{ "NAME": "iterations", "LABEL": "Folds", "TYPE": "float", "MIN": 2.0, "MAX": 14.0, "DEFAULT": 8.0 },
-		{ "NAME": "zoom", "LABEL": "Zoom (powers of two)", "TYPE": "float", "MIN": -2.0, "MAX": 6.0, "DEFAULT": 0.0 },
-		{ "NAME": "centerX", "LABEL": "Centre across", "TYPE": "float", "MIN": -4.0, "MAX": 4.0, "DEFAULT": 0.0 },
-		{ "NAME": "centerY", "LABEL": "Centre up", "TYPE": "float", "MIN": -4.0, "MAX": 4.0, "DEFAULT": 0.0 },
-		{ "NAME": "rotation", "LABEL": "Rotation (degrees)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Spin (degrees a second)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 4.0 },
-		{ "NAME": "colourMode", "LABEL": "Colour by", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["How near the orbit comes to the middle of a circle", "How deep the folds go", "Both"], "DEFAULT": 2 },
+		{ "NAME": "zoom", "LABEL": "Zoom", "TYPE": "float", "MIN": -2.0, "MAX": 6.0, "DEFAULT": 0.0 },
+		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": -4.0, "MAX": 4.0, "DEFAULT": 0.0 },
+		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": -4.0, "MAX": 4.0, "DEFAULT": 0.0 },
+		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
+		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 4.0 },
+		{ "NAME": "colourMode", "LABEL": "Colour by", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["Orbit near a circle", "Fold depth", "Both"], "DEFAULT": 2 },
 		{ "NAME": "palette", "LABEL": "Palette", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 4 },
-		{ "NAME": "colourA", "LABEL": "Colour A (two-colour palette)", "TYPE": "color", "DEFAULT": [0.02, 0.05, 0.3, 1.0] },
-		{ "NAME": "colourB", "LABEL": "Colour B (two-colour palette)", "TYPE": "color", "DEFAULT": [1.0, 0.85, 0.4, 1.0] },
-		{ "NAME": "colourScale", "LABEL": "Colour bands", "TYPE": "float", "MIN": 0.05, "MAX": 8.0, "DEFAULT": 1.0 },
+		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.02, 0.05, 0.3, 1.0] },
+		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.85, 0.4, 1.0] },
+		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.05, "MAX": 8.0, "DEFAULT": 1.0 },
 		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "colourCycle", "LABEL": "Colour cycling (turns a second)", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.05 },
-		{ "NAME": "lines", "LABEL": "Dark lines along the circles", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.6 },
-		{ "NAME": "samples", "LABEL": "Smoothing of the edges", "TYPE": "long", "VALUES": [1, 2, 3], "LABELS": ["None", "4 samples a pixel", "9 samples a pixel"], "DEFAULT": 2 }
+		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.05 },
+		{ "NAME": "lines", "LABEL": "Dark lines", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.6 },
+		{ "NAME": "samples", "LABEL": "Edge smoothing", "TYPE": "long", "VALUES": [1, 2, 3], "LABELS": ["None", "4 samples a pixel", "9 samples a pixel"], "DEFAULT": 2 }
 	]
 }*/
 

@@ -2,26 +2,26 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "Ink in water, or the veins of marble that is still liquid: smooth noise read at places that are pushed by smooth noise that is pushed by smooth noise, so that the colour folds into itself in slow tongues and swirls and never stops moving. Veins of a lighter colour run through it, if you want them.",
+	"DESCRIPTION": "Ink in water, or the veins of marble that is still liquid: smooth noise read at places that are pushed by smooth noise that is pushed by smooth noise, so that the colour folds into itself in slow tongues and swirls and never stops moving. Veins of a lighter colour run through it, if you want them. Speeds and rates are in turns a second, unless said otherwise.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
-		{ "NAME": "scale", "LABEL": "Swirl size (higher: smaller)", "TYPE": "float", "MIN": 0.3, "MAX": 10.0, "DEFAULT": 1.6 },
-		{ "NAME": "flowSpeed", "LABEL": "Speed of the flow", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 0.3 },
-		{ "NAME": "pushing", "LABEL": "Noise pushed by noise", "TYPE": "float", "MIN": 0.0, "MAX": 8.0, "DEFAULT": 3.2 },
-		{ "NAME": "detailLevels", "LABEL": "Fine swirls on the big ones", "TYPE": "long", "VALUES": [1, 2, 3, 4, 5], "LABELS": ["None", "1", "2", "3", "4"], "DEFAULT": 4 },
-		{ "NAME": "veins", "LABEL": "Veins (0 is none)", "TYPE": "float", "MIN": 0.0, "MAX": 12.0, "DEFAULT": 4.0 },
-		{ "NAME": "veinSharpness", "LABEL": "How thin the veins are", "TYPE": "float", "MIN": 1.0, "MAX": 40.0, "DEFAULT": 8.0 },
-		{ "NAME": "veinStrength", "LABEL": "How bright the veins are", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.35 },
-		{ "NAME": "centerX", "LABEL": "Centre across", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "centerY", "LABEL": "Centre up", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "scale", "LABEL": "Swirl scale", "TYPE": "float", "MIN": 0.3, "MAX": 10.0, "DEFAULT": 1.6 },
+		{ "NAME": "flowSpeed", "LABEL": "Flow speed", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 0.3 },
+		{ "NAME": "pushing", "LABEL": "Push", "TYPE": "float", "MIN": 0.0, "MAX": 8.0, "DEFAULT": 3.2 },
+		{ "NAME": "detailLevels", "LABEL": "Fine swirls", "TYPE": "long", "VALUES": [1, 2, 3, 4, 5], "LABELS": ["None", "1", "2", "3", "4"], "DEFAULT": 4 },
+		{ "NAME": "veins", "LABEL": "Veins", "TYPE": "float", "MIN": 0.0, "MAX": 12.0, "DEFAULT": 4.0 },
+		{ "NAME": "veinSharpness", "LABEL": "Thinness", "TYPE": "float", "MIN": 1.0, "MAX": 40.0, "DEFAULT": 8.0 },
+		{ "NAME": "veinStrength", "LABEL": "Brightness", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.35 },
+		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
+		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "palette", "LABEL": "Palette", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 4 },
-		{ "NAME": "colourA", "LABEL": "Colour A (two-colour palette)", "TYPE": "color", "DEFAULT": [0.02, 0.02, 0.25, 1.0] },
-		{ "NAME": "colourB", "LABEL": "Colour B (two-colour palette)", "TYPE": "color", "DEFAULT": [0.95, 0.6, 0.9, 1.0] },
-		{ "NAME": "colourScale", "LABEL": "Colour bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.4 },
+		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.02, 0.02, 0.25, 1.0] },
+		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [0.95, 0.6, 0.9, 1.0] },
+		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.4 },
 		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "colourCycle", "LABEL": "Colour cycling (turns a second)", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.04 }
+		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.04 }
 	]
 }*/
 
