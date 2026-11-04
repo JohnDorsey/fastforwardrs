@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The picture repainted in a palette: how light each place is picks its colour, so that a face is made of fire or ice or all the colours of the rainbow, and the colours run through the picture as waves and cycle with the time. Solarize it, posterize it (the number is how many steps of lightness there are, and under 1 is none), and keep as much of the real colours as you like. Speeds and rates are in turns a second, unless said otherwise.",
+	"DESCRIPTION": "The picture repainted in a palette: how light each place is picks its colour, so that a face is made of fire or ice or all the colours of the rainbow, and waves of colour run through the picture. Solarize it, posterize it (the number is how many steps of lightness there are, and under 1 is none), and keep as much of the real colours as you like. Colour shift and Wave shift move the colours along the palette. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
@@ -13,9 +13,8 @@
 		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.85, 0.3, 1.0] },
 		{ "NAME": "bands", "LABEL": "Repeats", "TYPE": "float", "MIN": 0.2, "MAX": 8.0, "DEFAULT": 1.5 },
 		{ "NAME": "shift", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "cycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.15 },
 		{ "NAME": "waves", "LABEL": "Waves", "TYPE": "float", "MIN": 0.0, "MAX": 4.0, "DEFAULT": 0.6 },
-		{ "NAME": "waveSpeed", "LABEL": "Wave speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.2 },
+		{ "NAME": "wavePhase", "LABEL": "Wave shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
 		{ "NAME": "solarize", "LABEL": "Solarize", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
 		{ "NAME": "posterize", "LABEL": "Posterize", "TYPE": "float", "MIN": 0.0, "MAX": 16.0, "DEFAULT": 0.0 },
 		{ "NAME": "keepColour", "LABEL": "Keep colour", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.2 },
@@ -88,8 +87,8 @@ void main()
 	}
 	// A wave of colour that runs through the picture: the colour of a place is moved along the palette by the wave that is there.
 	vec2 across_the_picture = (isf_FragNormCoord - 0.5) * vec2(aspect, 1.0);
-	float wave = waves * (across_the_picture.x * 0.7 + across_the_picture.y * 0.4 + 0.5 * length(across_the_picture));
-	float along = light * bands + shift + cycle * TIME + wave + waveSpeed * TIME * waves;
+	float wave = waves * (across_the_picture.x * 0.7 + across_the_picture.y * 0.4 + 0.5 * length(across_the_picture) + wavePhase);
+	float along = light * bands + shift + wave;
 	vec3 painted = palette_colour(palette, along);
 	vec3 colour = mix(painted, painted * (0.3 + 1.4 * original.rgb), keepColour);
 	gl_FragColor = mix(original, vec4(colour, original.a), amount);

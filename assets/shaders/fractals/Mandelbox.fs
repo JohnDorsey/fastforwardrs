@@ -2,21 +2,18 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The Mandelbox: space is folded back into a box and then into a ball, again and again, and what is left is a building of towers, halls and endless rooms. The scale, which decides what it looks like, drifts with the time, and the camera can go round it or be put inside it. Drawn by ray marching, with light, fog and a glow. The camera is inside the box when its distance is under about 12. It asks a great deal of the graphics card: lower the ray steps or raise the coarseness for a quick look. Speeds and rates are in turns a second, unless said otherwise.",
+	"DESCRIPTION": "The Mandelbox: space is folded back into a box and then into a ball, again and again, and what is left is a building of towers, halls and endless rooms. The scale decides what it looks like, and the camera can go round it (Cam. turn) or be put inside it. Drawn by ray marching, with light, fog and a glow. The camera is inside the box when its distance is under about 12. It asks a great deal of the graphics card: lower the ray steps or raise the coarseness for a quick look. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Fractal"],
 	"INPUTS": [
 		{ "NAME": "boxScale", "LABEL": "Scale", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 2.0 },
-		{ "NAME": "scaleDrift", "LABEL": "Scale drift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.15 },
-		{ "NAME": "driftSpeed", "LABEL": "Drift turns/s", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.03 },
 		{ "NAME": "boxFolds", "LABEL": "Folds", "TYPE": "float", "MIN": 2.0, "MAX": 16.0, "DEFAULT": 9.0 },
 		{ "NAME": "foldLimit", "LABEL": "Box size", "TYPE": "float", "MIN": 0.5, "MAX": 2.0, "DEFAULT": 1.0 },
 		{ "NAME": "ballRadius", "LABEL": "Ball radius", "TYPE": "float", "MIN": 0.2, "MAX": 1.2, "DEFAULT": 0.5 },
 		{ "NAME": "cameraTurn", "LABEL": "Cam. turn °", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 35.0 },
 		{ "NAME": "cameraTilt", "LABEL": "Cam. tilt °", "TYPE": "float", "MIN": -85.0, "MAX": 85.0, "DEFAULT": 25.0 },
 		{ "NAME": "cameraDistance", "LABEL": "Distance", "TYPE": "float", "MIN": 1.0, "MAX": 40.0, "DEFAULT": 17.0 },
-		{ "NAME": "cameraSpin", "LABEL": "Orbit (°/s)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 8.0 },
 		{ "NAME": "fieldOfView", "LABEL": "View angle", "TYPE": "float", "MIN": 15.0, "MAX": 110.0, "DEFAULT": 50.0 },
 		{ "NAME": "maxSteps", "LABEL": "Ray steps", "TYPE": "float", "MIN": 30.0, "MAX": 300.0, "DEFAULT": 120.0 },
 		{ "NAME": "detail", "LABEL": "Coarseness", "TYPE": "float", "MIN": 0.2, "MAX": 4.0, "DEFAULT": 1.0 },
@@ -30,7 +27,6 @@
 		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.8, 0.3, 1.0] },
 		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.05, "MAX": 8.0, "DEFAULT": 0.6 },
 		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.03 },
 		{ "NAME": "samples", "LABEL": "Edge smoothing", "TYPE": "long", "VALUES": [1, 2], "LABELS": ["None", "4 samples a pixel"], "DEFAULT": 1 }
 	]
 }*/
@@ -92,7 +88,7 @@ vec3 palette_colour(int which, float t)
 // How far `point` is from the box, and how near the folded point came to the middle (squared), which the colour is made from.
 float scene_distance(vec3 point, out float trap)
 {
-	float scale_now = boxScale + scaleDrift * sin(TAU * driftSpeed * TIME);
+	float scale_now = boxScale;
 	float inner_squared = ballRadius * ballRadius;
 	vec3 z = point;
 	// How much the folds and the scalings have stretched space so far: the distance to the shape is divided by it.
@@ -132,8 +128,8 @@ float scene_distance(vec3 point, out float trap)
 //                               how far `point` is from the shape (an estimate that is never more than the real distance), and a number from 0 up, `trap`, that tells the parts of the
 //                               shape apart (how near the point's orbit came to the middle, or the like) and that the colour is made from
 //
-// and the inputs cameraTurn, cameraTilt, cameraDistance, cameraSpin, fieldOfView, maxSteps, detail, lightTurn, glowAmount, fogAmount, backgroundTop, backgroundBottom, colourScale,
-// colourOffset, colourCycle, palette and samples (and colourA and colourB, for the palettes). This block has the main function.
+// and the inputs cameraTurn, cameraTilt, cameraDistance, fieldOfView, maxSteps, detail, lightTurn, glowAmount, fogAmount, backgroundTop, backgroundBottom, colourScale,
+// colourOffset, palette and samples (and colourA and colourB, for the palettes). This block has the main function.
 
 // The direction that the light comes from.
 vec3 light_direction()
@@ -156,7 +152,7 @@ vec3 surface_facing(vec3 point, float reach_of_the_look)
 
 // What a ray from `eye` towards `direction` sees: the colour of the shape where it hits it, in the light, with fog, and otherwise the sky with a glow round the shape where the ray went near it.
 // `pixel_angle` is how wide a pixel is, as an angle: the shape is let to be this far from the ray, in the angle of a pixel, and the ray stops there.
-vec3 colour_seen_by_the_ray(vec3 eye, vec3 direction, float pixel_angle, float sky_height, float colour_time)
+vec3 colour_seen_by_the_ray(vec3 eye, vec3 direction, float pixel_angle, float sky_height)
 {
 	vec3 sky = mix(backgroundBottom.rgb, backgroundTop.rgb, clamp(sky_height * 0.5 + 0.5, 0.0, 1.0));
 	// Only the part of the ray inside the sphere that holds the shape is followed.
@@ -192,7 +188,7 @@ vec3 colour_seen_by_the_ray(vec3 eye, vec3 direction, float pixel_angle, float s
 	}
 	// The glow round the shape: stronger the nearer the ray passed to it, and fading away towards the edge of the sphere that holds the shape (where rays are no longer followed).
 	float nearest_to_the_middle = sqrt(max(dot(eye, eye) - along_the_middle * along_the_middle, 0.0)) / SCENE_RADIUS;
-	vec3 halo = palette_colour(palette, 0.35 + colourOffset + colour_time) * glowAmount * exp(-nearest_pass * 14.0) * (1.0 - smoothstep(0.45, 1.0, nearest_to_the_middle));
+	vec3 halo = palette_colour(palette, 0.35 + colourOffset) * glowAmount * exp(-nearest_pass * 14.0) * (1.0 - smoothstep(0.45, 1.0, nearest_to_the_middle));
 	if (!hit) {
 		return sky + halo;
 	}
@@ -205,7 +201,7 @@ vec3 colour_seen_by_the_ray(vec3 eye, vec3 direction, float pixel_angle, float s
 	// Crevices need more steps to get into, so the number of steps says how closed in a place is.
 	float open = 1.0 - clamp(used_steps / float(maxSteps), 0.0, 1.0);
 	float shadowing = open * open * 0.8 + 0.2;
-	vec3 paint = palette_colour(palette, sqrt(max(trap, 0.0)) * colourScale + colourOffset + colour_time);
+	vec3 paint = palette_colour(palette, sqrt(max(trap, 0.0)) * colourScale + colourOffset);
 	vec3 seen = paint * (0.18 + 0.9 * lit) * shadowing + vec3(shine * 0.35 * shadowing);
 	// Fog: what is far away is the colour of the sky.
 	float fog = 1.0 - exp(-travelled * fogAmount * 0.08);
@@ -214,7 +210,7 @@ vec3 colour_seen_by_the_ray(vec3 eye, vec3 direction, float pixel_angle, float s
 
 void main()
 {
-	float turn = radians(cameraTurn + cameraSpin * TIME);
+	float turn = radians(cameraTurn);
 	float tilt = radians(clamp(cameraTilt, -89.0, 89.0));
 	vec3 eye = cameraDistance * vec3(cos(tilt) * sin(turn), sin(tilt), cos(tilt) * cos(turn));
 	vec3 forward = normalize(-eye);
@@ -222,7 +218,6 @@ void main()
 	vec3 up = cross(right, forward);
 	float focal = 1.0 / tan(radians(fieldOfView) * 0.5);
 	float pixel_angle = 2.0 / (focal * RENDERSIZE.y);
-	float colour_time = colourCycle * TIME;
 	int across = samples;
 	vec3 total = vec3(0.0);
 	// (One loop over the samples, and not one in another: the software adapter of Windows stops on a shader of this kind that has two.)
@@ -233,7 +228,7 @@ void main()
 		vec2 offset = (vec2(float(sample_number - (sample_number / across) * across), float(sample_number / across)) + 0.5) / float(across) - 0.5;
 		vec2 screen = (gl_FragCoord.xy + offset - 0.5 * RENDERSIZE.xy) / (0.5 * RENDERSIZE.y);
 		vec3 direction = normalize(forward * focal + right * screen.x + up * screen.y);
-		total += colour_seen_by_the_ray(eye, direction, pixel_angle, screen.y, colour_time);
+		total += colour_seen_by_the_ray(eye, direction, pixel_angle, screen.y);
 	}
 	gl_FragColor = vec4(total / float(across * across), 1.0);
 }

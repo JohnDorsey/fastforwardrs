@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The picture seen through a prism: the red, green and blue of it are pulled apart (in one direction, away from a point, or round it), and copies of it ring the middle, each in a colour of its own, so that every edge grows a rainbow. Speeds and rates are in turns a second, unless said otherwise.",
+	"DESCRIPTION": "The picture seen through a prism: the red, green and blue of it are pulled apart (in one direction, away from a point, or round it), and copies of it ring the middle, each in a colour of its own, so that every edge grows a rainbow. Copy turn takes the copies round the ring. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
@@ -11,11 +11,10 @@
 		{ "NAME": "spread", "LABEL": "Colour split", "TYPE": "float", "MIN": 0.0, "MAX": 0.15, "DEFAULT": 0.02 },
 		{ "NAME": "pullDirection", "LABEL": "Split direction", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["One direction", "Away from the centre", "Round the centre"], "DEFAULT": 1 },
 		{ "NAME": "angle", "LABEL": "Angle °", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "angleSpin", "LABEL": "Angle (°/s)", "TYPE": "float", "MIN": -360.0, "MAX": 360.0, "DEFAULT": 20.0 },
 		{ "NAME": "copies", "LABEL": "Copies round the middle", "TYPE": "long", "VALUES": [0, 2, 3, 4, 5, 6], "LABELS": ["None", "2", "3", "4", "5", "6"], "DEFAULT": 3 },
 		{ "NAME": "copyDistance", "LABEL": "Copy radius", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.12 },
 		{ "NAME": "copyStrength", "LABEL": "Copy power", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
-		{ "NAME": "copySpin", "LABEL": "Copy spin", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.08 },
+		{ "NAME": "copyTurn", "LABEL": "Copy turn", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
 		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
@@ -59,7 +58,7 @@ vec3 hue_turned(vec3 colour, float turn)
 // How far, and which way, the red is pulled at a point of the picture (the blue is pulled the other way).
 vec2 pull_at(vec2 uv, vec2 centre, float aspect)
 {
-	float turn = radians(angle + angleSpin * TIME);
+	float turn = radians(angle);
 	if (pullDirection == 0) {
 		return spread * vec2(cos(turn), sin(turn)) / vec2(aspect, 1.0) * 1.0;
 	}
@@ -90,7 +89,7 @@ void main()
 		if (copy_number >= copies) {
 			break;
 		}
-		float copy_angle = TAU * (float(copy_number) / float(copies) + copySpin * TIME);
+		float copy_angle = TAU * (float(copy_number) / float(copies) + copyTurn);
 		vec2 shifted = uv + copyDistance * vec2(cos(copy_angle), sin(copy_angle)) / vec2(aspect, 1.0);
 		vec3 copy_colour = IMG_NORM_PIXEL(inputImage, mirrored_repeat(shifted)).rgb;
 		ring += hue_turned(copy_colour, copy_angle);

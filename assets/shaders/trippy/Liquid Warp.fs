@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The picture seen through moving liquid: it is pushed about by smooth noise that is itself pushed about by noise, so that it melts, ripples and flows, and the three colours can be pulled apart along the flow. Mirrored at the edges.",
+	"DESCRIPTION": "The picture seen through liquid: it is pushed about by smooth noise that is itself pushed about by noise, so that it melts, ripples and flows (Flow is how far the liquid has flowed), and the three colours can be pulled apart along the flow. Mirrored at the edges. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
@@ -10,7 +10,7 @@
 		{ "NAME": "inputImage", "TYPE": "image" },
 		{ "NAME": "amountOfWarp", "LABEL": "Warp", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.08 },
 		{ "NAME": "fineness", "LABEL": "Ripple scale", "TYPE": "float", "MIN": 0.5, "MAX": 12.0, "DEFAULT": 3.0 },
-		{ "NAME": "flowSpeed", "LABEL": "Flow speed", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 0.35 },
+		{ "NAME": "flow", "LABEL": "Flow", "TYPE": "float", "MIN": 0.0, "MAX": 30.0, "DEFAULT": 0.0 },
 		{ "NAME": "detailLevels", "LABEL": "Fine ripples", "TYPE": "long", "VALUES": [1, 2, 3, 4, 5], "LABELS": ["None", "1", "2", "3", "4"], "DEFAULT": 3 },
 		{ "NAME": "warpOfWarp", "LABEL": "Push", "TYPE": "float", "MIN": 0.0, "MAX": 2.0, "DEFAULT": 0.8 },
 		{ "NAME": "splitColours", "LABEL": "Colour split", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.3 },
@@ -112,7 +112,7 @@ void main()
 	vec2 uv = isf_FragNormCoord;
 	float aspect = RENDERSIZE.x / RENDERSIZE.y;
 	vec2 point = (uv - 0.5) * vec2(aspect, 1.0) * fineness;
-	float moving = TIME * flowSpeed;
+	float moving = flow;
 	// The first noise, two numbers a point: how far to push across and up.
 	vec2 first = vec2(
 		layered_noise(vec3(point, moving), detailLevels),

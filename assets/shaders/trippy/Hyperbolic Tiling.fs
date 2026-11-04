@@ -2,17 +2,16 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "A tiling of the hyperbolic plane, drawn in a disc, in which the tiles are all the same size and shape and are squeezed smaller and smaller towards the rim, where there is no end of them. The disc is slid about inside itself as the clip plays, so that the tiles stream past and shrink away into the edge. Speeds and rates are in turns a second, unless said otherwise.",
+	"DESCRIPTION": "A tiling of the hyperbolic plane, drawn in a disc, in which the tiles are all the same size and shape and are squeezed smaller and smaller towards the rim, where there is no end of them. The disc can be slid about inside itself (Slide is how far, and Slide angle which way), so that the tiles stream past and shrink away into the edge. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "tiling", "LABEL": "Tiling", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "LABELS": ["3 sides, 7 at a corner", "3 sides, 8 at a corner", "4 sides, 5 at a corner", "4 sides, 6 at a corner", "5 sides, 4 at a corner", "5 sides, 5 at a corner", "6 sides, 4 at a corner", "7 sides, 3 at a corner", "8 sides, 3 at a corner", "4 sides, 8 at a corner"], "DEFAULT": 4 },
-		{ "NAME": "driftSize", "LABEL": "Slide", "TYPE": "float", "MIN": 0.0, "MAX": 0.9, "DEFAULT": 0.5 },
-		{ "NAME": "driftSpeed", "LABEL": "Slide speed", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.06 },
+		{ "NAME": "slideSize", "LABEL": "Slide", "TYPE": "float", "MIN": 0.0, "MAX": 0.9, "DEFAULT": 0.5 },
+		{ "NAME": "slideAngle", "LABEL": "Slide angle", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
 		{ "NAME": "discSize", "LABEL": "Disc size", "TYPE": "float", "MIN": 0.2, "MAX": 1.2, "DEFAULT": 0.47 },
 		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 5.0 },
 		{ "NAME": "foldLimit", "LABEL": "Folds", "TYPE": "float", "MIN": 6.0, "MAX": 60.0, "DEFAULT": 40.0 },
 		{ "NAME": "lineWidth", "LABEL": "Line width", "TYPE": "float", "MIN": 0.0, "MAX": 0.2, "DEFAULT": 0.035 },
 		{ "NAME": "lineDarkness", "LABEL": "Line shade", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.8 },
@@ -20,7 +19,7 @@
 		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.05, 0.05, 0.4, 1.0] },
 		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.7, 0.3, 1.0] },
 		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.0 },
-		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.05 },
+		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
 		{ "NAME": "outsideColour", "LABEL": "Outside colour", "TYPE": "color", "DEFAULT": [0.02, 0.02, 0.06, 1.0] }
 	]
 }*/
@@ -132,11 +131,11 @@ void main()
 	float aspect = RENDERSIZE.x / RENDERSIZE.y;
 	vec2 on_the_screen = (isf_FragNormCoord - 0.5) * vec2(aspect, 1.0) / discSize;
 	float outside = length(on_the_screen);
-	float turn = radians(rotation + spin * TIME);
+	float turn = radians(rotation);
 	vec2 place = vec2(cos(turn) * on_the_screen.x - sin(turn) * on_the_screen.y, sin(turn) * on_the_screen.x + cos(turn) * on_the_screen.y);
 	// The disc slid about inside itself: a move of the hyperbolic plane that takes the point `slide` to the middle.
-	float slide_angle = TAU * driftSpeed * TIME;
-	vec2 slide = driftSize * vec2(cos(slide_angle), sin(slide_angle * 1.3));
+	float slide_angle = TAU * slideAngle;
+	vec2 slide = slideSize * vec2(cos(slide_angle), sin(slide_angle));
 	vec2 z = complex_divide(place - slide, vec2(1.0, 0.0) - complex_multiply(vec2(slide.x, -slide.y), place));
 	float folds = 0.0;
 	int most_folds = int(foldLimit);
@@ -165,7 +164,7 @@ void main()
 	float to_the_edge = length(z - circle_middle) - circle_radius;
 	float line_amount = 1.0 - smoothstep(0.0, lineWidth, to_the_edge);
 	float angle_of_the_point = atan(z.y, z.x);
-	float t = folds * 0.13 * colourScale + length(z) * 0.5 * colourScale + angle_of_the_point * 0.4 + colourCycle * TIME;
+	float t = folds * 0.13 * colourScale + length(z) * 0.5 * colourScale + angle_of_the_point * 0.4 + colourOffset;
 	vec3 tile = palette_colour(palette, t);
 	vec3 colour = tile * (1.0 - lineDarkness * line_amount);
 	// The rim: what is outside the disc, and a fade into it where the tiles are too small to be told apart.

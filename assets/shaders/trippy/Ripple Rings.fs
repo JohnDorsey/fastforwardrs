@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "Rings that run out across the picture from one point, two or three, as if drops fell on water that the picture is under: it bends and shines where the waves are, the colours can be pulled apart along them, and they fade with the distance. Speeds and rates are in turns a second, unless said otherwise.",
+	"DESCRIPTION": "Rings that run out across the picture from one point, two or three, as if drops fell on water that the picture is under: it bends and shines where the waves are, the colours can be pulled apart along them, and they fade with the distance. Phase is how far the rings have run out (1 is one ring further, which looks the same as 0), and Source turn takes the sources round. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
@@ -10,11 +10,11 @@
 		{ "NAME": "inputImage", "TYPE": "image" },
 		{ "NAME": "waveHeight", "LABEL": "Height", "TYPE": "float", "MIN": 0.0, "MAX": 0.1, "DEFAULT": 0.02 },
 		{ "NAME": "waveLength", "LABEL": "Spacing", "TYPE": "float", "MIN": 0.01, "MAX": 0.5, "DEFAULT": 0.09 },
-		{ "NAME": "speed", "LABEL": "Speed", "TYPE": "float", "MIN": -4.0, "MAX": 4.0, "DEFAULT": 0.6 },
+		{ "NAME": "wavePhase", "LABEL": "Phase", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
 		{ "NAME": "fadeAway", "LABEL": "Fade", "TYPE": "float", "MIN": 0.0, "MAX": 5.0, "DEFAULT": 0.9 },
 		{ "NAME": "sources", "LABEL": "Sources", "TYPE": "long", "VALUES": [1, 2, 3], "LABELS": ["1", "2", "3"], "DEFAULT": 2 },
 		{ "NAME": "sourceSpread", "LABEL": "Source dist.", "TYPE": "float", "MIN": 0.0, "MAX": 0.5, "DEFAULT": 0.18 },
-		{ "NAME": "sourceSpin", "LABEL": "Source spin", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.05 },
+		{ "NAME": "sourceTurn", "LABEL": "Source turn", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
 		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "shine", "LABEL": "Shine", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.35 },
@@ -68,11 +68,11 @@ void main()
 		if (source_number >= sources) {
 			break;
 		}
-		float source_angle = TAU * (float(source_number) / float(sources) + sourceSpin * TIME);
+		float source_angle = TAU * (float(source_number) / float(sources) + sourceTurn);
 		vec2 source = centre + sourceSpread * vec2(cos(source_angle), sin(source_angle)) / vec2(aspect, 1.0);
 		vec2 away = (uv - source) * vec2(aspect, 1.0);
 		float distance_away = max(length(away), 1.0e-4);
-		float phase = TAU * (distance_away / waveLength - speed * TIME);
+		float phase = TAU * (distance_away / waveLength - wavePhase);
 		float fading = exp(-fadeAway * distance_away);
 		push += away / distance_away * sin(phase) * fading;
 		slope += cos(phase) * fading;

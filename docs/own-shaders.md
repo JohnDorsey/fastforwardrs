@@ -20,33 +20,36 @@ content that ships in the box (`distribution-notices.md`), made on the maintaine
   kind of effect (its key has the digest of its text), and the projects that used the old one go on running it.
 * **Licence: CC0-1.0**, as for the five look-up tables: made for the program, nothing of anyone else's (they were written from the mathematics, not from another person's code), with two lines of SPDX at the top
   of each file. The maintainer can change this: it is those two lines (and the same two lines of `assets/shaders/shared`).
-* Every input of every shader is a value like any other: a slider, the stopwatch and keyframes (a switch and a choice have no keyframes: they hold until they are changed). **Each moves with `TIME` by
-  default**, with a speed that can be put to nothing, so that a clip made from it is not a still picture; every one has labels that say what each input does, and a way to colour it (eight palettes, and
-  one that is made of two colours that a person picks).
+* Every input of every shader is a value like any other: a slider, the stopwatch and keyframes (a switch and a choice have no keyframes: they hold until they are changed). **Nothing moves by itself.** There is no input that
+  sets a *rate* beside one that sets the thing that would change (no spin beside a rotation, no wobble beside the value that wobbles, no cycling of the colours beside the shift of them, no orbit beside a camera angle): a person can
+  give that slider keyframes, which is more control than a rate is. Where there was no slider for what a rate moved, the input is that itself: *Depth* of the Droste spiral, *Flight* down the tunnel, *Phase* of the plasma, the
+  quasicrystal and the ripples, *Flow* of the liquids, *Slide angle* of the hyperbolic tiling, *Along path* of Julia Dance (where the point is on its path), *Shift x* and *y* of the kaleidoscope. The only rates left are those of
+  Video Feedback (the growth, turn, slide and colour turn of its echo each second), which build on the frame before and have nothing else that they could be. Every one has labels that say what each input does, and a way to
+  colour it (eight palettes, and one that is made of two colours that a person picks).
 
 ## The fractal generators
 
 | Shader | What it makes | What can be set (besides the colours) |
 |---|---|---|
-| **Mandelbrot Explorer** | the Mandelbrot set and its relatives, or the Julia set of a point, zoomed in as the clip plays (it begins on the whole set and glides to a branching point of the edge) | six folds of the plane (Mandelbrot, Burning Ship, Tricorn, Celtic, two more), any power from 2, zoom and the speed of it (it turns back at a depth), the point zoomed in on, rotation and spin, iterations (and more for each power of two of zoom), the Julia point and a circle that it goes round, six ways of colouring (smooth count, three orbit traps, distance to the set, count and angle), the glow along the edge, smoothing of the edges |
-| **Julia Dance** | a Julia set that breathes: its point goes round the edge of the main cardioid (or the disc beside it, or a circle) | how far out along the path, the speed, the place it starts, nudges, power, zoom, centre, rotation and spin, iterations, four ways of colouring the outside and three of colouring the inside |
-| **Newton Basins** | the basins of Newton's method for z to the power n less one: the root that each point walks to, and how long the walk took | 3 to 8 roots, the relaxation (it wobbles with the time), a point added at each step, zoom, centre, rotation and spin, steps of the walk, how much long walks are darkened, the colour of the points that never arrive |
-| **Apollonian Gasket** | circles inside circles without end (the plane is folded into a tile and turned inside out again and again) | the strength of the turning inside out (it wobbles), the drift of the tile, folds, zoom, centre, rotation and spin, three ways of colouring, dark lines along the circles |
-| **Mandelbulb** | the Mandelbrot set in three dimensions, by ray marching | the power (it wobbles with the time, so the bulb turns into other shapes), iterations, a cut that opens it, the camera (angle, height, distance, how fast it goes round, field of view), steps, coarseness of the detail, the light, glow, fog, the two colours of the sky |
-| **Folded Sponge** | the Menger sponge or the Sierpinski tetrahedron, made by folding space | the shape, folds, a twist between the folds (it changes with the time, and makes bending, spiralling relatives), and the camera, light, fog and glow of the Mandelbulb |
-| **Mandelbox** | the Mandelbox: space folded back into a box and then into a ball | the scale (it drifts), folds, the size of the box and of the ball, and the camera, light, fog and glow; the camera can be put inside the box |
+| **Mandelbrot Explorer** | the Mandelbrot set and its relatives, or the Julia set of a point (it begins on the whole set and, as the zoom goes in, glides to a branching point of the edge) | six folds of the plane (Mandelbrot, Burning Ship, Tricorn, Celtic, two more), any power from 2, the zoom, the point zoomed in on, rotation, iterations (and more for each power of two of zoom), the Julia point, six ways of colouring (smooth count, three orbit traps, distance to the set, count and angle), the glow along the edge, smoothing of the edges |
+| **Julia Dance** | a Julia set for a point on a path: the edge of the main cardioid (or the disc beside it, or a circle) | how far out the path is, where along it the point is (*Along path*: the set grows branches and falls to dust as the point goes round), nudges, power, zoom, centre, rotation, iterations, four ways of colouring the outside and three of colouring the inside |
+| **Newton Basins** | the basins of Newton's method for z to the power n less one: the root that each point walks to, and how long the walk took | 3 to 8 roots, the relaxation, a point added at each step, zoom, centre, rotation, steps of the walk, how much long walks are darkened, the colour of the points that never arrive |
+| **Apollonian Gasket** | circles inside circles without end (the plane is folded into a tile and turned inside out again and again) | the strength of the turning inside out, folds, zoom, centre, rotation, three ways of colouring, dark lines along the circles |
+| **Mandelbulb** | the Mandelbrot set in three dimensions, by ray marching | the power, iterations, a cut that opens it, the camera (angle round, height, distance, field of view), steps, coarseness of the detail, the light, glow, fog, the two colours of the sky |
+| **Folded Sponge** | the Menger sponge or the Sierpinski tetrahedron, made by folding space | the shape, folds, a twist between the folds (it makes bending, spiralling relatives), and the camera, light, fog and glow of the Mandelbulb |
+| **Mandelbox** | the Mandelbox: space folded back into a box and then into a ball | the scale, folds, the size of the box and of the ball, and the camera, light, fog and glow; the camera can be put inside the box |
 
-**Measured** (2026-11-03, at 1920x1080, at the time 4 s with the values that each begins as, the mean of six frames, `examples/shader_pictures.rs --measure 6`, DX12):
+**Measured** (2026-11-04, at 1920x1080, with the values that each begins as (nothing moves by itself, so every time is the same), the mean of six frames, `examples/shader_pictures.rs --measure 6`, DX12):
 
 | | RTX 3090 | AMD Radeon (the graphics of the processor) |
 |---|---|---|
-| Apollonian Gasket | 3.4 ms | 22 ms |
-| Folded Sponge | 4.3 ms | 41 ms |
-| Mandelbulb | 4.0 ms | 62 ms |
-| Mandelbrot Explorer | 5.4 ms | 118 ms |
-| Newton Basins | 4.8 ms | 150 ms |
-| Julia Dance | 5.0 ms | 163 ms |
-| Mandelbox | 6.1 ms | 190 ms |
+| Apollonian Gasket | 3.1 ms | 21 ms |
+| Folded Sponge | 3.2 ms | 39 ms |
+| Mandelbulb | 3.6 ms | 61 ms |
+| Mandelbrot Explorer | 4.2 ms | 94 ms |
+| Newton Basins | 4.4 ms | 157 ms |
+| Julia Dance | 4.8 ms | 184 ms |
+| Mandelbox | 6.2 ms | 241 ms |
 
 The 2D ones are drawn with 4 samples to a pixel to begin with (a choice of *Smoothing of the edges*) and the 3D ones are heavy by nature (*Steps of a ray*, *Coarseness of the detail* and the number of folds or iterations
 make them cheaper). The program's preview makes the picture smaller on a computer that cannot keep up. **Limits:** the shaders compute in single precision, so a zoom deeper than about 14 powers of two turns the
@@ -58,19 +61,19 @@ Four **generators** (they read no picture, and are made into clips with *New > G
 
 | Shader | What it does | What can be set |
 |---|---|---|
-| **Plasma Storm** (generator) | a plasma: waves added to waves, bent by waves, a slow storm of colour | the size of the waves, layers of bending and how much each bends, a swirl, the speed, the palette |
-| **Quasicrystal** (generator) | waves in 3 to 12 directions added together: patterns with a five-fold or seven-fold symmetry that never repeat, and that breathe | the number of directions, the size, speed and breathing of the waves, rotation and spin, how sharp the pattern is |
+| **Plasma Storm** (generator) | a plasma: waves added to waves, bent by waves, a storm of colour | the size of the waves, layers of bending and how much each bends, a swirl, the phase (how far the storm has got), the palette |
+| **Quasicrystal** (generator) | waves in 3 to 12 directions added together: patterns with a five-fold or seven-fold symmetry that never repeat | the number of directions, the size and the phase of the waves, rotation, how sharp the pattern is |
 | **Liquid Marble** (generator) | ink in water, or the veins of liquid marble: noise read at places that noise pushes, twice | the size of the swirls, the flow, how much the noise is pushed by noise, fine swirls on big ones, veins (how many, how thin, how bright) |
-| **Hyperbolic Tiling** (generator) | a tiling of the hyperbolic plane in a disc (ten tilings to choose from, such as five-sided tiles with four at a corner), slid about inside itself so that the tiles stream past and shrink into the rim | the tiling, how far and how fast the disc slides, the size of the disc, rotation and spin, the folds that are made, the lines between the tiles |
-| **Kaleidoscope Mandala** | the picture seen through a kaleidoscope: wedges that are mirrors of one another, mirrors within mirrors, and a picture inside that turns and drifts on its own | the number of wedges, mirrors within mirrors, the centre, the turn and spin of the wedges and of the picture inside, zoom, drift, a turn of the colours in alternate wedges |
-| **Droste Spiral** | the picture inside the picture without end, along a spiral if you like | how many times smaller each copy is, the arms of the spiral (0 is a straight tunnel), the speed in or out, how much of the picture each copy shows, how much deeper copies are darkened |
-| **Tunnel Warp** | the picture on the walls of a tunnel that is flown down, twisting | the speed, the twist, how many copies there are round the tunnel, how long it looks, how dark the far end is |
-| **Liquid Warp** | the picture seen through moving liquid, with the colours pulled apart along the flow | how far it is pushed, the size of the ripples, the speed, fine ripples, how much the noise is pushed by noise |
-| **Prism Split** | red, green and blue pulled apart (one way, away from a point, or round it), and copies of the picture ringing the middle, each in a colour of its own | how far, the direction and the angle (it can turn), how many copies, how far and how strong, how fast they go round |
-| **Acid Palette** | the picture repainted in a palette by how light each place is, with waves of colour through it | the palette, how many times it goes round, a shift and a cycling, waves, solarize, posterize, how much of the real colour is kept |
-| **Neon Edges** | the edges drawn in glowing colours, as neon tubes, on a dimmed picture | the width of the lines, their brightness, how strong an edge has to be, what colours them (the way the edge faces, its strength, or where it is), the palette |
+| **Hyperbolic Tiling** (generator) | a tiling of the hyperbolic plane in a disc (ten tilings to choose from, such as five-sided tiles with four at a corner), which can be slid about inside itself so that the tiles stream past and shrink into the rim | the tiling, how far the disc slides and which way, the size of the disc, rotation, the folds that are made, the lines between the tiles |
+| **Kaleidoscope Mandala** | the picture seen through a kaleidoscope: wedges that are mirrors of one another, mirrors within mirrors, and a picture inside that can be turned and shifted | the number of wedges, mirrors within mirrors, the centre, the turn of the wedges and of the picture inside, zoom, a shift of the picture inside, a turn of the colours in alternate wedges |
+| **Droste Spiral** | the picture inside the picture without end, along a spiral if you like | how many times smaller each copy is, the arms of the spiral (0 is a straight tunnel), how deep it goes in, how much of the picture each copy shows, how much deeper copies are darkened |
+| **Tunnel Warp** | the picture on the walls of a tunnel that is flown down, twisting | the flight (how far down the tunnel you are), the twist, how many copies there are round the tunnel, how long it looks, how dark the far end is |
+| **Liquid Warp** | the picture seen through liquid, with the colours pulled apart along the flow | how far it is pushed, the size of the ripples, the flow (how far the liquid has flowed), fine ripples, how much the noise is pushed by noise |
+| **Prism Split** | red, green and blue pulled apart (one way, away from a point, or round it), and copies of the picture ringing the middle, each in a colour of its own | how far, the direction and the angle, how many copies, how far and how strong, how far round the ring they are |
+| **Acid Palette** | the picture repainted in a palette by how light each place is, with waves of colour through it | the palette, how many times it goes round, a shift of the colours, waves and a shift of them, solarize, posterize, how much of the real colour is kept |
+| **Neon Edges** | the edges drawn in glowing colours, as neon tubes, on a dimmed picture | the width of the lines, their brightness, how strong an edge has to be, what colours them (the way the edge faces, its strength, or where it is), the palette and a shift of it |
 | **Video Feedback** | what a camera pointed at its own screen makes: every frame is the frame before it, a little larger, turned, shifted, turned in colour and faded, with the live picture let in (**it remembers the frames before it**: the preview is exact when it is played from the start, and the export always is; the box says *Depends on earlier frames*) | the growth, turn, slide and colour turn of the echo each second, how much of it is kept, how much of the live picture is let in and how |
-| **Ripple Rings** | rings that run out from one place, two or three, as if drops fell on water that the picture is under: it bends and shines where the waves are | the height and length of the waves, their speed, how fast they fade, the places they run out from (and how far they go round), the shine |
+| **Ripple Rings** | rings that run out from one place, two or three, as if drops fell on water that the picture is under: it bends and shines where the waves are | the height and length of the waves, their phase (how far the rings have run out), how fast they fade, the places they run out from (and how far round the ring they are), the shine |
 
 **Noise is made by whole-number arithmetic.** The first noise (a hash of the corner of each cell by `fract(sin(...) * 43758.5453)`, as nearly every shader that is passed about has it) drew **five different pictures on the five
 adapters of this computer** (the RTX 3090 on Vulkan had blocks in it; the Radeon was smooth): a card's `sin` of a large number is not the same on every make of card. The block `noise` has a hash of 32-bit whole numbers
@@ -97,8 +100,8 @@ instead, and the same shader drew **the same picture on all five adapters, the s
   (`write_screenshots_of_a_generator_that_comes_with_the_program` in `tests/application_screenshots.rs`, run by hand: its labels were of up to 31 characters, and one of its words had 43), and then by a test that looks at
   every box as it is drawn (see *In the editor*), which found more: the box of Julia Dance **began 18 points wider than the panel**, which no picture of the first generator had shown. A label of more than about ten or eleven letters
   is too long for a number (it depends on the letters: *Rotation (°)* fits, *Colour bands* did not), and a label and the words of a choice together should be no more than about 35 characters. The labels and words are short now
-  (`°` for degrees, `x` and `y` for a place, *speed* or *spin* for how fast), and what they cannot say is said by the description of the shader (speeds and rates are in turns a second unless it says otherwise; the zoom is counted
-  in octaves, which are doublings). (A panel that wraps a long label was tried and **changed the program's own boxes**: the text field of a text object moved under its label, and 33 of the 120 other pictures that the screenshot
+  (`°` for degrees, `x` and `y` for a place), and what they cannot say is said by the description of the shader (the zoom is counted
+  in octaves, which are doublings; the echo of Video Feedback is for each second). (A panel that wraps a long label was tried and **changed the program's own boxes**: the text field of a text object moved under its label, and 33 of the 120 other pictures that the screenshot
   tests draw were different when they were drawn before and after and compared; it was taken out again.)
 * **Tests of every shader** (`shader_files/shaders_of_the_program/tests.rs`): that the folder and the list are the same files; that each begins with the two lines of SPDX; that each reads, compiles, can be used, has a
   description, a category, a label on every input, a range that holds its first value and at most 60 numbers of inputs; that the fractals are generators; that each draws a picture with colours in it at two times; and that

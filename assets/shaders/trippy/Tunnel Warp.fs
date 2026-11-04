@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The picture on the walls of a tunnel that you fly down: it is wrapped round the inside of a pipe that goes away to a point in the middle, and slides towards you as the clip plays, twisting as it comes. Mirrored, so that there is never an edge.",
+	"DESCRIPTION": "The picture on the walls of a tunnel that you fly down: it is wrapped round the inside of a pipe that goes away to a point in the middle, twisting as it comes. Flight takes you down it (1 is there and back, which looks the same as 0). Mirrored, so that there is never an edge. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "inputImage", "TYPE": "image" },
-		{ "NAME": "speed", "LABEL": "Speed", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.6 },
+		{ "NAME": "flight", "LABEL": "Flight", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
 		{ "NAME": "twist", "LABEL": "Twist", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.8 },
 		{ "NAME": "wraps", "LABEL": "Copies round the tunnel", "TYPE": "long", "VALUES": [1, 2, 3, 4, 5, 6], "LABELS": ["1", "2", "3", "4", "5", "6"], "DEFAULT": 2 },
 		{ "NAME": "tunnelLength", "LABEL": "Length", "TYPE": "float", "MIN": 0.1, "MAX": 3.0, "DEFAULT": 0.5 },
@@ -17,7 +17,6 @@
 		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 6.0 },
 		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
 	]
 }*/
@@ -60,13 +59,13 @@ void main()
 {
 	vec2 centre = vec2(centerX, centerY);
 	float aspect = RENDERSIZE.x / RENDERSIZE.y;
-	vec2 here = rotated((isf_FragNormCoord - centre) * vec2(aspect, 1.0), -radians(rotation + spin * TIME));
+	vec2 here = rotated((isf_FragNormCoord - centre) * vec2(aspect, 1.0), -radians(rotation));
 	float radius = max(length(here), 1.0e-4);
 	float angle = atan(here.y, here.x);
 	// How far down the tunnel the wall is at this point: the nearer the middle, the farther.
 	float depth = tunnelLength / radius;
 	float around = angle / TAU * float(wraps) + twist * depth * 0.1;
-	float along = (depth + speed * TIME) / pictureSize;
+	float along = depth / pictureSize + 2.0 * flight;
 	vec2 place = mirrored_repeat(vec2(around, along));
 	vec4 seen = IMG_NORM_PIXEL(inputImage, place);
 	// (The far end is dark, and the very middle, where the picture is too fine to be anything but noise, is darker still.)

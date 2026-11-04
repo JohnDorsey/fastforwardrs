@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "A plasma: waves added to waves, bent by waves, until the whole picture is a slow storm of colour. Every layer of bending makes it more tangled; the palette runs through it and cycles with the time. Speeds and rates are in turns a second, unless said otherwise.",
+	"DESCRIPTION": "A plasma: waves added to waves, bent by waves, until the whole picture is a storm of colour. Every layer of bending makes it more tangled. Phase is how far the storm has got, and Colour shift moves the palette through it. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
@@ -11,15 +11,14 @@
 		{ "NAME": "bendLayers", "LABEL": "Layers of bending", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4], "LABELS": ["None", "1", "2", "3", "4"], "DEFAULT": 2 },
 		{ "NAME": "bendAmount", "LABEL": "Bend", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 1.2 },
 		{ "NAME": "swirl", "LABEL": "Swirl", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.6 },
-		{ "NAME": "speed", "LABEL": "Speed", "TYPE": "float", "MIN": 0.0, "MAX": 4.0, "DEFAULT": 0.6 },
+		{ "NAME": "timeShift", "LABEL": "Phase", "TYPE": "float", "MIN": 0.0, "MAX": 30.0, "DEFAULT": 0.0 },
 		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "palette", "LABEL": "Palette", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 3 },
 		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.05, 0.0, 0.3, 1.0] },
 		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.4, 0.8, 1.0] },
 		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.2 },
-		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.06 }
+		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 }
 	]
 }*/
 
@@ -79,7 +78,7 @@ void main()
 {
 	float aspect = RENDERSIZE.x / RENDERSIZE.y;
 	vec2 p = (isf_FragNormCoord - vec2(centerX, centerY)) * vec2(aspect, 1.0) * scale;
-	float moving = TIME * speed;
+	float moving = timeShift;
 	// The middle turns faster than the edge.
 	float swirl_angle = swirl * (1.0 - clamp(length(p) / (scale * 0.8), 0.0, 1.0)) * 2.0;
 	p = vec2(cos(swirl_angle) * p.x - sin(swirl_angle) * p.y, sin(swirl_angle) * p.x + cos(swirl_angle) * p.y);
@@ -93,5 +92,5 @@ void main()
 	}
 	float sum = sin(p.x + moving) + sin(p.y * 1.2 - moving * 0.7) + sin((p.x + p.y) * 0.8 + moving * 0.5) + sin(length(p) * 1.5 - moving);
 	float level = sum * 0.125 + 0.5;
-	gl_FragColor = vec4(palette_colour(palette, level * colourScale + colourOffset + colourCycle * TIME), 1.0);
+	gl_FragColor = vec4(palette_colour(palette, level * colourScale + colourOffset), 1.0);
 }

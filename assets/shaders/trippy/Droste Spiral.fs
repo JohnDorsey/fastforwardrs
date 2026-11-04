@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The picture inside the picture inside the picture, without end: each copy is a number of times smaller than the one outside it, and they go on in towards the middle for ever, along a spiral if you like (with 0 spiral arms it is a straight tunnel), and in or out as the clip plays.",
+	"DESCRIPTION": "The picture inside the picture inside the picture, without end: each copy is a number of times smaller than the one outside it, and they go on in towards the middle for ever, along a spiral if you like (with 0 spiral arms it is a straight tunnel). Depth takes it in towards the middle: a whole copy deeper is 1. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
@@ -10,12 +10,11 @@
 		{ "NAME": "inputImage", "TYPE": "image" },
 		{ "NAME": "ratio", "LABEL": "Shrink", "TYPE": "float", "MIN": 1.3, "MAX": 16.0, "DEFAULT": 3.0 },
 		{ "NAME": "arms", "LABEL": "Spiral arms", "TYPE": "long", "VALUES": [-3, -2, -1, 0, 1, 2, 3], "LABELS": ["3 the other way", "2 the other way", "1 the other way", "0", "1", "2", "3"], "DEFAULT": 1 },
-		{ "NAME": "speed", "LABEL": "Speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.25 },
+		{ "NAME": "inward", "LABEL": "Depth", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
 		{ "NAME": "pictureSize", "LABEL": "Picture size", "TYPE": "float", "MIN": 0.3, "MAX": 1.4, "DEFAULT": 0.75 },
 		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 },
 		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
 		{ "NAME": "darkenInward", "LABEL": "Darkening", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.15 },
 		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
 	]
@@ -59,13 +58,13 @@ void main()
 {
 	vec2 centre = vec2(centerX, centerY);
 	float aspect = RENDERSIZE.x / RENDERSIZE.y;
-	vec2 here = rotated((isf_FragNormCoord - centre) * vec2(aspect, 1.0), -radians(rotation + spin * TIME));
+	vec2 here = rotated((isf_FragNormCoord - centre) * vec2(aspect, 1.0), -radians(rotation));
 	float radius = max(length(here), 1.0e-5);
 	float angle = atan(here.y, here.x);
 	// The size of a point is its logarithm: a copy that is `ratio` times smaller is one period further in, and a spiral is a size that goes with the angle. (The arms are whole numbers,
 	// so that the size is the same at the two ends of the angle, where it is cut.)
 	float period = log(ratio);
-	float along = log(radius) - float(arms) * (angle / TAU) * period + speed * TIME * period;
+	float along = log(radius) - float(arms) * (angle / TAU) * period + inward * period;
 	// Where in its period the point is, from just past the size of the copy that is inside to the size of the copy that holds it.
 	float within = mod(along, period) - period;
 	float copy_radius = exp(within) * pictureSize;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The edges of the picture drawn in glowing colours, as if it were made of neon tubes: where the picture changes quickly a line lights up (an edge weaker than the cut-off does not), in a colour that goes with the way the edge faces, how strong it is or where it is, and the colours cycle with the time. The picture under the lines can be dimmed or kept. Speeds and rates are in turns a second, unless said otherwise.",
+	"DESCRIPTION": "The edges of the picture drawn in glowing colours, as if it were made of neon tubes: where the picture changes quickly a line lights up (an edge weaker than the cut-off does not), in a colour that goes with the way the edge faces, how strong it is or where it is, and Colour shift moves the colours along the palette. The picture under the lines can be dimmed or kept. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
@@ -16,7 +16,7 @@
 		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.0, 0.8, 1.0, 1.0] },
 		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.1, 0.8, 1.0] },
 		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.0 },
-		{ "NAME": "cycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.2 },
+		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
 		{ "NAME": "keepPicture", "LABEL": "Picture", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.15 },
 		{ "NAME": "amount", "LABEL": "Amount", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 1.0 }
 	]
@@ -105,7 +105,7 @@ void main()
 	} else {
 		along = (isf_FragNormCoord.x + isf_FragNormCoord.y * 0.6) * colourScale;
 	}
-	vec3 tube = palette_colour(palette, along + cycle * TIME);
+	vec3 tube = palette_colour(palette, along + colourOffset);
 	// A little extra where the line is brightest, as a tube glows white in the middle.
 	vec3 lit = tube * tube_strength + vec3(1.0) * tube_strength * tube_strength * tube_strength * 0.35;
 	vec3 colour = original.rgb * keepPicture + lit;

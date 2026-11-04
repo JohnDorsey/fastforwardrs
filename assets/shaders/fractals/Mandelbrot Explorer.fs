@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The Mandelbrot set and its relatives, or the Julia set of a point, drawn with smooth colours and zoomed in as the clip plays. The zoom is counted in octaves, which are doublings: 3 is eight times closer; the zoom speed is octaves a second, the zoom turns back at its limit, and each octave of depth adds a number of iterations (Per octave). Several variants of the plane (Burning Ship, Tricorn, Celtic, and two that fold the real or the imaginary part before the power), any power from 2 up, six ways of colouring, eight palettes. Single precision: deeper than about 14 octaves the picture turns blocky. Speeds and rates are in turns a second, unless said otherwise.",
+	"DESCRIPTION": "The Mandelbrot set and its relatives, or the Julia set of a point, drawn with smooth colours. The zoom is counted in octaves, which are doublings: 3 is eight times closer, and each octave of depth adds a number of iterations (Per octave). While Begin on the whole set is on, the view glides from the whole set to the target as the zoom goes in. Several variants of the plane (Burning Ship, Tricorn, Celtic, and two that fold the real or the imaginary part before the power), any power from 2 up, six ways of colouring, eight palettes. Single precision: deeper than about 14 octaves the picture turns blocky. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Fractal"],
@@ -10,28 +10,22 @@
 		{ "NAME": "variant", "LABEL": "Variant", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5], "LABELS": ["Mandelbrot", "Burning Ship", "Tricorn (conjugate)", "Celtic", "Fold real, then power", "Fold imaginary, then power"], "DEFAULT": 0 },
 		{ "NAME": "power", "LABEL": "Power", "TYPE": "float", "MIN": 2.0, "MAX": 8.0, "DEFAULT": 2.0 },
 		{ "NAME": "zoom", "LABEL": "Zoom", "TYPE": "float", "MIN": -1.0, "MAX": 16.0, "DEFAULT": 0.0 },
-		{ "NAME": "zoomSpeed", "LABEL": "Zoom speed", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 0.7 },
-		{ "NAME": "zoomLimit", "LABEL": "Zoom limit", "TYPE": "float", "MIN": 1.0, "MAX": 16.0, "DEFAULT": 12.0 },
 		{ "NAME": "centerX", "LABEL": "Target x", "TYPE": "float", "MIN": -2.5, "MAX": 2.5, "DEFAULT": -0.10109636 },
 		{ "NAME": "centerY", "LABEL": "Target y", "TYPE": "float", "MIN": -2.5, "MAX": 2.5, "DEFAULT": 0.95628651 },
 		{ "NAME": "wholeSetFirst", "LABEL": "Begin on the whole set", "TYPE": "bool", "DEFAULT": true },
 		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 3.0 },
 		{ "NAME": "iterations", "LABEL": "Iterations", "TYPE": "float", "MIN": 16.0, "MAX": 1500.0, "DEFAULT": 150.0 },
 		{ "NAME": "iterationsPerZoom", "LABEL": "Per octave", "TYPE": "float", "MIN": 0.0, "MAX": 100.0, "DEFAULT": 25.0 },
 		{ "NAME": "bailout", "LABEL": "Bailout", "TYPE": "float", "MIN": 4.0, "MAX": 1000.0, "DEFAULT": 64.0 },
 		{ "NAME": "julia", "LABEL": "Julia set", "TYPE": "bool", "DEFAULT": false },
 		{ "NAME": "juliaX", "LABEL": "Julia x", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": -0.8 },
 		{ "NAME": "juliaY", "LABEL": "Julia y", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.156 },
-		{ "NAME": "juliaOrbit", "LABEL": "Julia circle", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "juliaOrbitSpeed", "LABEL": "Julia speed", "TYPE": "float", "MIN": -1.0, "MAX": 1.0, "DEFAULT": 0.05 },
 		{ "NAME": "colourMode", "LABEL": "Colour by", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5], "LABELS": ["Smooth iteration count", "Orbit trap: a point", "Orbit trap: a cross", "Orbit trap: a circle", "Distance to the set", "Iterations and angle"], "DEFAULT": 0 },
 		{ "NAME": "palette", "LABEL": "Palette", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 3 },
 		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.04, 0.05, 0.45, 1.0] },
 		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.82, 0.25, 1.0] },
 		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.05, "MAX": 8.0, "DEFAULT": 1.0 },
 		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.08 },
 		{ "NAME": "insideColour", "LABEL": "Inside colour", "TYPE": "color", "DEFAULT": [0.0, 0.0, 0.0, 1.0] },
 		{ "NAME": "glow", "LABEL": "Edge glow", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 0.5 },
 		{ "NAME": "trapX", "LABEL": "Trap x", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.0 },
@@ -209,7 +203,7 @@ Escape escape_of(vec2 start, vec2 added, int most_steps)
 }
 
 // The colour of the point of the plane `where_`, which a pixel that is `pixel_size` across looks at.
-vec3 colour_of_the_point(vec2 where_, float pixel_size, int most_steps, float colour_time, vec2 julia_point)
+vec3 colour_of_the_point(vec2 where_, float pixel_size, int most_steps, vec2 julia_point)
 {
 	Escape escape;
 	if (julia) {
@@ -230,7 +224,7 @@ vec3 colour_of_the_point(vec2 where_, float pixel_size, int most_steps, float co
 	} else {
 		t = escape.trap_distance * 0.7;
 	}
-	vec3 colour = palette_colour(palette, t * colourScale + colourOffset + colour_time);
+	vec3 colour = palette_colour(palette, t * colourScale + colourOffset);
 	float rim = glow * exp(-escape.distance_to_the_set / pixel_size * 0.35);
 	return mix(colour, vec3(1.0, 0.97, 0.9), clamp(rim, 0.0, 1.0));
 }
@@ -255,14 +249,7 @@ vec2 whole_set_centre()
 
 void main()
 {
-	// How deep the zoom is now: it goes in at the speed that is asked for, and turns round at its limit.
-	float span = zoomLimit - zoom;
-	float travelled = abs(zoomSpeed) * TIME;
-	if (span > 0.001) {
-		float phase = mod(travelled, 2.0 * span);
-		travelled = phase < span ? phase : 2.0 * span - phase;
-	}
-	float depth = zoom + (zoomSpeed >= 0.0 ? travelled : -travelled);
+	float depth = zoom;
 	float view_height = 3.0 * exp2(-depth);
 	float pixel_size = view_height / RENDERSIZE.y;
 	// The middle of the picture: the point that is zoomed in on, or, while the zoom is still shallow and the whole set is wanted first, a place between that and the middle of the set, which
@@ -271,13 +258,11 @@ void main()
 	float glide = wholeSetFirst ? smoothstep(0.0, 3.5, depth_in) : 1.0;
 	vec2 aimed_at = vec2(centerX, centerY);
 	vec2 middle_of_the_picture = aimed_at + (whole_set_centre() - aimed_at) * exp2(-depth_in) * (1.0 - glide);
-	float turn = radians(rotation + spin * TIME);
+	float turn = radians(rotation);
 	float turn_cos = cos(turn);
 	float turn_sin = sin(turn);
 	int most_steps = int(min(iterations + iterationsPerZoom * max(depth, 0.0), 3000.0));
-	float orbit_angle = TAU * juliaOrbitSpeed * TIME;
-	vec2 julia_point = vec2(juliaX, juliaY) + juliaOrbit * vec2(cos(orbit_angle), sin(orbit_angle));
-	float colour_time = colourCycle * TIME;
+	vec2 julia_point = vec2(juliaX, juliaY);
 	int across = samples;
 	vec3 total = vec3(0.0);
 	// (One loop over the samples, and not one in another: the software adapter of Windows stops on shaders that have two, with a heavy call in them.)
@@ -288,7 +273,7 @@ void main()
 		vec2 offset = (vec2(float(sample_number - (sample_number / across) * across), float(sample_number / across)) + 0.5) / float(across) - 0.5;
 		vec2 from_the_middle = (gl_FragCoord.xy + offset - 0.5 * RENDERSIZE.xy) / RENDERSIZE.y * view_height;
 		vec2 turned = vec2(turn_cos * from_the_middle.x - turn_sin * from_the_middle.y, turn_sin * from_the_middle.x + turn_cos * from_the_middle.y);
-		total += colour_of_the_point(middle_of_the_picture + turned, pixel_size, most_steps, colour_time, julia_point);
+		total += colour_of_the_point(middle_of_the_picture + turned, pixel_size, most_steps, julia_point);
 	}
 	gl_FragColor = vec4(total / float(across * across), 1.0);
 }

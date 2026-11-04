@@ -284,7 +284,6 @@ fn names_that_a_shared_block_takes_from_the_inputs(name: &str) -> &'static [&'st
             "cameraTurn",
             "cameraTilt",
             "cameraDistance",
-            "cameraSpin",
             "fieldOfView",
             "maxSteps",
             "detail",
@@ -295,7 +294,6 @@ fn names_that_a_shared_block_takes_from_the_inputs(name: &str) -> &'static [&'st
             "backgroundBottom",
             "colourScale",
             "colourOffset",
-            "colourCycle",
             "palette",
             "samples",
         ],
@@ -446,14 +444,14 @@ fn ways_to_set_up(file_name: &str) -> Vec<Vec<(&'static str, &'static str)>> {
     let mut ways = vec![Vec::new()];
     match file_name {
         "Mandelbrot Explorer.fs" => {
-            // (The Julia set of a point, a point that circles, orbit traps of each kind, the two-colour palette, a view that stays where it is and does not glide, and a zoom that is
-            // fast enough to reach its limit and turn round before the time of the picture.)
-            ways.push(vec![("julia", "true"), ("juliaOrbit", "0.3"), ("zoomSpeed", "0")]);
+            // (The Julia set of a point, orbit traps of each kind, the two-colour palette, a view that stays where it is and does not glide, and a zoom, which is what the
+            // iterations that each octave adds are for.)
+            ways.push(vec![("julia", "true")]);
             ways.push(vec![("colourMode", "1")]);
             ways.push(vec![("colourMode", "3")]);
             ways.push(vec![("palette", "7")]);
             ways.push(vec![("wholeSetFirst", "false"), ("zoom", "2")]);
-            ways.push(vec![("zoomSpeed", "3")]);
+            ways.push(vec![("zoom", "3")]);
         }
         "Julia Dance.fs" => {
             // (The inside in one colour, an orbit trap of the circle, and the two-colour palette.)
@@ -469,19 +467,12 @@ fn ways_to_set_up(file_name: &str) -> Vec<Vec<(&'static str, &'static str)>> {
         "Apollonian Gasket.fs" => {
             ways.push(vec![("palette", "7")]);
             ways.push(vec![("colourMode", "0")]);
+            // (The pattern repeats, and has turns that leave it as it is: the ends of the sliders of the middle and of the turn are among them, so they are tried from a place and a turn that are not.)
+            ways.push(vec![("centerX", "0.7"), ("centerY", "0.7"), ("rotation", "30")]);
         }
-        // (The two-colour palette; and a shape that moves fast with the time, so that what the movement is for is seen in a picture of 48 pixels across.)
-        "Mandelbulb.fs" => {
-            ways.push(vec![("palette", "7")]);
-            ways.push(vec![("wobbleSpeed", "0.4")]);
-        }
-        "Folded Sponge.fs" => {
-            ways.push(vec![("palette", "7")]);
-            ways.push(vec![("twistSpeed", "9.0")]);
-        }
-        "Mandelbox.fs" => {
-            ways.push(vec![("palette", "7")]);
-            ways.push(vec![("driftSpeed", "0.4")]);
+        // (Two sources swap places in a half turn: three do not.)
+        "Ripple Rings.fs" => {
+            ways.push(vec![("sources", "3")]);
         }
         // (A half turn of eight wedges is a whole number of wedges, which changes nothing: seven wedges have no such turn among the ends of the slider.)
         "Kaleidoscope Mandala.fs" => {
@@ -493,7 +484,10 @@ fn ways_to_set_up(file_name: &str) -> Vec<Vec<(&'static str, &'static str)>> {
         | "Plasma Storm.fs"
         | "Quasicrystal.fs"
         | "Liquid Marble.fs"
-        | "Hyperbolic Tiling.fs" => {
+        | "Hyperbolic Tiling.fs"
+        | "Mandelbulb.fs"
+        | "Folded Sponge.fs"
+        | "Mandelbox.fs" => {
             ways.push(vec![("palette", "7")]);
         }
         _ => {}

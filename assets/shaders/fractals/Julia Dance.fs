@@ -2,15 +2,14 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "A Julia set that breathes: the point that makes it travels round the edge of the main body of the Mandelbrot set (or round another path; reach 1 is the edge itself, less is inside it and more is outside), and the set grows branches, falls to dust and gathers again. Turn and zoom it (the zoom is counted in octaves, which are doublings), colour it in six ways, and colour the inside of it too. Speeds and rates are in turns a second, unless said otherwise.",
+	"DESCRIPTION": "A Julia set made for a point on a path: Along path takes the point once round the edge of the main body of the Mandelbrot set (or round another path; reach 1 is the edge itself, less is inside it and more is outside), and as it goes the set grows branches, falls to dust and gathers again. Turn and zoom it (the zoom is counted in octaves, which are doublings), colour it in six ways, and colour the inside of it too. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Fractal"],
 	"INPUTS": [
 		{ "NAME": "path", "LABEL": "Path", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["Edge of the main cardioid", "Edge of the disc to its left", "Circle round the middle"], "DEFAULT": 0 },
 		{ "NAME": "pathReach", "LABEL": "Reach", "TYPE": "float", "MIN": 0.5, "MAX": 1.5, "DEFAULT": 1.0 },
-		{ "NAME": "pathSpeed", "LABEL": "Point speed", "TYPE": "float", "MIN": -0.5, "MAX": 0.5, "DEFAULT": 0.04 },
-		{ "NAME": "pathStart", "LABEL": "Start (turns)", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.12 },
+		{ "NAME": "alongPath", "LABEL": "Along path", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.12 },
 		{ "NAME": "nudgeX", "LABEL": "Nudge x", "TYPE": "float", "MIN": -0.5, "MAX": 0.5, "DEFAULT": 0.0 },
 		{ "NAME": "nudgeY", "LABEL": "Nudge y", "TYPE": "float", "MIN": -0.5, "MAX": 0.5, "DEFAULT": 0.0 },
 		{ "NAME": "power", "LABEL": "Power", "TYPE": "float", "MIN": 2.0, "MAX": 6.0, "DEFAULT": 2.0 },
@@ -18,7 +17,6 @@
 		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.0 },
 		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.0 },
 		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 2.0 },
 		{ "NAME": "iterations", "LABEL": "Iterations", "TYPE": "float", "MIN": 20.0, "MAX": 600.0, "DEFAULT": 140.0 },
 		{ "NAME": "colourMode", "LABEL": "Outside", "TYPE": "long", "VALUES": [0, 1, 2, 3], "LABELS": ["Smooth iterations", "Orbit trap: a circle", "Orbit trap: a cross", "Iterations and angle"], "DEFAULT": 0 },
 		{ "NAME": "insideMode", "LABEL": "Inside", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["One colour", "Where the orbit ends", "Nearness to the middle"], "DEFAULT": 1 },
@@ -27,7 +25,6 @@
 		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.55, 0.85, 1.0] },
 		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.05, "MAX": 8.0, "DEFAULT": 1.0 },
 		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.06 },
 		{ "NAME": "insideColour", "LABEL": "Inside colour", "TYPE": "color", "DEFAULT": [0.0, 0.0, 0.0, 1.0] },
 		{ "NAME": "trapSize", "LABEL": "Trap radius", "TYPE": "float", "MIN": 0.0, "MAX": 2.0, "DEFAULT": 0.6 },
 		{ "NAME": "samples", "LABEL": "Edge smoothing", "TYPE": "long", "VALUES": [1, 2, 3], "LABELS": ["None", "4 samples a pixel", "9 samples a pixel"], "DEFAULT": 2 }
@@ -112,7 +109,7 @@ vec2 complex_power(vec2 z, float exponent)
 }
 // --- shared: complex (end) ---
 
-// The point that the set is made for, at this moment: it goes round its path, and can be moved by hand.
+// The point that the set is made for: a place along its path (`turns` is how far round the path, from 0 to 1), moved by hand if it is to be.
 vec2 the_point(float turns)
 {
 	float angle = TAU * turns;
@@ -182,7 +179,7 @@ Orbit orbit_of(vec2 start, vec2 added, int most_steps)
 	return result;
 }
 
-vec3 colour_of_the_point(vec2 where_, vec2 julia_point, int most_steps, float colour_time)
+vec3 colour_of_the_point(vec2 where_, vec2 julia_point, int most_steps)
 {
 	Orbit orbit = orbit_of(where_, julia_point, most_steps);
 	float t;
@@ -195,7 +192,7 @@ vec3 colour_of_the_point(vec2 where_, vec2 julia_point, int most_steps, float co
 		} else {
 			t = orbit.nearest_to_the_middle * 2.0 * colourScale;
 		}
-		return palette_colour(palette, t + colourOffset + colour_time) * 0.8;
+		return palette_colour(palette, t + colourOffset) * 0.8;
 	}
 	// (The count is taken to a power under one, so that the bands are close near the set, where the count is large, and still go through the palette far from it.)
 	float spread = pow(max(orbit.count, 0.0), 0.6) * 0.25;
@@ -206,18 +203,17 @@ vec3 colour_of_the_point(vec2 where_, vec2 julia_point, int most_steps, float co
 	} else {
 		t = orbit.trap_distance * 0.9;
 	}
-	return palette_colour(palette, t * colourScale + colourOffset + colour_time);
+	return palette_colour(palette, t * colourScale + colourOffset);
 }
 
 void main()
 {
 	float view_height = 3.0 * exp2(-zoom);
-	float turn = radians(rotation + spin * TIME);
+	float turn = radians(rotation);
 	float turn_cos = cos(turn);
 	float turn_sin = sin(turn);
-	vec2 julia_point = the_point(pathStart + pathSpeed * TIME);
+	vec2 julia_point = the_point(alongPath);
 	int most_steps = int(min(iterations, 2000.0));
-	float colour_time = colourCycle * TIME;
 	int across = samples;
 	vec3 total = vec3(0.0);
 	// (One loop over the samples, and not one in another: the software adapter of Windows stops on shaders that have two, with a heavy call in them.)
@@ -228,7 +224,7 @@ void main()
 		vec2 offset = (vec2(float(sample_number - (sample_number / across) * across), float(sample_number / across)) + 0.5) / float(across) - 0.5;
 		vec2 from_the_middle = (gl_FragCoord.xy + offset - 0.5 * RENDERSIZE.xy) / RENDERSIZE.y * view_height;
 		vec2 turned = vec2(turn_cos * from_the_middle.x - turn_sin * from_the_middle.y, turn_sin * from_the_middle.x + turn_cos * from_the_middle.y);
-		total += colour_of_the_point(vec2(centerX, centerY) + turned, julia_point, most_steps, colour_time);
+		total += colour_of_the_point(vec2(centerX, centerY) + turned, julia_point, most_steps);
 	}
 	gl_FragColor = vec4(total / float(across * across), 1.0);
 }

@@ -1539,7 +1539,7 @@ fn write_screenshots_of_a_generator_that_comes_with_the_program() {
     // The buttons of the keyframes float to the right of a row while the pointer is on it: what they cover of a row whose number has the widest box (its label is short, and the number has seven characters) and of another.
     for (label, name) in [
         ("Target x", "132_the_pointer_on_a_row_whose_number_has_the_widest_box"),
-        ("Zoom speed", "133_the_pointer_on_a_row_with_a_label_of_ten_characters"),
+        ("Zoom", "133_the_pointer_on_a_row_with_a_short_label"),
     ] {
         let on_the_row = journey.rectangle_of(label).center();
         journey.move_pointer_to(on_the_row);

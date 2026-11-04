@@ -2,29 +2,23 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "Circles inside circles inside circles: the plane is folded into a tile and turned inside out again and again, and what is left is a gasket of circles that never ends. The strength of the turning inside out and the drift of the tile make it flow. The zoom is counted in octaves, which are doublings. Speeds and rates are in turns a second, unless said otherwise.",
+	"DESCRIPTION": "Circles inside circles inside circles: the plane is folded into a tile and turned inside out again and again, and what is left is a gasket of circles that never ends. The strength of the turning inside out changes how the circles crowd together. The zoom is counted in octaves, which are doublings. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Fractal"],
 	"INPUTS": [
 		{ "NAME": "inversion", "LABEL": "Inversion", "TYPE": "float", "MIN": 1.0, "MAX": 1.6, "DEFAULT": 1.18 },
-		{ "NAME": "inversionWobble", "LABEL": "Wobble", "TYPE": "float", "MIN": 0.0, "MAX": 0.3, "DEFAULT": 0.06 },
-		{ "NAME": "wobbleSpeed", "LABEL": "Wobble rate", "TYPE": "float", "MIN": 0.0, "MAX": 2.0, "DEFAULT": 0.1 },
-		{ "NAME": "driftSize", "LABEL": "Drift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.2 },
-		{ "NAME": "driftSpeed", "LABEL": "Drift turns/s", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.05 },
 		{ "NAME": "iterations", "LABEL": "Folds", "TYPE": "float", "MIN": 2.0, "MAX": 14.0, "DEFAULT": 8.0 },
 		{ "NAME": "zoom", "LABEL": "Zoom", "TYPE": "float", "MIN": -2.0, "MAX": 6.0, "DEFAULT": 0.0 },
 		{ "NAME": "centerX", "LABEL": "Centre x", "TYPE": "float", "MIN": -4.0, "MAX": 4.0, "DEFAULT": 0.0 },
 		{ "NAME": "centerY", "LABEL": "Centre y", "TYPE": "float", "MIN": -4.0, "MAX": 4.0, "DEFAULT": 0.0 },
 		{ "NAME": "rotation", "LABEL": "Rotation (°)", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 0.0 },
-		{ "NAME": "spin", "LABEL": "Spin (°/s)", "TYPE": "float", "MIN": -90.0, "MAX": 90.0, "DEFAULT": 4.0 },
 		{ "NAME": "colourMode", "LABEL": "Colour by", "TYPE": "long", "VALUES": [0, 1, 2], "LABELS": ["Orbit near a circle", "Fold depth", "Both"], "DEFAULT": 2 },
 		{ "NAME": "palette", "LABEL": "Palette", "TYPE": "long", "VALUES": [0, 1, 2, 3, 4, 5, 6, 7], "LABELS": ["Fire", "Ice", "Rainbow", "Acid", "Twilight", "Gold", "Grey", "Two colours"], "DEFAULT": 4 },
 		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.02, 0.05, 0.3, 1.0] },
 		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [1.0, 0.85, 0.4, 1.0] },
 		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.05, "MAX": 8.0, "DEFAULT": 1.0 },
 		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.05 },
 		{ "NAME": "lines", "LABEL": "Dark lines", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.6 },
 		{ "NAME": "samples", "LABEL": "Edge smoothing", "TYPE": "long", "VALUES": [1, 2, 3], "LABELS": ["None", "4 samples a pixel", "9 samples a pixel"], "DEFAULT": 2 }
 	]
@@ -83,7 +77,7 @@ vec3 palette_colour(int which, float t)
 // --- shared: palettes (end) ---
 
 // The colour of the point `start` of the plane: the plane is folded into a square tile, and the tile is turned inside out through a circle, again and again.
-vec3 gasket_colour(vec2 start, float strength, int most_folds, float colour_time)
+vec3 gasket_colour(vec2 start, float strength, int most_folds)
 {
 	vec2 p = start;
 	// How much the plane has been stretched in all by the turnings inside out: what the sizes of the last tile are divided by to give sizes of the plane.
@@ -109,7 +103,7 @@ vec3 gasket_colour(vec2 start, float strength, int most_folds, float colour_time
 	} else {
 		t = sqrt(nearest) * 0.9 + depth * 0.08;
 	}
-	vec3 colour = palette_colour(palette, t * colourScale + colourOffset + colour_time);
+	vec3 colour = palette_colour(palette, t * colourScale + colourOffset);
 	// Dark lines where the last tile has the edge of a circle: how far the point is from the circle of the tile, in the sizes of the plane.
 	float to_the_circle = abs(length(p) - 1.0) / stretched;
 	float line = 1.0 - smoothstep(0.0, 0.004 + 0.0, to_the_circle);
@@ -119,13 +113,11 @@ vec3 gasket_colour(vec2 start, float strength, int most_folds, float colour_time
 void main()
 {
 	float view_height = 4.0 * exp2(-zoom);
-	float turn = radians(rotation + spin * TIME);
+	float turn = radians(rotation);
 	float turn_cos = cos(turn);
 	float turn_sin = sin(turn);
-	float strength = inversion + inversionWobble * sin(TAU * wobbleSpeed * TIME);
-	vec2 drift = driftSize * vec2(cos(TAU * driftSpeed * TIME), sin(TAU * driftSpeed * TIME * 0.7));
+	float strength = inversion;
 	int most_folds = int(min(iterations, 14.0));
-	float colour_time = colourCycle * TIME;
 	int across = samples;
 	vec3 total = vec3(0.0);
 	// (One loop over the samples, and not one in another: the software adapter of Windows stops on shaders that have two, with a heavy call in them.)
@@ -136,7 +128,7 @@ void main()
 		vec2 offset = (vec2(float(sample_number - (sample_number / across) * across), float(sample_number / across)) + 0.5) / float(across) - 0.5;
 		vec2 from_the_middle = (gl_FragCoord.xy + offset - 0.5 * RENDERSIZE.xy) / RENDERSIZE.y * view_height;
 		vec2 turned = vec2(turn_cos * from_the_middle.x - turn_sin * from_the_middle.y, turn_sin * from_the_middle.x + turn_cos * from_the_middle.y);
-		total += gasket_colour(vec2(centerX, centerY) + turned + drift, strength, most_folds, colour_time);
+		total += gasket_colour(vec2(centerX, centerY) + turned, strength, most_folds);
 	}
 	gl_FragColor = vec4(total / float(across * across), 1.0);
 }

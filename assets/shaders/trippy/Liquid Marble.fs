@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "Ink in water, or the veins of marble that is still liquid: smooth noise read at places that are pushed by smooth noise that is pushed by smooth noise, so that the colour folds into itself in slow tongues and swirls and never stops moving. Veins of a lighter colour run through it, if you want them. Speeds and rates are in turns a second, unless said otherwise.",
+	"DESCRIPTION": "Ink in water, or the veins of marble that is still liquid: smooth noise read at places that are pushed by smooth noise that is pushed by smooth noise, so that the colour folds into itself in slow tongues and swirls. Flow is how far the liquid has flowed. Veins of a lighter colour run through it, if you want them. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Trippy"],
 	"INPUTS": [
 		{ "NAME": "scale", "LABEL": "Swirl scale", "TYPE": "float", "MIN": 0.3, "MAX": 10.0, "DEFAULT": 1.6 },
-		{ "NAME": "flowSpeed", "LABEL": "Flow speed", "TYPE": "float", "MIN": 0.0, "MAX": 3.0, "DEFAULT": 0.3 },
+		{ "NAME": "flow", "LABEL": "Flow", "TYPE": "float", "MIN": 0.0, "MAX": 30.0, "DEFAULT": 0.0 },
 		{ "NAME": "pushing", "LABEL": "Push", "TYPE": "float", "MIN": 0.0, "MAX": 8.0, "DEFAULT": 3.2 },
 		{ "NAME": "detailLevels", "LABEL": "Fine swirls", "TYPE": "long", "VALUES": [1, 2, 3, 4, 5], "LABELS": ["None", "1", "2", "3", "4"], "DEFAULT": 4 },
 		{ "NAME": "veins", "LABEL": "Veins", "TYPE": "float", "MIN": 0.0, "MAX": 12.0, "DEFAULT": 4.0 },
@@ -20,8 +20,7 @@
 		{ "NAME": "colourA", "LABEL": "Colour A", "TYPE": "color", "DEFAULT": [0.02, 0.02, 0.25, 1.0] },
 		{ "NAME": "colourB", "LABEL": "Colour B", "TYPE": "color", "DEFAULT": [0.95, 0.6, 0.9, 1.0] },
 		{ "NAME": "colourScale", "LABEL": "Bands", "TYPE": "float", "MIN": 0.1, "MAX": 6.0, "DEFAULT": 1.4 },
-		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 },
-		{ "NAME": "colourCycle", "LABEL": "Cycle speed", "TYPE": "float", "MIN": -2.0, "MAX": 2.0, "DEFAULT": 0.04 }
+		{ "NAME": "colourOffset", "LABEL": "Colour shift", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.0 }
 	]
 }*/
 
@@ -138,7 +137,7 @@ void main()
 {
 	float aspect = RENDERSIZE.x / RENDERSIZE.y;
 	vec2 spot = (isf_FragNormCoord - vec2(centerX, centerY)) * vec2(aspect, 1.0) * scale;
-	float moving = TIME * flowSpeed;
+	float moving = flow;
 	// Noise read at spots that noise pushes, twice.
 	vec2 pushed_once = vec2(
 		layered_noise(vec3(spot, moving), detailLevels),
@@ -153,6 +152,6 @@ void main()
 		float wave = abs(sin(ink * veins * 3.14159265));
 		vein = pow(1.0 - wave, veinSharpness) * veinStrength;
 	}
-	vec3 colour = palette_colour(palette, ink * colourScale * 2.0 + length(pushed_once - 0.5) * 0.6 + colourOffset + colourCycle * TIME);
+	vec3 colour = palette_colour(palette, ink * colourScale * 2.0 + length(pushed_once - 0.5) * 0.6 + colourOffset);
 	gl_FragColor = vec4(colour + vec3(vein), 1.0);
 }
