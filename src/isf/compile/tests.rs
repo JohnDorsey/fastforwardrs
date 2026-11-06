@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::engine::{DEFAULT_MOST_PASSES_OF_A_LOOP, ImageSlot, guard_wgsl};
-use crate::isf::{IsfInputKind, Mapping, MaskChannel, read};
+use crate::isf::{IsfInputKind, Mapping, MaskChannel, Space, read};
 
 const COLOR_CONTROLS: &str = include_str!("../fixtures/color_controls.fs");
 const PLASMA: &str = include_str!("../fixtures/plasma.fs");
@@ -201,6 +201,7 @@ fn driven_radius(mask: usize, channel: MaskChannel) -> DrivenInput {
         mask,
         channel,
         mapping: Mapping::Straight,
+        space: Space::Screen,
     }
 }
 
@@ -241,6 +242,7 @@ fn an_input_mapped_by_a_graph_compiles_with_the_same_structure_as_one_mapped_str
         &file,
         &[DrivenInput {
             mapping: Mapping::Graph,
+            space: Space::Screen,
             ..driven_radius(0, MaskChannel::Red)
         }],
     )
@@ -267,6 +269,7 @@ fn the_variant_of_a_shader_that_maps_an_input_by_a_graph_is_another_variant_than
     let straight = driven_radius(0, MaskChannel::Red);
     let graph = DrivenInput {
         mapping: Mapping::Graph,
+        space: Space::Screen,
         ..straight.clone()
     };
 
@@ -378,6 +381,7 @@ fn every_float_input_of_the_corpus_can_be_read_from_a_mask() {
             mask: number % 3,
             channel: MaskChannel::ALL[number % MaskChannel::ALL.len()],
             mapping: Mapping::Straight,
+            space: Space::Screen,
         };
         let mut together: Vec<DrivenInput> = Vec::new();
         for (number, input) in drivable.iter().enumerate() {
@@ -436,6 +440,7 @@ fn what_is_wrong_with_the_driven_inputs_is_a_problem_of_the_compile() {
             mask: 0,
             channel: MaskChannel::Red,
             mapping: Mapping::Straight,
+            space: Space::Screen,
         }],
     )
     .unwrap_err();

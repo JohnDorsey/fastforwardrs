@@ -22,7 +22,7 @@ use super::{
     WorkingSpace, guard_wgsl,
 };
 use crate::colour_space::StandardPrimaries;
-use crate::isf::{DrivenInput, MOST_POINTS_OF_A_GRAPH, Mapping, MaskChannel, compile_with_driven_inputs, read};
+use crate::isf::{DrivenInput, MOST_POINTS_OF_A_GRAPH, Mapping, MaskChannel, Space, compile_with_driven_inputs, read};
 
 const A_LONG_TIME: Duration = Duration::from_secs(60);
 
@@ -46,6 +46,7 @@ pub(super) fn driven(name: &str, mask: usize, channel: MaskChannel) -> DrivenInp
         mask,
         channel,
         mapping: Mapping::Straight,
+        space: Space::Screen,
     }
 }
 
@@ -82,7 +83,7 @@ pub(super) fn reading_masks(key: &str, inputs: &[f32], masks: Vec<GroupDescripti
 }
 
 /// A colour (red, green, blue and opacity, straight) over `corners` of the mask.
-fn a_colour_over(corners: [(f32, f32); 4], colour: [u8; 4]) -> LayerDescription {
+pub(super) fn a_colour_over(corners: [(f32, f32); 4], colour: [u8; 4]) -> LayerDescription {
     LayerDescription {
         source: LayerSource::Solid(colour),
         corners,
@@ -90,11 +91,11 @@ fn a_colour_over(corners: [(f32, f32); 4], colour: [u8; 4]) -> LayerDescription 
     }
 }
 
-fn all_of_it(colour: [u8; 4]) -> LayerDescription {
+pub(super) fn all_of_it(colour: [u8; 4]) -> LayerDescription {
     a_colour_over(CORNERS_OF_THE_WHOLE_PICTURE, colour)
 }
 
-fn the_left_half_of_it(colour: [u8; 4]) -> LayerDescription {
+pub(super) fn the_left_half_of_it(colour: [u8; 4]) -> LayerDescription {
     a_colour_over([(0.0, 0.0), (0.5, 0.0), (0.5, 1.0), (0.0, 1.0)], colour)
 }
 
@@ -103,13 +104,16 @@ pub(super) fn mask_of(layers: Vec<LayerDescription>) -> GroupDescription {
 }
 
 /// A frame of 8 by 8 pixels made of the single layer `layer`, in the compatibility mode (the numbers are codes).
-fn frame_of_one_layer(renderer: &mut FrameRenderer, layer: LayerDescription) -> (RenderedFrame, FrameStatistics) {
+pub(super) fn frame_of_one_layer(
+    renderer: &mut FrameRenderer,
+    layer: LayerDescription,
+) -> (RenderedFrame, FrameStatistics) {
     let picture = TestPicture::gradient(8, 8);
     frame_of(renderer, (8, 8), &[(1, &picture)], vec![layer])
 }
 
 /// The frame of the layer that shows what is read from `masks`, with the call `key` that has `inputs` as its numbers.
-fn shown(
+pub(super) fn shown(
     renderer: &mut FrameRenderer,
     key: &str,
     inputs: &[f32],
@@ -119,7 +123,7 @@ fn shown(
 }
 
 /// Whether `pixel` is `expected` to within `by` in each colour, and opaque.
-fn is_near(pixel: [u8; 4], expected: [u8; 3], by: u8) -> bool {
+pub(super) fn is_near(pixel: [u8; 4], expected: [u8; 3], by: u8) -> bool {
     pixel[3] == 255 && (0..3).all(|colour| pixel[colour].abs_diff(expected[colour]) <= by)
 }
 
@@ -869,6 +873,7 @@ fn an_input_mapped_by_a_graph_is_the_height_of_the_graph_at_the_channel_of_the_m
             SHOW_THE_LEVEL,
             &[DrivenInput {
                 mapping: Mapping::Graph,
+                space: Space::Screen,
                 ..driven("level", 0, MaskChannel::Red)
             }],
         );
@@ -919,6 +924,7 @@ fn where_the_mask_has_nothing_an_input_mapped_by_a_graph_is_still_the_number_of_
             SHOW_THE_LEVEL,
             &[DrivenInput {
                 mapping: Mapping::Graph,
+                space: Space::Screen,
                 ..driven("level", 0, MaskChannel::Red)
             }],
         );

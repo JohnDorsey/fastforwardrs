@@ -10,9 +10,11 @@ use crate::project::groups::GroupId;
 use crate::project::tracks::TrackId;
 
 mod graph;
+mod space;
 
-pub use crate::isf::MaskChannel;
+pub use crate::isf::{MaskChannel, NUMBERS_OF_A_WORLD_PLACEMENT, WorldShape};
 pub use graph::{Graph, LEAST_DISTANCE_BETWEEN_PLACES, MOST_POINTS_OF_A_GRAPH, NUMBERS_OF_A_GRAPH};
+pub use space::{LARGEST_DISTANCE_OF_A_SHAPE, MaskSpace, SMALLEST_SIZE_OF_A_SHAPE, WorldPlacement};
 
 /// What a mask is made of: where the picture that a value is read from comes from.
 ///
@@ -85,6 +87,9 @@ pub struct DrivenValue {
     pub value_where_nothing: f32,
     /// How the channel's value becomes the place in the range: straight, or by a graph the person drew.
     pub map: MaskMap,
+    /// Where the mask is laid: over the picture (the value at a pixel is the mask at that pixel), or in space (for a shader that says where in space it works as it uses the value: the value
+    /// at a point is the mask at the place of a plane, a sphere or a cylinder that is nearest to the point).
+    pub space: MaskSpace,
     /// Whether a **transition** among the effects of the clips of the source **sees the real backdrop**: the tracks behind the source in the frame (`docs/shader-masks-design.md`, 10). While a
     /// clip of the source has a transition, the mask is then the source over the tracks behind it, as the frame shows it; when it is off the mask is the source on its own and a transition
     /// is done over nothing. On when a value is first read from a mask.
@@ -116,6 +121,7 @@ impl DrivenValue {
             channel,
             value_where_nothing,
             map: MaskMap::Straight,
+            space: MaskSpace::Screen,
             real_backdrop: true,
         }
     }
@@ -140,9 +146,15 @@ impl DrivenValue {
         Self { map, ..self }
     }
 
-    /// Whether the number is one that can be kept (it is a number).
+    /// The same value, with the mask laid as `space` says.
+    #[must_use]
+    pub fn with_the_space(self, space: MaskSpace) -> Self {
+        Self { space, ..self }
+    }
+
+    /// Whether the numbers are ones that can be kept (they are numbers, and a shape in space is one that can be put there).
     pub fn is_well_formed(&self) -> bool {
-        self.value_where_nothing.is_finite()
+        self.value_where_nothing.is_finite() && self.space.is_well_formed()
     }
 }
 

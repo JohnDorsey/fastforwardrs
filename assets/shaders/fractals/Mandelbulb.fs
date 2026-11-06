@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The Mandelbulb: the Mandelbrot set taken into three dimensions, a shape of knots, ridges and spires that goes on getting finer as it is looked at, drawn by ray marching with light, shadow-in-the-crevices, fog and a glow. The power decides the shape (8 is the usual bulb, and one iteration is a smooth blob); Cam. turn goes round it. It asks a great deal of the graphics card: lower the ray steps or raise the coarseness for a quick look. Nothing moves by itself: give any slider keyframes to animate it.",
+	"DESCRIPTION": "The Mandelbulb: the Mandelbrot set taken into three dimensions, a shape of knots, ridges and spires that goes on getting finer as it is looked at, drawn by ray marching with light, shadow-in-the-crevices, fog and a glow. The power decides the shape (8 is the usual bulb, and one iteration is a smooth blob); Cam. turn goes round it. It asks a great deal of the graphics card: lower the ray steps or raise the coarseness for a quick look. Power, Iterations and Cut at can also be read from a mask laid in space (the window of the mask button): a plane, a sphere or a cylinder, so that the shape changes from place to place. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
+	"WORLD_SIZE": 3.2,
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Fractal"],
 	"INPUTS": [
-		{ "NAME": "bulbPower", "LABEL": "Power", "TYPE": "float", "MIN": 2.0, "MAX": 16.0, "DEFAULT": 8.0 },
-		{ "NAME": "bulbIterations", "LABEL": "Iterations", "TYPE": "float", "MIN": 1.0, "MAX": 16.0, "DEFAULT": 8.0 },
-		{ "NAME": "cutAt", "LABEL": "Cut at", "TYPE": "float", "MIN": -1.5, "MAX": 1.5, "DEFAULT": 1.5 },
+		{ "NAME": "bulbPower", "LABEL": "Power", "TYPE": "float", "MIN": 2.0, "MAX": 16.0, "DEFAULT": 8.0, "WORLD_SPACE": true },
+		{ "NAME": "bulbIterations", "LABEL": "Iterations", "TYPE": "float", "MIN": 1.0, "MAX": 16.0, "DEFAULT": 8.0, "WORLD_SPACE": true },
+		{ "NAME": "cutAt", "LABEL": "Cut at", "TYPE": "float", "MIN": -1.5, "MAX": 1.5, "DEFAULT": 1.5, "WORLD_SPACE": true },
 		{ "NAME": "cameraTurn", "LABEL": "Cam. turn °", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 35.0 },
 		{ "NAME": "cameraTilt", "LABEL": "Cam. tilt °", "TYPE": "float", "MIN": -85.0, "MAX": 85.0, "DEFAULT": 22.0 },
 		{ "NAME": "cameraDistance", "LABEL": "Distance", "TYPE": "float", "MIN": 1.2, "MAX": 8.0, "DEFAULT": 3.0 },
@@ -87,6 +88,7 @@ vec3 palette_colour(int which, float t)
 // How far `point` is from the bulb, and how near the orbit of the point came to the middle (squared), which is what the colour is made from.
 float scene_distance(vec3 point, out float trap)
 {
+	isf_world_position = point;
 	float exponent = bulbPower;
 	vec3 z = point;
 	float slope = 1.0;

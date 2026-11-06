@@ -48,9 +48,11 @@ pub use effects::{
     take_all_tables_out_label,
 };
 #[cfg(test)]
-pub use keyframe_buttons::{KeyframeButton, keyframe_button_label, mask_button_label};
+pub use keyframe_buttons::{
+    KeyframeButton, keyframe_button_label, mask_button_label, mask_button_label_with_world_space,
+};
 #[cfg(test)]
-pub use mask_thumbnail::label_of_the_thumbnail;
+pub use mask_thumbnail::{label_of_the_thumbnail, words_about_the_space};
 
 use std::collections::HashMap;
 

@@ -1559,3 +1559,69 @@ fn write_screenshots_of_a_generator_that_comes_with_the_program() {
     journey.move_pointer_to(egui::pos2(5.0, 5.0));
     save(&mut journey, &folder, "134_the_box_of_another_generator");
 }
+
+#[test]
+#[ignore = "makes pictures for looking at; run with --ignored and the screenshot folder variable set"]
+fn write_screenshots_of_a_number_of_a_generator_whose_mask_can_be_laid_in_space() {
+    let toolchain = toolchain_or_skip!();
+    let _turn = take_turn_at_drawing();
+    let folder = screenshot_folder();
+    let mut journey = Journey::start(&toolchain);
+    journey.application_mut().install_the_shaders_of_the_program();
+    while journey.application().is_scanning_plugins() {
+        journey.keep_drawing_for(std::time::Duration::from_millis(50));
+    }
+    // Two tracks: the generator goes on the one below, and the one above can be the mask.
+    journey.add_a_track();
+    journey.add_a_track();
+    journey.settle();
+    let on_the_track_below = journey.point_on_the_strip_at_frame(1, 30);
+    journey.right_click(on_the_track_below);
+    journey.harness.get_by_label_contains("New").click();
+    journey.settle();
+    journey.harness.get_by_label("Generator \u{23f5}").click();
+    journey.settle();
+    journey.harness.get_by_label("Mandelbulb").click();
+    journey.settle();
+
+    // The pointer on the row of Power: its mask button has a diamond round it.
+    let on_the_row = journey.rectangle_of("Power").center();
+    journey.move_pointer_to(on_the_row);
+    journey.settle();
+    save(
+        &mut journey,
+        &folder,
+        "135_the_pointer_on_a_row_whose_number_can_be_read_in_space",
+    );
+
+    // The button opens the window of the mask: no track is chosen yet.
+    journey
+        .harness
+        .get_by_label("Read power from a mask, over the picture or in space")
+        .click();
+    journey.settle();
+    save(
+        &mut journey,
+        &folder,
+        "136_the_window_of_the_mask_before_a_track_is_chosen",
+    );
+
+    // A track is chosen, and then the mask is laid in space on each of the shapes.
+    let title = journey.application().project().tracks()[0].title().to_owned();
+    journey.harness.get_by_value("Choose a track or a group").click();
+    journey.settle();
+    journey.harness.get_all_by_label(&title).last().unwrap().click();
+    journey.settle();
+    save(&mut journey, &folder, "137_the_mask_over_the_picture");
+    for (button, name) in [
+        ("In space", "138_the_mask_in_space_on_a_plane"),
+        ("Sphere", "139_the_mask_in_space_on_a_sphere"),
+        ("Cylinder", "140_the_mask_in_space_on_a_cylinder"),
+    ] {
+        let at = journey.rectangle_of(button).center();
+        journey.click(at);
+        journey.settle();
+        save(&mut journey, &folder, name);
+    }
+    // (The thumbnail that takes the place of the button, and says the shape, is at the left, under the window.)
+}

@@ -156,7 +156,12 @@ pub const FILE_FORMAT_NAME: &str = "fastforwardrs-project";
 ///
 /// **Version 27 added two kinds of source to a `driven` number**: `{ "clip_group": n }` and `{ "track_group": n }`, where `n` is the place of the group in the file's list of groups, from 0, and
 /// the group is of that kind. A file where the group is not there or is of the other kind is refused. A file of version 26 has only `{ "track": n }`.
-pub const FILE_FORMAT_VERSION: u32 = 27;
+///
+/// **Version 28 added `space` to a `driven` number**: where the mask is laid, `{ "world": { "shape": "plane" | "sphere" | "cylinder", "position": [x, y, z], "yaw_pitch_roll_degrees": [a, b, c],
+/// "width": w, "height": h } }` for a mask laid in space (the value is read, at each point of space that the shader says it works at, from the mask at the place of the shape that is nearest to it:
+/// `docs/shader-masks-design.md`), left out for a mask over the picture, which is what a number is until it is said otherwise. A file where the number is not one that its shader says can be read
+/// in space, where a number of the placement is not a number, or where the size is none, is refused. A file of version 27 has none: every mask is over the picture.
+pub const FILE_FORMAT_VERSION: u32 = 28;
 
 /// The newest version that has the old layout.
 const NEWEST_LEGACY_FILE_FORMAT_VERSION: u32 = 2;
@@ -1549,3 +1554,5 @@ mod tests;
 mod text_effect_tests;
 #[cfg(test)]
 mod track_visibility_tests;
+#[cfg(test)]
+mod world_driven_value_tests;

@@ -22,12 +22,12 @@ fn tint() -> EffectKind {
     EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "tint.fs", TINT)).unwrap()
 }
 
-fn from(track: TrackId, channel: MaskChannel, nothing: f32) -> Option<DrivenValue> {
+pub(super) fn from(track: TrackId, channel: MaskChannel, nothing: f32) -> Option<DrivenValue> {
     Some(DrivenValue::from_a_track(track, channel, nothing))
 }
 
 /// A project of three tracks with a clip each, the track in front first, and the clip on each.
-fn three_tracks() -> (Project, [TrackId; 3], [ClipId; 3]) {
+pub(super) fn three_tracks() -> (Project, [TrackId; 3], [ClipId; 3]) {
     let project = project_of_tracks(vec![
         vec![(0, video_clip(1, 0, 100))],
         vec![(0, video_clip(1, 0, 100))],
@@ -48,7 +48,12 @@ fn with_a_shader_on(project: &mut Project, clip: ClipId) -> (Member, EffectInsta
     (Member::Clip(clip), instance)
 }
 
-fn driven_of(project: &Project, owner: Member, instance: EffectInstanceId, slot: usize) -> Option<DrivenValue> {
+pub(super) fn driven_of(
+    project: &Project,
+    owner: Member,
+    instance: EffectInstanceId,
+    slot: usize,
+) -> Option<DrivenValue> {
     project
         .chain_of_the_member(owner)
         .unwrap()
@@ -537,7 +542,7 @@ fn a_shader_with_this_many_numbers(count: usize) -> EffectKind {
     EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "many.fs", &text)).unwrap()
 }
 
-fn a_graph() -> MaskMap {
+pub(super) fn a_graph() -> MaskMap {
     MaskMap::Graph(Graph::from_points(&[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)]).unwrap())
 }
 

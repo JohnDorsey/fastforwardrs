@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "A shape that is made by folding space again and again, so that the same few cuts are seen at every size: the Menger sponge or the Sierpinski tetrahedron. A twist of the folds turns them into bending, spiralling relatives. Drawn by ray marching, with light, fog and a glow; Cam. turn and Cam. tilt put the camera round it. It asks a great deal of the graphics card: lower the ray steps or raise the coarseness for a quick look. Nothing moves by itself: give any slider keyframes to animate it.",
+	"DESCRIPTION": "A shape that is made by folding space again and again, so that the same few cuts are seen at every size: the Menger sponge or the Sierpinski tetrahedron. A twist of the folds turns them into bending, spiralling relatives. Drawn by ray marching, with light, fog and a glow; Cam. turn and Cam. tilt put the camera round it. It asks a great deal of the graphics card: lower the ray steps or raise the coarseness for a quick look. Folds and Twist can also be read from a mask laid in space (the window of the mask button): a plane, a sphere or a cylinder, so that the shape changes from place to place. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
+	"WORLD_SIZE": 3.8,
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Fractal"],
 	"INPUTS": [
 		{ "NAME": "shape", "LABEL": "Shape", "TYPE": "long", "VALUES": [0, 1], "LABELS": ["Menger sponge", "Sierpinski tetrahedron"], "DEFAULT": 0 },
-		{ "NAME": "foldCount", "LABEL": "Folds", "TYPE": "float", "MIN": 1.0, "MAX": 10.0, "DEFAULT": 5.0 },
-		{ "NAME": "twistAmount", "LABEL": "Twist °", "TYPE": "float", "MIN": -30.0, "MAX": 30.0, "DEFAULT": 0.0 },
+		{ "NAME": "foldCount", "LABEL": "Folds", "TYPE": "float", "MIN": 1.0, "MAX": 10.0, "DEFAULT": 5.0, "WORLD_SPACE": true },
+		{ "NAME": "twistAmount", "LABEL": "Twist °", "TYPE": "float", "MIN": -30.0, "MAX": 30.0, "DEFAULT": 0.0, "WORLD_SPACE": true },
 		{ "NAME": "cameraTurn", "LABEL": "Cam. turn °", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 35.0 },
 		{ "NAME": "cameraTilt", "LABEL": "Cam. tilt °", "TYPE": "float", "MIN": -85.0, "MAX": 85.0, "DEFAULT": 25.0 },
 		{ "NAME": "cameraDistance", "LABEL": "Distance", "TYPE": "float", "MIN": 1.0, "MAX": 10.0, "DEFAULT": 3.6 },
@@ -108,6 +109,7 @@ float tetrahedron_distance(vec3 point)
 // How far `point` is from the shape, and how near the folded point came to the middle (squared), which the colour is made from.
 float scene_distance(vec3 point, out float trap)
 {
+	isf_world_position = point;
 	vec3 z = point;
 	float shrunk = 1.0;
 	float nearest = 1.0e10;

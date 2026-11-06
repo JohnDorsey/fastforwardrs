@@ -20,6 +20,9 @@
 //! * **A float input can be read from a mask** ([`rewrite_with_driven_inputs`], `docs/shader-masks-design.md`): the input's name stands for a global, `_isf_driven_NAME`, that a generated
 //!   function (`_isf_set_up_driven`) fills in **once per pixel, before anything else of the shader runs**, from one read of the mask picture (one more image of the shader, bound after the
 //!   others). The shader's text is not changed and its uses of the input (in a loop, in an initialiser) are reads of a global, not of the picture.
+//! * **The mask can be laid in space instead** ([`Space::World`], `docs/shader-masks-design.md`, section 12): for an input whose header says `"WORLD_SPACE": true`, in a shader that sets `isf_world_position` to
+//!   the point of space it is working at, the input's name stands for a call of a generated function, `_isf_world_NAME()`, that finds the place of a plane, a sphere or a cylinder that is nearest to that
+//!   point and reads the mask there: **at every use**, since the point changes as the shader goes on. The place of the shape is nine numbers of the call ([`NUMBERS_OF_A_WORLD_PLACEMENT`]).
 //!
 //! What is refused, with the line: a `sampler2D` anywhere in the code (an image is read by its name, in the macros), and brackets nested more deeply than a compiler's stack is known
 //! to take.
@@ -30,6 +33,10 @@ use super::reader::{IsfFile, IsfInputKind, IsfProblem};
 
 /// How many `vec4` the uniform block has: 17, which is 68 numbers: the 64 of a call and the engine's four.
 pub const VEC4S_OF_THE_UNIFORM_BLOCK: usize = 17;
+
+/// The name of the global that a shader sets to the point of space that it is working at, for the inputs that are read from a mask laid in space (`WORLD_SPACE` in the header). It is
+/// declared (as a `vec3`) for a shader that uses the name; a shader that does not has nothing of the kind in its text.
+pub const WORLD_POSITION: &str = "isf_world_position";
 
 /// What the name of the image of a mask begins with (the number of the mask follows): the image of the mask `n` of a shader is called `_isf_mask_n`. (A name that begins with `_isf_`
 /// is never a shader's own.)
@@ -85,7 +92,71 @@ pub enum Mapping {
     Graph,
 }
 
-/// A float input of a shader whose value is read, at each pixel, from a **mask**: a picture that the engine draws and the shader is given as one more image. (The slider's own number is
+/// The shape that a mask laid **in space** is wrapped on: the value of an input at a point of space is read from the mask at the place of the shape that is **nearest to the point**.
+///
+/// Each shape has its own frame: the origin is the middle of the shape, **y is up** the picture, and **z is the front** (the way the picture faces; it is read the right way round from the
+/// front). A point of space is first moved into that frame (see [`NUMBERS_OF_A_WORLD_PLACEMENT`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum WorldShape {
+    /// A flat rectangle in the plane of x and y, `width` across (x) and `height` up (y): the picture is laid on it, and the place nearest to a point is where it is dropped straight onto
+    /// the plane (along z). A point whose nearest place on the plane is outside the rectangle is not covered by the mask.
+    Plane,
+    /// A sphere: the picture is wrapped round it as a map of the world is (the middle of the picture faces z, the top is the pole at +y, the left and right edges meet behind). The place
+    /// nearest to a point is on the line from the middle through the point, so **the size of the sphere does not matter**, and a point at the middle itself is not covered.
+    Sphere,
+    /// A cylinder round the y axis: the picture is wrapped once round it (the middle of the picture faces z, the left and right edges meet behind), `height` tall. The place nearest to a
+    /// point is where the line from the axis through the point meets it, so **the size round does not matter**, a point on the axis is not covered, and nor is one above or below the
+    /// cylinder's height.
+    Cylinder,
+}
+
+impl WorldShape {
+    pub const ALL: [Self; 3] = [Self::Plane, Self::Sphere, Self::Cylinder];
+
+    /// The word that the key of a shader that is made for this shape has in it.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Plane => "plane",
+            Self::Sphere => "sphere",
+            Self::Cylinder => "cylinder",
+        }
+    }
+
+    /// The GLSL that works out `_isf_at` (the place in the picture of the mask, 0 to 1 across and up) and `_isf_inside` (1 if the place is on the shape, 0 if it is not) from `_isf_d`, the
+    /// point in the frame of the shape, and `_isf_size` (the width and the height). (Every name is one that no input of a shader can have: an input's name is a `#define`.)
+    fn place_in_the_picture(self) -> &'static str {
+        match self {
+            Self::Plane => {
+                "    vec2 _isf_at = vec2(_isf_d.x / _isf_size.x + 0.5, _isf_d.y / _isf_size.y + 0.5);\n    float _isf_inside = (_isf_at.x >= 0.0 && _isf_at.x <= 1.0 && _isf_at.y >= 0.0 && _isf_at.y <= 1.0) ? 1.0 : 0.0;\n"
+            }
+            Self::Sphere => {
+                "    float _isf_away = length(_isf_d);\n    vec2 _isf_at = vec2(0.5, 0.5);\n    float _isf_inside = 0.0;\n    if (_isf_away > 1.0e-6) {\n        _isf_at = vec2(atan(_isf_d.x, _isf_d.z) / 6.28318530718 + 0.5, asin(clamp(_isf_d.y / _isf_away, -1.0, 1.0)) / 3.14159265359 + 0.5);\n        _isf_inside = 1.0;\n    }\n"
+            }
+            Self::Cylinder => {
+                "    vec2 _isf_at = vec2(0.5, _isf_d.y / _isf_size.y + 0.5);\n    float _isf_inside = 0.0;\n    if (length(_isf_d.xz) > 1.0e-6 && _isf_at.y >= 0.0 && _isf_at.y <= 1.0) {\n        _isf_at.x = atan(_isf_d.x, _isf_d.z) / 6.28318530718 + 0.5;\n        _isf_inside = 1.0;\n    }\n"
+            }
+        }
+    }
+}
+
+/// Where a mask is laid: over the picture, or in space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Space {
+    /// The mask is the picture's shape: the value of an input at a pixel is read from the mask at that pixel, once, before the shader runs.
+    Screen,
+    /// The mask is wrapped on a shape in space: the value of an input is read, **every time the shader uses it**, from the mask at the place of the shape nearest to
+    /// `isf_world_position`, the point of space that the shader says it is working at (and so the input must say `"WORLD_SPACE": true` in the header, and the shader must set
+    /// `isf_world_position` before it uses the input: see `IsfInput::world_space` in the reader).
+    World(WorldShape),
+}
+
+/// How many numbers of a call a mask laid in space takes: **where the shape is** (3: the place of its middle), **how it is turned** (4: the quaternion `x, y, z, w` that turns a point of space
+/// into the frame of the shape; the caller makes it from angles, so that dragging an angle compiles nothing) and **how big it is** (2: the width and the height; a sphere has no use for them
+/// and a cylinder only for the height). They come after the points of the graphs (and, when several inputs are read in space, one placement after another in the order of the inputs of
+/// the file).
+pub const NUMBERS_OF_A_WORLD_PLACEMENT: usize = 9;
+
+/// A float input of a shader whose value is read from a **mask**: a picture that the engine draws and the shader is given as one more image. (The slider's own number is
 /// what the input is **where the mask has nothing**; see `rewrite_with_driven_inputs`.)
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DrivenInput {
@@ -95,6 +166,8 @@ pub struct DrivenInput {
     pub mask: usize,
     pub channel: MaskChannel,
     pub mapping: Mapping,
+    /// Where the mask is laid: over the picture, read at each pixel, or in space, read at each point of space the shader works at.
+    pub space: Space,
 }
 
 /// A GLSL number for `value` (always with a point or an exponent, so that it is a float).
@@ -533,6 +606,8 @@ struct InputReadFromAMask<'file> {
     own_number: usize,
     /// Which of the numbers of a call the points of its graph begin at, if it has one.
     graph_at: Option<usize>,
+    /// Which of the numbers of a call the placement of its mask begins at, if the mask is laid in space.
+    world_at: Option<usize>,
     read_from: &'file DrivenInput,
 }
 
@@ -564,23 +639,47 @@ fn function_of_a_graph(name: &str, first_number: usize) -> String {
     text
 }
 
-/// The globals that the inputs read from masks are, and the function that fills them in: each mask is read once (at the pixel being made), and each input is worked out from that one
-/// read. `inputs` are the inputs in the order of the file; `masks` is how many masks there are (each is read from by some input: see [`what_is_wrong_with_the_driven_inputs`]).
-fn function_that_sets_up_the_driven_inputs(inputs: &[InputReadFromAMask<'_>], masks: usize) -> String {
-    let mut text = String::new();
-    for input in inputs {
-        text.push_str(&format!("float _isf_driven_{};\n", input.name));
-        if let Some(first_number) = input.graph_at {
-            text.push_str(&function_of_a_graph(input.name, first_number));
-        }
+/// The place in the range of the input that the channel of the colour `colour` (a `vec4`, premultiplied) of a mask is: the unit of the channel with the opacity divided out (0 where nothing
+/// covers), made into a height by the graph of the input if it has one.
+fn place_in_the_range_of(input: &InputReadFromAMask<'_>, colour: &str) -> String {
+    let channel = input.read_from.channel.expression_for(colour);
+    let unit = format!("({colour}.a > 0.0 ? clamp({channel} / {colour}.a, 0.0, 1.0) : 0.0)");
+    match input.graph_at {
+        Some(_) => format!("_isf_graph_{}({unit})", input.name),
+        None => unit,
     }
-    text.push_str("void _isf_set_up_driven() {\n");
-    for mask in 0..masks {
+}
+
+/// The globals that the inputs read from masks over the picture are, and the function that fills them in: each mask is read once (at the pixel being made), and each input is worked out from
+/// that one read. `inputs` are the inputs in the order of the file (those read from masks laid in space are not among the globals: see [`functions_of_the_inputs_read_in_space`]).
+fn function_that_sets_up_the_driven_inputs(inputs: &[InputReadFromAMask<'_>]) -> String {
+    let over_the_picture: Vec<&InputReadFromAMask<'_>> = inputs
+        .iter()
+        .filter(|input| input.read_from.space == Space::Screen)
+        .collect();
+    let mut masks: Vec<usize> = over_the_picture.iter().map(|input| input.read_from.mask).collect();
+    masks.sort_unstable();
+    masks.dedup();
+    let mut text = String::new();
+    for input in &over_the_picture {
         text.push_str(&format!(
-            "    vec4 _isf_mask_{mask}_here = _isf_IMG_NORM_PIXEL__isf_mask_{mask}(isf_FragNormCoord);\n    float _isf_mask_{mask}_cover = _isf_mask_{mask}_here.a;\n"
+            "float _isf_driven_{};
+",
+            input.name
         ));
     }
-    for input in inputs {
+    text.push_str(
+        "void _isf_set_up_driven() {
+",
+    );
+    for mask in masks {
+        text.push_str(&format!(
+            "    vec4 _isf_mask_{mask}_here = _isf_IMG_NORM_PIXEL__isf_mask_{mask}(isf_FragNormCoord);
+    float _isf_mask_{mask}_cover = _isf_mask_{mask}_here.a;
+"
+        ));
+    }
+    for input in over_the_picture {
         let (name, mask) = (input.name, input.read_from.mask);
         let channel = input
             .read_from
@@ -592,14 +691,74 @@ fn function_that_sets_up_the_driven_inputs(inputs: &[InputReadFromAMask<'_>], ma
             None => format!("_isf_unit_of_the_channel_{name}"),
         };
         text.push_str(&format!(
-            "    float _isf_unit_of_the_channel_{name} = (_isf_mask_{mask}_cover > 0.0) ? clamp({channel} / _isf_mask_{mask}_cover, 0.0, 1.0) : 0.0;\n    _isf_driven_{name} = mix({own}, {minimum} + {range} * {place}, _isf_mask_{mask}_cover);\n",
+            "    float _isf_unit_of_the_channel_{name} = (_isf_mask_{mask}_cover > 0.0) ? clamp({channel} / _isf_mask_{mask}_cover, 0.0, 1.0) : 0.0;
+    _isf_driven_{name} = mix({own}, {minimum} + {range} * {place}, _isf_mask_{mask}_cover);
+",
             own = number_expression(input.own_number),
             minimum = glsl_float(input.minimum),
             range = glsl_float(input.maximum - input.minimum),
         ));
     }
-    text.push_str("}\n");
+    text.push_str(
+        "}
+",
+    );
     text
+}
+
+/// The function `_isf_world_NAME()` of each input that is read from a mask laid in space: the value of the input at the point `isf_world_position`, which the shader sets (a function and not
+/// a global, because the point changes as the shader goes on: the mask is read at **every use** of the input). The point is moved into the frame of the shape (the numbers of its placement,
+/// see [`NUMBERS_OF_A_WORLD_PLACEMENT`]), the nearest place of the shape is found ([`WorldShape::place_in_the_picture`]) and the mask is read there; where the point has no place on the
+/// shape the mask has nothing. The value is made from what is read as for a mask over the picture (the input's own number where nothing covers, the range spread over the channel
+/// between).
+fn functions_of_the_inputs_read_in_space(inputs: &[InputReadFromAMask<'_>]) -> String {
+    let mut text = String::new();
+    for input in inputs {
+        let Space::World(shape) = input.read_from.space else {
+            continue;
+        };
+        let (name, mask) = (input.name, input.read_from.mask);
+        let first = input
+            .world_at
+            .expect("an input read in space has the place of its placement");
+        let number = |offset: usize| number_expression(first + offset);
+        let place = place_in_the_range_of(input, "_isf_here");
+        text.push_str(&format!(
+            "float _isf_world_{name}() {{
+    vec3 _isf_middle = vec3({}, {}, {});
+    vec4 _isf_turn = vec4({}, {}, {}, {});
+    vec2 _isf_size = vec2({}, {});
+    vec3 _isf_d = isf_world_position - _isf_middle;
+    _isf_d = _isf_d + 2.0 * cross(_isf_turn.xyz, cross(_isf_turn.xyz, _isf_d) + _isf_turn.w * _isf_d);
+{}    vec4 _isf_here = _isf_IMG_NORM_PIXEL__isf_mask_{mask}(_isf_at);
+    float _isf_cover = _isf_here.a * _isf_inside;
+    return mix({own}, {minimum} + {range} * {place}, _isf_cover);
+}}
+",
+            number(0),
+            number(1),
+            number(2),
+            number(3),
+            number(4),
+            number(5),
+            number(6),
+            number(7),
+            number(8),
+            shape.place_in_the_picture(),
+            own = number_expression(input.own_number),
+            minimum = glsl_float(input.minimum),
+            range = glsl_float(input.maximum - input.minimum),
+        ));
+    }
+    text
+}
+
+/// The functions `_isf_graph_NAME` of the inputs that are mapped by a graph.
+fn functions_of_the_graphs(inputs: &[InputReadFromAMask<'_>]) -> String {
+    inputs
+        .iter()
+        .filter_map(|input| Some(function_of_a_graph(input.name, input.graph_at?)))
+        .collect()
 }
 
 /// What is wrong with reading the inputs `driven` from masks, if anything is: an input that is not there or is not a float, one that is read twice, one that sets the size of a buffer (a
@@ -631,6 +790,18 @@ fn what_is_wrong_with_the_driven_inputs(file: &IsfFile, driven: &[DrivenInput]) 
             return says(format!(
                 "the range of the input {name} is too wide for a number to be read from a mask"
             ));
+        }
+        if matches!(one.space, Space::World(_)) {
+            if !input.world_space {
+                return says(format!(
+                    "the input {name} cannot be read from a mask laid in space: its header does not say \"WORLD_SPACE\": true, which is the shader's promise that it says where it is working"
+                ));
+            }
+            if first_use_of(&without_comments(&file.body), WORLD_POSITION).is_none() {
+                return says(format!(
+                    "the input {name} cannot be read from a mask laid in space: the shader never sets {WORLD_POSITION}, so there is no point of space to read the mask at"
+                ));
+            }
         }
     }
     let masks = driven.iter().map(|one| one.mask + 1).max().unwrap_or(0);
@@ -726,9 +897,13 @@ pub fn rewrite_with_driven_inputs(file: &IsfFile, driven: &[DrivenInput]) -> Res
                         maximum: *maximum,
                         own_number: number,
                         graph_at: None,
+                        world_at: None,
                         read_from,
                     });
-                    Some(format!("_isf_driven_{}", input.name))
+                    Some(match read_from.space {
+                        Space::Screen => format!("_isf_driven_{}", input.name),
+                        Space::World(_) => format!("_isf_world_{}()", input.name),
+                    })
                 }
                 None => Some(n(0)),
             },
@@ -752,11 +927,17 @@ pub fn rewrite_with_driven_inputs(file: &IsfFile, driven: &[DrivenInput]) -> Res
         }
         number += input.kind.numbers();
     }
-    // (The points of the graphs come after the numbers of all the inputs, one graph after another in the order of the file.)
+    // (The points of the graphs come after the numbers of all the inputs, one graph after another in the order of the file; then the placements of the masks laid in space, in the same way.)
     for input in &mut inputs_read_from_masks {
         if input.read_from.mapping == Mapping::Graph {
             input.graph_at = Some(number);
             number += NUMBERS_OF_A_GRAPH;
+        }
+    }
+    for input in &mut inputs_read_from_masks {
+        if matches!(input.read_from.space, Space::World(_)) {
+            input.world_at = Some(number);
+            number += NUMBERS_OF_A_WORLD_PLACEMENT;
         }
     }
     if number > MOST_NUMBERS_OF_A_CALL {
@@ -766,10 +947,13 @@ pub fn rewrite_with_driven_inputs(file: &IsfFile, driven: &[DrivenInput]) -> Res
                 input
                     .graph_at
                     .is_some_and(|at| at + NUMBERS_OF_A_GRAPH > MOST_NUMBERS_OF_A_CALL)
+                    || input
+                        .world_at
+                        .is_some_and(|at| at + NUMBERS_OF_A_WORLD_PLACEMENT > MOST_NUMBERS_OF_A_CALL)
             })
             .map_or("", |input| input.name);
         return Err(IsfProblem::nowhere_in_particular(format!(
-            "there is no room for the graph of the input {name} among the numbers of the shader: a graph takes {NUMBERS_OF_A_GRAPH} numbers of the {MOST_NUMBERS_OF_A_CALL} that a shader can have"
+            "there is no room for the graph or the place in space of the input {name} among the numbers of the shader: a graph takes {NUMBERS_OF_A_GRAPH} and a place in space {NUMBERS_OF_A_WORLD_PLACEMENT} of the {MOST_NUMBERS_OF_A_CALL} numbers that a shader can have"
         )));
     }
     for (place, name) in image_names.iter().enumerate() {
@@ -796,8 +980,19 @@ pub fn rewrite_with_driven_inputs(file: &IsfFile, driven: &[DrivenInput]) -> Res
             n = name
         ));
     }
+    // (The point of space that a shader says it works at: only for a shader that names it, so that the text of every other shader is what it always was.)
+    if first_use_of(&code, WORLD_POSITION).is_some() {
+        prelude.push_str(&format!("vec3 {WORLD_POSITION};\n"));
+    }
+    let any_over_the_picture = inputs_read_from_masks
+        .iter()
+        .any(|input| input.read_from.space == Space::Screen);
     if !inputs_read_from_masks.is_empty() {
-        prelude.push_str(&function_that_sets_up_the_driven_inputs(&inputs_read_from_masks, masks));
+        prelude.push_str(&functions_of_the_graphs(&inputs_read_from_masks));
+        if any_over_the_picture {
+            prelude.push_str(&function_that_sets_up_the_driven_inputs(&inputs_read_from_masks));
+        }
+        prelude.push_str(&functions_of_the_inputs_read_in_space(&inputs_read_from_masks));
     }
     let prelude_lines = prelude.matches('\n').count() as u32;
 
@@ -854,10 +1049,10 @@ pub fn rewrite_with_driven_inputs(file: &IsfFile, driven: &[DrivenInput]) -> Res
         "\nlayout(location = 0) out vec4 _isf_out;\nvoid main() {{\n    vec4 real = _isf_real_fragcoord();\n    _isf_fragcoord = vec4(real.x, _isf_u[{last}].y - real.y, real.z, real.w);\n    isf_FragNormCoord = vec2(real.x / _isf_u[{last}].x, 1.0 - real.y / _isf_u[{last}].y);\n    _isf_color = vec4(0.0);\n{driven_call}{set_up_call}    _isf_user_main();\n    _isf_out = _isf_color;\n}}\n",
         last = VEC4S_OF_THE_UNIFORM_BLOCK - 1,
         // (The inputs read from masks first of all: the initialisers of the globals may use them.)
-        driven_call = if inputs_read_from_masks.is_empty() {
-            ""
-        } else {
+        driven_call = if any_over_the_picture {
             "    _isf_set_up_driven();\n"
+        } else {
+            ""
         },
         set_up_call = if set_up.is_empty() { "" } else { "    _isf_set_up_globals();\n" }
     ));
@@ -874,3 +1069,5 @@ mod tests;
 
 #[cfg(test)]
 mod driven_tests;
+#[cfg(test)]
+mod world_tests;

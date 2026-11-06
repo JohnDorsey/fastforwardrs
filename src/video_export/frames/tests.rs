@@ -1812,3 +1812,139 @@ fn the_mask_of_a_clip_group_has_the_effect_of_the_group_and_the_number_is_read_f
         );
     });
 }
+
+// ---- a mask laid in space: the picture of a track whose eye is closed, wrapped on a shape in space, read by a number of a shader that says where in space it is (docs/shader-masks-design.md)
+
+/// A shader that says where in space it is (a flat sheet of x and y, from -1 to 1 across the frame and up it) and shows its number `level` (0 to 1) there as a grey, ignoring its picture.
+const SHOW_THE_LEVEL_AT_A_POINT_OF_SPACE: &str = "/*{ \"INPUTS\": [ { \"NAME\": \"inputImage\", \"TYPE\": \"image\" }, { \"NAME\": \"level\", \"TYPE\": \"float\", \"DEFAULT\": 0.5, \"WORLD_SPACE\": true } ] }*/\nvoid main() {\n\tisf_world_position = vec3((isf_FragNormCoord - 0.5) * 2.0, 0.0);\n\tgl_FragColor = vec4(vec3(level), 1.0);\n}\n";
+
+/// The project of `video_with_a_shader_that_reads_a_hidden_picture_file`, but with the shader that says where it is, and with its number read from the red of the picture file **laid in space**
+/// as `space` says. (Where the mask has nothing the number is 0.)
+fn video_with_a_shader_that_reads_a_hidden_picture_file_laid_in_space(space: crate::project::MaskSpace) -> Project {
+    use crate::project::{DrivenValue, EffectKind, MaskChannel, Member};
+    let mut project = project_with_video(320, 180, false);
+    project
+        .import_source(picture_source(2, 320, 180), frame(0))
+        .expect("the picture file goes on a track in front");
+    let (in_front, host_clip) = (
+        project.tracks()[0].id(),
+        project.tracks()[1].placement_at_index(0).unwrap().id,
+    );
+    project.set_track_hidden(in_front, true).unwrap();
+    let file = crate::isf::read(SHOW_THE_LEVEL_AT_A_POINT_OF_SPACE).unwrap();
+    let kind = EffectKind::from_snapshot(crate::isf::descriptor_of(
+        &file,
+        "level_in_space.fs",
+        SHOW_THE_LEVEL_AT_A_POINT_OF_SPACE,
+    ))
+    .unwrap();
+    let instance = project.add_effect(AnimationTarget::Clip(host_clip), kind).unwrap();
+    project
+        .set_driven_value(
+            Member::Clip(host_clip),
+            instance,
+            0,
+            Some(DrivenValue::from_a_track(in_front, MaskChannel::Red, 0.0).with_the_space(space)),
+        )
+        .unwrap();
+    project
+}
+
+#[test]
+fn a_mask_laid_in_space_is_described_as_the_shader_made_for_the_shape_with_the_place_after_the_numbers() {
+    use crate::project::{MaskSpace, WorldPlacement, WorldShape};
+    let placement = WorldPlacement {
+        shape: WorldShape::Cylinder,
+        position: [0.5, 0.0, 0.0],
+        yaw_pitch_roll_degrees: [0.0, 0.0, 0.0],
+        width: 1.0,
+        height: 2.0,
+    };
+    let project = video_with_a_shader_that_reads_a_hidden_picture_file_laid_in_space(MaskSpace::World(placement));
+    let plan = plan_of(&project);
+    let images = HashMap::from([(SourceMediaIdentifier::new(2), a_picture_file(2, 2))]);
+    let mut describer = describer_of(&plan, &script_of_pictures(255), images, Box::new(NoFontsYet));
+
+    let (described, _) = describe(&mut describer, 10);
+
+    let effect = &described.description.layers[0].effects[0];
+    assert!(effect.key.contains("+masks["), "{}", effect.key);
+    assert!(effect.key.contains("in-space-cylinder"), "{}", effect.key);
+    assert_eq!(effect.masks.len(), 1);
+    // The four numbers of the shader, the one number, and the nine of the place.
+    assert_eq!(effect.values.len(), 4 + 1 + 9);
+    assert_eq!(effect.values[4], 0.0, "the number where the mask has nothing");
+    assert_eq!(effect.values[5..], placement.numbers());
+}
+
+#[test]
+fn the_engine_draws_the_number_that_the_picture_of_a_hidden_track_gives_at_each_point_of_space_in_the_frame_of_the_export()
+ {
+    use crate::engine::{
+        DEFAULT_MOST_PASSES_OF_A_LOOP, FrameRenderer, guard_wgsl, published_effect_shader_with_structure,
+    };
+    use crate::project::{MaskSpace, WorldPlacement, WorldShape};
+    // (The pictures of the video that these tests are given are 2 by 2 pixels, so the shader works at four points of space only: x is -0.5 or 0.5 and y is -0.5 or 0.5. The picture it
+    // makes is spread over the frame, smoothly between the middles of its pixels, and is flat beyond them: a quarter of the way in from each side.)
+    // The plane is 0.4 across and 2 up, moved half a unit to the right: it holds the points with x from 0.3 to 0.7, which are the two on the right, and not the two on the left.
+    let plane = WorldPlacement {
+        shape: WorldShape::Plane,
+        position: [0.5, 0.0, 0.0],
+        width: 0.4,
+        height: 2.0,
+        ..WorldPlacement::default()
+    };
+    let project = video_with_a_shader_that_reads_a_hidden_picture_file_laid_in_space(MaskSpace::World(plane));
+    let plan = plan_of(&project);
+    // The red of the picture file is 200 of 255.
+    let images = HashMap::from([(
+        SourceMediaIdentifier::new(2),
+        RgbaPicture {
+            width_in_pixels: 2,
+            height_in_pixels: 2,
+            rgba_pixels: [200, 10, 10, 255].repeat(4),
+        },
+    )]);
+    let mut describer = describer_of(&plan, &script_of_pictures(255), images, Box::new(NoFontsYet));
+    let (described, sent) = describe(&mut describer, 10);
+
+    crate::engine::testing::with_software_graphics!(graphics, {
+        let mut renderer = FrameRenderer::new(graphics.device.clone());
+        for (id, data) in &sent {
+            renderer.upload_picture(*id, data).unwrap();
+        }
+        for flat in described.description.flatten().layers {
+            for effect in &flat.layer.effects {
+                let (source, structure) = published_effect_shader_with_structure(&effect.key)
+                    .expect("the shader that reads the mask was put on the shelf when the plan was made");
+                renderer
+                    .install_effect_with_structure(
+                        &effect.key,
+                        &guard_wgsl(&source, DEFAULT_MOST_PASSES_OF_A_LOOP).unwrap(),
+                        &structure,
+                    )
+                    .unwrap();
+            }
+        }
+
+        let (finished, statistics) = renderer
+            .render(&described.description, std::time::Duration::from_secs(60))
+            .unwrap();
+
+        assert_eq!(statistics.effects_not_run, 0);
+        for (across, down) in [(300, 20), (300, 90), (300, 160)] {
+            let inside = finished.pixel(across, down);
+            assert!(
+                inside[0].abs_diff(200) <= 1 && inside[1].abs_diff(200) <= 1 && inside[2].abs_diff(200) <= 1,
+                "at {across}, {down}, inside the plane, the grey of the red of the picture file, 200: {inside:?}"
+            );
+        }
+        for (across, down) in [(20, 20), (20, 90), (20, 160)] {
+            let outside = finished.pixel(across, down);
+            assert!(
+                outside[0] <= 1 && outside[1] <= 1 && outside[2] <= 1,
+                "at {across}, {down}, beyond the plane's edge, the mask has nothing and the number is 0: {outside:?}"
+            );
+        }
+    });
+}

@@ -258,7 +258,7 @@ fn an_effect_of_a_vst3_plugin_is_in_the_file_by_its_key_is_kept_where_the_plugin
 
     let file: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
-        file["file_format_version"], 27,
+        file["file_format_version"], 28,
         "the format is the one it was before VST3 plugins: the key is all that names the plugin"
     );
     assert!(text.contains(key), "the key is in the file");

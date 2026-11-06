@@ -362,6 +362,7 @@ pub(super) fn show_the_control_of(
                     slot,
                 },
                 cannot_because: effect.why_a_value_cannot_be_driven(slot),
+                world_space_is_available: effect.can_the_value_be_laid_in_space(slot),
             })
     });
     let changed =
@@ -426,6 +427,7 @@ pub(super) fn show_the_control_of_a_group_effect(
                 slot,
             },
             cannot_because: effect.why_a_value_cannot_be_driven(slot),
+            world_space_is_available: effect.can_the_value_be_laid_in_space(slot),
         });
     let row_left = ui.available_rect_before_wrap().left();
     let row_width = ui.available_width();
@@ -591,7 +593,7 @@ fn control_for(
             // (Read from a mask: the thumbnail of the mask is in the place of the slider, and a click on it asks for the window of the mask.)
             if let Some(driven) = driven {
                 let name = project.name_of_the_source(driven.source);
-                return mask_thumbnail::show(ui, &parameter.name, &name, driven.channel, driven.map)
+                return mask_thumbnail::show(ui, &parameter.name, &name, driven.channel, driven.map, driven.space)
                     .clicked()
                     .then_some(Change::ShowTheMaskSettings);
             }

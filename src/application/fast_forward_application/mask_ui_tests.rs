@@ -46,6 +46,11 @@ fn the_shader() -> EffectKind {
 
 /// A window with a video that is selected and has the shader on it: the window, the clip, and the other track (a sound's, in front of the video's), which the number can be read from.
 fn window_with_the_shader_on_the_video() -> (Window, ClipId, TrackId) {
+    window_with_this_shader_on_the_video(the_shader())
+}
+
+/// The same with the shader `kind`. (Whoever calls it keeps the installed plugins in peace for as long as the window lives.)
+pub(super) fn window_with_this_shader_on_the_video(kind: EffectKind) -> (Window, ClipId, TrackId) {
     let _no_plugin_is_being_installed = crate::test_support::the_installed_plugins_in_peace();
     let mut window = Window::showing(project_with_a_video_and_a_sound(300, 5));
     let project = window.application().project();
@@ -54,7 +59,7 @@ fn window_with_the_shader_on_the_video() -> (Window, ClipId, TrackId) {
     select(&mut window, clip);
     window.do_this(Command::AddEffect {
         target: AnimationTarget::Clip(clip),
-        kind: the_shader(),
+        kind,
     });
     (window, clip, the_other)
 }

@@ -117,6 +117,8 @@ mod transition_plan_tests;
 #[cfg(test)]
 mod transition_tests;
 #[cfg(test)]
+mod world_mask_tests;
+#[cfg(test)]
 mod yuv_tests;
 
 pub use colour::{

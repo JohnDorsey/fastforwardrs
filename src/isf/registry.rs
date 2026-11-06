@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use super::compile::{CompiledShader, compile_in_a_worker, compile_in_a_worker_with_driven_inputs};
 use super::descriptor::key_is_of_the_source;
 use super::reader::{IsfFile, IsfProblem, Shape, read};
-use super::rewrite::{DrivenInput, Mapping};
+use super::rewrite::{DrivenInput, Mapping, Space};
 use crate::engine::ShaderStructure;
 use crate::project::{EffectDescriptor, ShaderLanguage, ShaderSource};
 
@@ -153,9 +153,16 @@ pub fn compiled_shader_of(descriptor: &EffectDescriptor) -> Option<Made> {
 pub fn driven_variant_key(base_key: &str, driven: &[DrivenInput]) -> String {
     let parts: Vec<String> = driven
         .iter()
-        .map(|one| match one.mapping {
-            Mapping::Straight => format!("{}={}:{:?}", one.name, one.mask, one.channel),
-            Mapping::Graph => format!("{}={}:{:?}:graph", one.name, one.mask, one.channel),
+        .map(|one| {
+            let mapping = match one.mapping {
+                Mapping::Straight => "",
+                Mapping::Graph => ":graph",
+            };
+            let space = match one.space {
+                Space::Screen => String::new(),
+                Space::World(shape) => format!(":in-space-{}", shape.word()),
+            };
+            format!("{}={}:{:?}{mapping}{space}", one.name, one.mask, one.channel)
         })
         .collect();
     format!("{base_key}+masks[{}]", parts.join(","))
@@ -206,6 +213,66 @@ pub fn inputs_that_set_the_size_of_a_buffer(descriptor: &EffectDescriptor) -> Ve
         .get_or_insert_with(HashMap::new)
         .insert(key, found.clone());
     found
+}
+
+/// What each shader says about space, by the key of its effect: worked out once.
+static WHAT_SHADERS_SAY_OF_SPACE: Mutex<Option<HashMap<String, WhatAShaderSaysOfSpace>>> = Mutex::new(None);
+
+/// What the header of a shader says about space.
+#[derive(Clone, Debug, Default)]
+struct WhatAShaderSaysOfSpace {
+    /// The inputs that say `"WORLD_SPACE": true`.
+    inputs: Vec<String>,
+    /// The header's `WORLD_SIZE`.
+    size: Option<f32>,
+}
+
+/// What the header of the shader of `descriptor` says about space (nothing for an effect that is no ISF shader, or whose text cannot be read).
+fn what_the_shader_says_of_space(descriptor: &EffectDescriptor) -> WhatAShaderSaysOfSpace {
+    let Some(source) = descriptor
+        .shader
+        .as_ref()
+        .filter(|source| source.language == ShaderLanguage::Isf)
+    else {
+        return WhatAShaderSaysOfSpace::default();
+    };
+    let key = descriptor.key.to_string();
+    if let Some(found) = WHAT_SHADERS_SAY_OF_SPACE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .and_then(|found| found.get(&key))
+    {
+        return found.clone();
+    }
+    let found = read(&source.text)
+        .map(|file| WhatAShaderSaysOfSpace {
+            inputs: file
+                .inputs
+                .iter()
+                .filter(|input| input.world_space)
+                .map(|input| input.name.clone())
+                .collect(),
+            size: file.world_size,
+        })
+        .unwrap_or_default();
+    WHAT_SHADERS_SAY_OF_SPACE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_with(HashMap::new)
+        .insert(key, found.clone());
+    found
+}
+
+/// How many units across the shape that the shader of `descriptor` makes in space is, if its header says (`WORLD_SIZE`): what a mask laid in space begins as, in width and height.
+pub fn world_size_of(descriptor: &EffectDescriptor) -> Option<f32> {
+    what_the_shader_says_of_space(descriptor).size
+}
+
+/// The names of the inputs of the shader of `descriptor` that the shader says can be **read from a mask laid in space** (a plane, a sphere or a cylinder): it sets `isf_world_position`
+/// to the point of space it is working at before it uses them. Nothing for an effect that is no ISF shader, or whose text cannot be read, or that never sets the point.
+pub fn inputs_that_can_be_read_in_space(descriptor: &EffectDescriptor) -> Vec<String> {
+    what_the_shader_says_of_space(descriptor).inputs
 }
 
 /// What was made of each shader that reads masks, by its key: whether it could be made.

@@ -26,6 +26,10 @@ content that ships in the box (`distribution-notices.md`), made on the maintaine
   quasicrystal and the ripples, *Flow* of the liquids, *Slide angle* of the hyperbolic tiling, *Along path* of Julia Dance (where the point is on its path), *Shift x* and *y* of the kaleidoscope. The only rates left are those of
   Video Feedback (the growth, turn, slide and colour turn of its echo each second), which build on the frame before and have nothing else that they could be. Every one has labels that say what each input does, and a way to
   colour it (eight palettes, and one that is made of two colours that a person picks).
+* **Three of them can have a number vary from place to place of the shape they make**, and not only from pixel to pixel: the three ray marchers (Mandelbulb: Power, Iterations, Cut at; Folded Sponge: Folds,
+  Twist; Mandelbox: Scale, Folds, Box size, Ball radius) say in their headers (`"WORLD_SPACE": true`, and `isf_world_position = point;` in the function of the shape) that these numbers may be **read from a mask laid in
+  space**, on a plane, a sphere or a cylinder that the window of the mask puts where the person wants it. Their mask button has a diamond round it. How it works, what it costs (5 to 15 % for one number) and its limits
+  (a hard edge in the mask tears the shape; a call has room for nine numbers of place for each such number, so the Mandelbox can have three of its four at once) are in section 12 of `shader-masks-design.md`.
 
 ## The fractal generators
 

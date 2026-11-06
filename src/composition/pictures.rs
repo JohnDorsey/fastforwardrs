@@ -317,8 +317,8 @@ fn imported_pictures_of(effect: &LayerEffect) -> Vec<ImportedPicture> {
         .collect()
 }
 
-/// The key that the engine has the shader of `effect` under, the tracks of the masks it reads in the order it numbers them, and the numbers of the graphs that map its numbers (after the numbers
-/// of all its inputs, in the order of the numbers): for a shader whose numbers are all on their sliders, its own key and none; for one that has a number read from a mask, the key of the
+/// The key that the engine has the shader of `effect` under, the tracks of the masks it reads in the order it numbers them, and the numbers of the graphs that map its numbers and of the places in
+/// space of its masks (after the numbers of all its inputs, the graphs first and then the places, each in the order of the numbers): for a shader whose numbers are all on their sliders, its own key and none; for one that has a number read from a mask, the key of the
 /// shader that does that (made, and given to the engine, if it was not). `None` if that shader cannot be made.
 fn shader_and_masks_of(effect: &LayerEffect) -> Option<(String, Vec<crate::project::MaskUse>, Vec<f32>)> {
     if effect.driven.is_empty() {
@@ -327,6 +327,7 @@ fn shader_and_masks_of(effect: &LayerEffect) -> Option<(String, Vec<crate::proje
     let uses = effect.driven.uses();
     let mut inputs: Vec<crate::isf::DrivenInput> = Vec::new();
     let mut graph_numbers: Vec<f32> = Vec::new();
+    let mut placement_numbers: Vec<f32> = Vec::new();
     for (slot, driven) in effect.driven.iter() {
         let Some(parameter) = effect.kind.parameters().get(slot) else {
             continue;
@@ -339,12 +340,16 @@ fn shader_and_masks_of(effect: &LayerEffect) -> Option<(String, Vec<crate::proje
             mask,
             channel: driven.channel,
             mapping: driven.map.mapping(),
+            space: driven.space.for_the_shader(),
         });
         // (Only for an input that is in the shader: the numbers are read in the order of its inputs.)
         graph_numbers.extend(driven.map.numbers_of_the_call().into_iter().flatten());
+        placement_numbers.extend(driven.space.numbers_of_the_call().into_iter().flatten());
     }
     let key = crate::isf::driven_variant_of(effect.kind.descriptor(), &inputs)?;
-    Some((key, uses, graph_numbers))
+    // (After the numbers of all the inputs: the points of the graphs, then the places in space, each in the order of the inputs.)
+    let numbers_after_the_inputs: Vec<f32> = graph_numbers.into_iter().chain(placement_numbers).collect();
+    Some((key, uses, numbers_after_the_inputs))
 }
 
 /// What `effects` do to a picture at `timeline_frame`, one after another in the order they are applied in. An effect that does nothing at the frame is left out, and neighbouring
@@ -378,11 +383,11 @@ pub fn operations_of_effects(
                 }
             }
             numbers.extend(crate::isf::numbers_of_the_values(&values));
-            let Some((key, masks, graph_numbers)) = shader_and_masks_of(effect) else {
+            let Some((key, masks, numbers_after_the_inputs)) = shader_and_masks_of(effect) else {
                 continue;
             };
-            // (The points of the graphs that map the numbers read from masks: after the numbers of all the inputs.)
-            numbers.extend(graph_numbers);
+            // (The points of the graphs that map the numbers read from masks and the places in space of the masks that are laid in space: after the numbers of all the inputs.)
+            numbers.extend(numbers_after_the_inputs);
             PictureOperation::Shader {
                 key,
                 masks,
@@ -1104,3 +1109,5 @@ mod shader_tests;
 mod state_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod world_mask_tests;

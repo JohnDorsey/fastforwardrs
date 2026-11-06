@@ -56,12 +56,14 @@ pub use duplicating::{ClipSide, TrackSide};
 pub use effects::{
     Badge, ChainEntry, ChainItem, ChainItemKey, ChoiceOption, DrivenValue, DrivenValues, Effect, EffectDescriptor,
     EffectDomain, EffectInstanceId, EffectKind, EffectPreset, Effects, EffectsIter, Graph, HUE_SHIFT_KEY,
-    ImportedPicture, InstalledPlugin, LEAST_DISTANCE_BETWEEN_PLACES, LutOperation, LutSpace, MOST_BYTES_OF_A_SHADER,
-    MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS,
-    MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER, MOST_POINTS_OF_A_GRAPH, MOST_VALUES_OF_AN_EFFECT, MaskChannel, MaskMap,
-    MaskSource, MaskUse, NUMBERS_OF_A_GRAPH, ParameterControl, ParameterDescriptor, PictureOperation, PluginAddress,
-    ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueScale, fingerprint_of_a_state, installed_plugin_for,
-    installed_plugins, installed_shaders, set_installed_plugins, set_installed_shaders,
+    ImportedPicture, InstalledPlugin, LARGEST_DISTANCE_OF_A_SHAPE, LEAST_DISTANCE_BETWEEN_PLACES, LutOperation,
+    LutSpace, MOST_BYTES_OF_A_SHADER, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING,
+    MOST_IMAGES_A_SHADER_BRINGS, MOST_PIXELS_ACROSS_OF_AN_IMAGE_OF_A_SHADER, MOST_POINTS_OF_A_GRAPH,
+    MOST_VALUES_OF_AN_EFFECT, MaskChannel, MaskMap, MaskSource, MaskSpace, MaskUse, NUMBERS_OF_A_GRAPH,
+    NUMBERS_OF_A_WORLD_PLACEMENT, ParameterControl, ParameterDescriptor, PictureOperation, PluginAddress,
+    SMALLEST_SIZE_OF_A_SHAPE, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueScale, WorldPlacement,
+    WorldShape, fingerprint_of_a_state, installed_plugin_for, installed_plugins, installed_shaders,
+    set_installed_plugins, set_installed_shaders,
 };
 pub use frame_index::{SourceFrameIndex, TimelineFrameIndex};
 pub use frame_rate::{FrameRate, InvalidFrameRate};
@@ -1276,3 +1278,5 @@ mod resource_editing_tests;
 mod source_colour_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod world_driven_value_tests;

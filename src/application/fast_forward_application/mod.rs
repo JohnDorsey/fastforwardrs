@@ -214,6 +214,8 @@ mod video_format_tests;
 #[cfg(test)]
 mod view_history_tests;
 #[cfg(test)]
+mod world_mask_ui_tests;
+#[cfg(test)]
 mod zoom_tests;
 
 use std::path::PathBuf;

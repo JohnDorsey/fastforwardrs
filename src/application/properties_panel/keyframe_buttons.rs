@@ -37,12 +37,26 @@ pub(super) struct MaskButton {
     pub which: WhichValue,
     /// Why the number cannot be read from a mask, if it cannot (the button is dimmed, and says why).
     pub cannot_because: Option<&'static str>,
+    /// Whether the number can also be read from a mask **laid in space** (its shader says where in space it works as it uses the number): the window of the mask then has the choice, and the
+    /// button has a diamond round it, the outline of a plane seen corner on.
+    pub world_space_is_available: bool,
 }
 
 /// What the mask button is called to a screen reader and the tests: `name` is what the number is called, in lower case.
 pub fn mask_button_label(name: &str) -> String {
     format!("Read {name} from a mask")
 }
+
+/// What the mask button of a number that can be read from a mask laid in space is called: it says so.
+pub fn mask_button_label_with_world_space(name: &str) -> String {
+    format!("Read {name} from a mask, over the picture or in space")
+}
+
+/// What the mask button says when the pointer rests on it.
+const HINT_OF_THE_MASK_BUTTON: &str = "Read this number from the picture of a track, pixel by pixel";
+
+/// What the mask button of a number that can be read from a mask laid in space says when the pointer rests on it.
+const HINT_OF_THE_MASK_BUTTON_WITH_WORLD_SPACE: &str = "Read this number from the picture of a track, pixel by pixel. World space options are available: the window of the mask can lay the picture in space, on a plane, a sphere or a cylinder, so that the number changes from place to place of the shape the shader makes.";
 
 /// How the faces of the stopwatch and the arrows are drawn: how far the stopwatch's face is from its middle, and how wide and tall
 /// an arrow is, in points.
@@ -220,7 +234,11 @@ fn show_the_mask_button_in(
     commands: &mut Vec<Command>,
 ) {
     let can_be_used = mask.cannot_because.is_none() && ui.is_enabled();
-    let label = mask_button_label(name);
+    let label = if mask.world_space_is_available {
+        mask_button_label_with_world_space(name)
+    } else {
+        mask_button_label(name)
+    };
     let id = ui
         .id()
         .with(("mask button", mask.which.owner, mask.which.instance, mask.which.slot));
@@ -231,12 +249,22 @@ fn show_the_mask_button_in(
             ui.painter()
                 .rect_filled(rectangle, 4.0, theme::KEYFRAME_BUTTON_HOVERED_BACKGROUND);
         }
-        draw_a_mask(ui.painter(), rectangle.center(), theme::KEYFRAME_BUTTON_INACTIVE);
+        draw_a_mask(
+            ui.painter(),
+            rectangle.center(),
+            theme::KEYFRAME_BUTTON_INACTIVE,
+            mask.world_space_is_available,
+        );
     }
     if can_be_used {
-        let response = response
-            .on_hover_cursor(CursorIcon::PointingHand)
-            .on_hover_text("Read this number from the picture of a track, pixel by pixel");
+        let response =
+            response
+                .on_hover_cursor(CursorIcon::PointingHand)
+                .on_hover_text(if mask.world_space_is_available {
+                    HINT_OF_THE_MASK_BUTTON_WITH_WORLD_SPACE
+                } else {
+                    HINT_OF_THE_MASK_BUTTON
+                });
         if response.clicked() {
             commands.push(Command::ShowTheMaskSettings(mask.which));
         }
@@ -245,16 +273,36 @@ fn show_the_mask_button_in(
     }
 }
 
-/// A mask at `middle`: a round face with its left half filled in.
-fn draw_a_mask(painter: &Painter, middle: Pos2, colour: Color32) {
-    painter.circle_stroke(middle, STOPWATCH_RADIUS, Stroke::new(1.5, colour));
+/// How far the corners of the diamond round a mask that can be laid in space are from its middle, in points: as far as the button allows (it is 18 across, and the corners are in it).
+const DIAMOND_RADIUS: f32 = 8.6;
+
+/// How big the round face is inside the diamond, in points: smaller than the face alone, so that the sides of the diamond (which are `DIAMOND_RADIUS` over the square root of 2 from the middle)
+/// stand clear of it by more than a pixel, and the diamond is seen as a diamond and not as a rounded blur.
+const RADIUS_OF_THE_FACE_IN_A_DIAMOND: f32 = 4.0;
+
+/// A mask at `middle`: a round face with its left half filled in, and, if it can be laid in space, **a diamond round it**: the outline of a plane seen from its corner.
+fn draw_a_mask(painter: &Painter, middle: Pos2, colour: Color32, with_a_diamond: bool) {
+    if with_a_diamond {
+        painter.add(Shape::closed_line(
+            vec![
+                pos2(middle.x, middle.y - DIAMOND_RADIUS),
+                pos2(middle.x + DIAMOND_RADIUS, middle.y),
+                pos2(middle.x, middle.y + DIAMOND_RADIUS),
+                pos2(middle.x - DIAMOND_RADIUS, middle.y),
+            ],
+            Stroke::new(1.0, colour),
+        ));
+    }
+    let radius = if with_a_diamond {
+        RADIUS_OF_THE_FACE_IN_A_DIAMOND
+    } else {
+        STOPWATCH_RADIUS
+    };
+    painter.circle_stroke(middle, radius, Stroke::new(1.5, colour));
     let half: Vec<Pos2> = (0..=12)
         .map(|step| {
             let angle = std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * step as f32 / 12.0;
-            pos2(
-                middle.x + STOPWATCH_RADIUS * angle.cos(),
-                middle.y - STOPWATCH_RADIUS * angle.sin(),
-            )
+            pos2(middle.x + radius * angle.cos(), middle.y - radius * angle.sin())
         })
         .collect();
     painter.add(Shape::convex_polygon(half, colour, Stroke::NONE));

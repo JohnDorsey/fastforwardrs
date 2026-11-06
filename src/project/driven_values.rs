@@ -44,6 +44,11 @@ impl Project {
             {
                 return Err(EditError::ValueCannotBeDriven { reason });
             }
+            if driven.space.is_in_space()
+                && let Some(reason) = effect.why_the_value_cannot_be_in_space(slot)
+            {
+                return Err(EditError::ValueCannotBeDriven { reason });
+            }
             match driven.source {
                 MaskSource::Track(track) if self.track(track).is_none() => {
                     return Err(EditError::UnknownTrack { track });

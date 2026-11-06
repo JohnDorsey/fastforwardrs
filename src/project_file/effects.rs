@@ -25,10 +25,10 @@ use super::{legacy_effects, value_document_of, value_from_document};
 use crate::project::tracks::TrackId;
 use crate::project::{
     ChainEntry, ChoiceOption, DrivenValue, DrivenValues, Effect, EffectDescriptor, EffectDomain, EffectInstanceId,
-    EffectKind, Effects, Graph, GroupId, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER, MOST_EFFECTS_ON_ONE_THING,
-    MOST_IMAGES_A_SHADER_BRINGS, MOST_POINTS_OF_A_GRAPH, MaskChannel, MaskMap, MaskSource, ParameterControl,
-    ParameterDescriptor, Project, ShaderImage, ShaderLanguage, ShaderSource, TailLength, UnknownFields, ValueKind,
-    ValueScale,
+    EffectKind, Effects, Graph, GroupId, LARGEST_DISTANCE_OF_A_SHAPE, MOST_BYTES_OF_AN_IMAGE_OF_A_SHADER,
+    MOST_EFFECTS_ON_ONE_THING, MOST_IMAGES_A_SHADER_BRINGS, MOST_POINTS_OF_A_GRAPH, MaskChannel, MaskMap, MaskSource,
+    MaskSpace, ParameterControl, ParameterDescriptor, Project, SMALLEST_SIZE_OF_A_SHAPE, ShaderImage, ShaderLanguage,
+    ShaderSource, TailLength, UnknownFields, ValueKind, ValueScale, WorldPlacement, WorldShape,
 };
 
 /// What a type of effect is, as a file says it: a snapshot of its descriptor.
@@ -194,6 +194,81 @@ pub(super) struct DrivenDocument {
     /// Whether the transitions of the source see the real backdrop (format 26 and after): `true` when it is not said, which is how a value is first read from a mask; written only when it is `false`.
     #[serde(default = "is_the_real_backdrop_by_default", skip_serializing_if = "is_true")]
     pub real_backdrop: bool,
+    /// Where the mask is laid (format 28 and after): left out for a mask over the picture, which is what a value is until it is said otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space: Option<SpaceDocument>,
+}
+
+/// Where a mask is laid, as a file says it: `{ "world": { "shape": "plane", "position": [0, 0, 0], "yaw_pitch_roll_degrees": [0, 0, 0], "width": 3.2, "height": 3.2 } }`.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum SpaceDocument {
+    /// In space, on a shape (format 28 and after).
+    World(WorldPlacementDocument),
+}
+
+/// How a shape is put in space, as a file says it.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct WorldPlacementDocument {
+    pub shape: WorldShapeDocument,
+    pub position: [f32; 3],
+    pub yaw_pitch_roll_degrees: [f32; 3],
+    pub width: f32,
+    pub height: f32,
+}
+
+/// What a mask is wrapped on, as a file says it.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum WorldShapeDocument {
+    Plane,
+    Sphere,
+    Cylinder,
+}
+
+impl From<WorldShape> for WorldShapeDocument {
+    fn from(shape: WorldShape) -> Self {
+        match shape {
+            WorldShape::Plane => Self::Plane,
+            WorldShape::Sphere => Self::Sphere,
+            WorldShape::Cylinder => Self::Cylinder,
+        }
+    }
+}
+
+impl From<WorldShapeDocument> for WorldShape {
+    fn from(shape: WorldShapeDocument) -> Self {
+        match shape {
+            WorldShapeDocument::Plane => Self::Plane,
+            WorldShapeDocument::Sphere => Self::Sphere,
+            WorldShapeDocument::Cylinder => Self::Cylinder,
+        }
+    }
+}
+
+impl From<&WorldPlacement> for WorldPlacementDocument {
+    fn from(placement: &WorldPlacement) -> Self {
+        Self {
+            shape: placement.shape.into(),
+            position: placement.position,
+            yaw_pitch_roll_degrees: placement.yaw_pitch_roll_degrees,
+            width: placement.width,
+            height: placement.height,
+        }
+    }
+}
+
+impl From<WorldPlacementDocument> for WorldPlacement {
+    fn from(document: WorldPlacementDocument) -> Self {
+        Self {
+            shape: document.shape.into(),
+            position: document.position,
+            yaw_pitch_roll_degrees: document.yaw_pitch_roll_degrees,
+            width: document.width,
+            height: document.height,
+        }
+    }
 }
 
 fn is_the_real_backdrop_by_default() -> bool {
@@ -558,6 +633,23 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
                 })?)
             }
         };
+        let space = match one.space {
+            None => MaskSpace::Screen,
+            Some(SpaceDocument::World(placement)) => {
+                if !effect.can_the_value_be_laid_in_space(slot) {
+                    return Err(format!(
+                        "the value \"{id}\" of the {kind} effect is read from a mask laid in space, which its shader does not say it can be"
+                    ));
+                }
+                let placement = WorldPlacement::from(placement);
+                if !placement.is_well_formed() {
+                    return Err(format!(
+                        "the place in space of the mask of the value \"{id}\" of the {kind} effect is not one: its numbers have to be numbers, the middle within {LARGEST_DISTANCE_OF_A_SHAPE}, and the width and the height from {SMALLEST_SIZE_OF_A_SHAPE} to {LARGEST_DISTANCE_OF_A_SHAPE}"
+                    ));
+                }
+                MaskSpace::World(placement)
+            }
+        };
         driven.push((
             u16::try_from(slot).map_err(|_| format!("the {kind} effect has too many values"))?,
             DrivenValue {
@@ -565,6 +657,7 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
                 channel: one.channel.into(),
                 value_where_nothing: one.where_nothing,
                 map,
+                space,
                 real_backdrop: one.real_backdrop,
             },
         ));
@@ -572,9 +665,9 @@ fn effect_from_document(document: EffectDocument, kind: EffectKind) -> Result<Ef
     let driven = DrivenValues::from_places(driven)
         .ok_or_else(|| format!("a value of the {kind} effect that is read from a mask has a number that is not one"))?;
     let effect = effect.with_driven_values(driven);
-    if !effect.has_room_for_its_graphs() {
+    if !effect.has_room_for_the_numbers_of_its_masks() {
         return Err(format!(
-            "the graphs of the values of the {kind} effect have no room among the numbers of the shader"
+            "the graphs and the places in space of the masks of the values of the {kind} effect have no room among the numbers of the shader"
         ));
     }
     Ok(effect)
@@ -680,6 +773,10 @@ pub(super) fn effect_documents_of(effects: &Effects, project: &Project) -> Vec<E
                                 channel: one.channel.into(),
                                 where_nothing: one.value_where_nothing,
                                 real_backdrop: one.real_backdrop,
+                                space: match one.space {
+                                    MaskSpace::Screen => None,
+                                    MaskSpace::World(placement) => Some(SpaceDocument::World((&placement).into())),
+                                },
                                 graph: match one.map {
                                     MaskMap::Straight => None,
                                     MaskMap::Graph(graph) => {

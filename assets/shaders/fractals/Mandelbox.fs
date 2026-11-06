@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: CC0-1.0
 
 /*{
-	"DESCRIPTION": "The Mandelbox: space is folded back into a box and then into a ball, again and again, and what is left is a building of towers, halls and endless rooms. The scale decides what it looks like, and the camera can go round it (Cam. turn) or be put inside it. Drawn by ray marching, with light, fog and a glow. The camera is inside the box when its distance is under about 12. It asks a great deal of the graphics card: lower the ray steps or raise the coarseness for a quick look. Nothing moves by itself: give any slider keyframes to animate it.",
+	"DESCRIPTION": "The Mandelbox: space is folded back into a box and then into a ball, again and again, and what is left is a building of towers, halls and endless rooms. The scale decides what it looks like, and the camera can go round it (Cam. turn) or be put inside it. Drawn by ray marching, with light, fog and a glow. The camera is inside the box when its distance is under about 12. It asks a great deal of the graphics card: lower the ray steps or raise the coarseness for a quick look. Scale, Folds, Box size and Ball radius can also be read from a mask laid in space (the window of the mask button): a plane, a sphere or a cylinder, so that the shape changes from place to place. Nothing moves by itself: give any slider keyframes to animate it.",
 	"CREDIT": "fastforwardrs",
+	"WORLD_SIZE": 23.0,
 	"ISFVSN": "2.0",
 	"CATEGORIES": ["Fractal"],
 	"INPUTS": [
-		{ "NAME": "boxScale", "LABEL": "Scale", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 2.0 },
-		{ "NAME": "boxFolds", "LABEL": "Folds", "TYPE": "float", "MIN": 2.0, "MAX": 16.0, "DEFAULT": 9.0 },
-		{ "NAME": "foldLimit", "LABEL": "Box size", "TYPE": "float", "MIN": 0.5, "MAX": 2.0, "DEFAULT": 1.0 },
-		{ "NAME": "ballRadius", "LABEL": "Ball radius", "TYPE": "float", "MIN": 0.2, "MAX": 1.2, "DEFAULT": 0.5 },
+		{ "NAME": "boxScale", "LABEL": "Scale", "TYPE": "float", "MIN": -3.0, "MAX": 3.0, "DEFAULT": 2.0, "WORLD_SPACE": true },
+		{ "NAME": "boxFolds", "LABEL": "Folds", "TYPE": "float", "MIN": 2.0, "MAX": 16.0, "DEFAULT": 9.0, "WORLD_SPACE": true },
+		{ "NAME": "foldLimit", "LABEL": "Box size", "TYPE": "float", "MIN": 0.5, "MAX": 2.0, "DEFAULT": 1.0, "WORLD_SPACE": true },
+		{ "NAME": "ballRadius", "LABEL": "Ball radius", "TYPE": "float", "MIN": 0.2, "MAX": 1.2, "DEFAULT": 0.5, "WORLD_SPACE": true },
 		{ "NAME": "cameraTurn", "LABEL": "Cam. turn °", "TYPE": "float", "MIN": -180.0, "MAX": 180.0, "DEFAULT": 35.0 },
 		{ "NAME": "cameraTilt", "LABEL": "Cam. tilt °", "TYPE": "float", "MIN": -85.0, "MAX": 85.0, "DEFAULT": 25.0 },
 		{ "NAME": "cameraDistance", "LABEL": "Distance", "TYPE": "float", "MIN": 1.0, "MAX": 40.0, "DEFAULT": 17.0 },
@@ -88,7 +89,10 @@ vec3 palette_colour(int which, float t)
 // How far `point` is from the box, and how near the folded point came to the middle (squared), which the colour is made from.
 float scene_distance(vec3 point, out float trap)
 {
+	isf_world_position = point;
 	float scale_now = boxScale;
+	// (Read once, and not in the loop: a number read from a mask laid in space is read at every use.)
+	float fold_limit = foldLimit;
 	float inner_squared = ballRadius * ballRadius;
 	vec3 z = point;
 	// How much the folds and the scalings have stretched space so far: the distance to the shape is divided by it.
@@ -100,7 +104,7 @@ float scene_distance(vec3 point, out float trap)
 			break;
 		}
 		// Fold space into the box: what is past a face is mirrored back.
-		z = clamp(z, -foldLimit, foldLimit) * 2.0 - z;
+		z = clamp(z, -fold_limit, fold_limit) * 2.0 - z;
 		// Fold space into the ball: what is inside a small ball is blown up to the size of the ball that it is in, and what is inside the large ball is turned inside out.
 		float size_squared = dot(z, z);
 		if (size_squared < inner_squared) {

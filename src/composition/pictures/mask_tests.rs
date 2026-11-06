@@ -39,7 +39,7 @@ fn read_from(project: &mut Project, clip: ClipId, slot: usize, source: TrackId, 
         .unwrap();
 }
 
-fn first_clip_of(project: &Project, position: usize) -> ClipId {
+pub(super) fn first_clip_of(project: &Project, position: usize) -> ClipId {
     project.tracks()[position].placement_at_index(0).unwrap().id
 }
 
@@ -56,7 +56,7 @@ fn track_of(which: crate::project::MaskUse) -> TrackId {
     }
 }
 
-fn the_shader_operation(section: &PictureSection, at: u64) -> (String, Vec<f32>, Vec<TrackId>) {
+pub(super) fn the_shader_operation(section: &PictureSection, at: u64) -> (String, Vec<f32>, Vec<TrackId>) {
     let operations = section.layers.last().unwrap().operations_at(frame(at));
     match operations.as_slice() {
         [

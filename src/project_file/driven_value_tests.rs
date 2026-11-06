@@ -19,7 +19,7 @@ fn tint() -> EffectKind {
     EffectKind::from_snapshot(crate::isf::descriptor_of(&file, "tint.fs", TINT)).unwrap()
 }
 
-fn as_json(text: &str) -> Value {
+pub(super) fn as_json(text: &str) -> Value {
     serde_json::from_str(text).unwrap()
 }
 
@@ -44,7 +44,7 @@ fn project_with_a_value_read_from_the_front_track() -> (Project, TrackId, TrackI
     (project, front, back)
 }
 
-fn the_effect_of_the_back_tracks_first_clip(document: &Value) -> &Value {
+pub(super) fn the_effect_of_the_back_tracks_first_clip(document: &Value) -> &Value {
     &document["tracks"][1]["clips"][0]["effects"][0]
 }
 

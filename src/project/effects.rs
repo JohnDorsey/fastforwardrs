@@ -43,8 +43,9 @@ pub use descriptor::{
     ParameterControl, ParameterDescriptor, ShaderImage, ShaderLanguage, ShaderSource, UnknownFields, ValueScale,
 };
 pub use driven::{
-    DrivenValue, DrivenValues, Graph, LEAST_DISTANCE_BETWEEN_PLACES, MOST_POINTS_OF_A_GRAPH, MaskChannel, MaskMap,
-    MaskSource, MaskUse, NUMBERS_OF_A_GRAPH,
+    DrivenValue, DrivenValues, Graph, LARGEST_DISTANCE_OF_A_SHAPE, LEAST_DISTANCE_BETWEEN_PLACES,
+    MOST_POINTS_OF_A_GRAPH, MaskChannel, MaskMap, MaskSource, MaskSpace, MaskUse, NUMBERS_OF_A_GRAPH,
+    NUMBERS_OF_A_WORLD_PLACEMENT, SMALLEST_SIZE_OF_A_SHAPE, WorldPlacement, WorldShape,
 };
 pub use installed::{
     EffectPreset, InstalledPlugin, PluginAddress, installed_plugin_for, installed_plugins, installed_shaders,
@@ -199,33 +200,89 @@ impl Effect {
     }
 
     /// Why the value in place `slot` cannot be mapped by a graph, if it cannot: the points of a graph are [`NUMBERS_OF_A_GRAPH`] numbers of the call, after the numbers of all the inputs, and a call has
-    /// only so many numbers (counting the graphs of the other values of the effect that have one).
+    /// only so many numbers (counting the graphs and the places in space of the other values of the effect).
     pub fn why_the_value_cannot_have_a_graph(&self, slot: usize) -> Option<&'static str> {
-        let other_graphs = self
-            .driven
-            .iter()
-            .filter(|(other, one)| *other != slot && matches!(one.map, MaskMap::Graph(_)))
-            .count();
-        (self.numbers_of_a_call_with_graphs(other_graphs + 1) > crate::isf::MOST_NUMBERS_OF_A_CALL)
+        let (graphs, places) = self.what_follows_the_inputs_apart_from(slot);
+        // (The value's own place in space stays whatever it has; only its graph is in question.)
+        let own_place = usize::from(self.driven.of(slot).is_some_and(|one| one.space.is_in_space()));
+        (self.numbers_of_a_call_with(graphs + 1, places + own_place) > crate::isf::MOST_NUMBERS_OF_A_CALL)
             .then_some("the shader has so many numbers that there is no room for the points of a graph among them")
     }
 
-    /// Whether the graphs that the values of the effect have fit among the numbers of a call.
-    pub fn has_room_for_its_graphs(&self) -> bool {
+    /// Why the mask of the value in place `slot` cannot be laid **in space**, if it cannot: the shader has not said that the number can (`"WORLD_SPACE": true` in the header of its input, which
+    /// is its promise that it sets `isf_world_position` before it uses the number), or the placement is [`NUMBERS_OF_A_WORLD_PLACEMENT`] numbers of the call, after the numbers of all
+    /// the inputs, and a call has only so many (counting the graphs and the places in space of the other values of the effect).
+    pub fn why_the_value_cannot_be_in_space(&self, slot: usize) -> Option<&'static str> {
+        if !self.can_the_value_be_laid_in_space(slot) {
+            return Some(
+                "the shader does not work in space as it uses this number, so a mask cannot be laid in space for it",
+            );
+        }
+        let (graphs, places) = self.what_follows_the_inputs_apart_from(slot);
+        let own_graph = usize::from(
+            self.driven
+                .of(slot)
+                .is_some_and(|one| matches!(one.map, MaskMap::Graph(_))),
+        );
+        (self.numbers_of_a_call_with(graphs + own_graph, places + 1) > crate::isf::MOST_NUMBERS_OF_A_CALL).then_some(
+            "the shader has so many numbers that there is no room for the place in space of a mask among them",
+        )
+    }
+
+    /// Whether the shader says that a mask can be laid in space for the value in place `slot` (see [`Self::why_the_value_cannot_be_in_space`]). It is a question for the window, which offers
+    /// the choice of space for these values only.
+    pub fn can_the_value_be_laid_in_space(&self, slot: usize) -> bool {
+        let Some(parameter) = self.kind.parameters().get(slot) else {
+            return false;
+        };
+        self.kind.shader_source().is_some()
+            && crate::isf::inputs_that_can_be_read_in_space(self.kind.descriptor())
+                .iter()
+                .any(|name| name.as_str() == &*parameter.id)
+    }
+
+    /// What a mask laid in space begins as for a value of this effect: a plane at the middle, not turned, as wide and tall as the shape that the shader makes in space is (the header's
+    /// `WORLD_SIZE`), so that the picture covers what the shader shows; or, for a shader that does not say, the default size.
+    pub fn placement_in_space_to_begin_with(&self) -> WorldPlacement {
+        let default = WorldPlacement::default();
+        match crate::isf::world_size_of(self.kind.descriptor()) {
+            Some(size) => WorldPlacement {
+                width: size,
+                height: size,
+                ..default
+            },
+            None => default,
+        }
+    }
+
+    /// How many values besides the one in place `slot` are mapped by a graph, and how many are laid in space.
+    fn what_follows_the_inputs_apart_from(&self, slot: usize) -> (usize, usize) {
+        let others = || self.driven.iter().filter(|(other, _)| *other != slot);
+        (
+            others().filter(|(_, one)| matches!(one.map, MaskMap::Graph(_))).count(),
+            others().filter(|(_, one)| one.space.is_in_space()).count(),
+        )
+    }
+
+    /// Whether what the values of the effect that are read from masks add after the numbers of the inputs (the points of graphs, the places in space) fit among the numbers of a call.
+    pub fn has_room_for_the_numbers_of_its_masks(&self) -> bool {
         let graphs = self
             .driven
             .iter()
             .filter(|(_, one)| matches!(one.map, MaskMap::Graph(_)))
             .count();
-        // (An effect with no graph has nothing to fit: a plugin with hundreds of values is not a shader whose call has 64 numbers.)
-        graphs == 0 || self.numbers_of_a_call_with_graphs(graphs) <= crate::isf::MOST_NUMBERS_OF_A_CALL
+        let places = self.driven.iter().filter(|(_, one)| one.space.is_in_space()).count();
+        // (An effect with nothing of the kind has nothing to fit: a plugin with hundreds of values is not a shader whose call has 64 numbers.)
+        graphs + places == 0 || self.numbers_of_a_call_with(graphs, places) <= crate::isf::MOST_NUMBERS_OF_A_CALL
     }
 
-    /// How many numbers a call of the effect has if `graphs` of its values are mapped by a graph: the four of the shader's own, those of the values, and the points of the graphs.
-    fn numbers_of_a_call_with_graphs(&self, graphs: usize) -> usize {
+    /// How many numbers a call of the effect has if `graphs` of its values are mapped by a graph and `places` are laid in space: the four of the shader's own, those of the values, the
+    /// points of the graphs and the places in space.
+    fn numbers_of_a_call_with(&self, graphs: usize, places: usize) -> usize {
         crate::isf::NUMBERS_BEFORE_THE_INPUTS
             + crate::isf::numbers_of_the_values(&self.values).len()
             + graphs * NUMBERS_OF_A_GRAPH
+            + places * NUMBERS_OF_A_WORLD_PLACEMENT
     }
 
     /// The effect with the value in place `slot` read as `driven` says, or from its slider again (`None`). `None` if the value cannot be read from a mask (see

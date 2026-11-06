@@ -35,6 +35,7 @@ fn driven(name: &str, mask: usize, channel: MaskChannel) -> DrivenInput {
         mask,
         channel,
         mapping: Mapping::Straight,
+        space: Space::Screen,
     }
 }
 

@@ -25,7 +25,8 @@ pub use descriptor::{
 };
 pub use registry::{
     compiled_shader_of, depends_on_earlier_frames, driven_variant_key, driven_variant_of,
-    inputs_that_set_the_size_of_a_buffer, is_usable, shape_of, why_not_usable,
+    inputs_that_can_be_read_in_space, inputs_that_set_the_size_of_a_buffer, is_usable, shape_of, why_not_usable,
+    world_size_of,
 };
 
 pub use reader::{
@@ -33,7 +34,8 @@ pub use reader::{
 };
 pub use rewrite::{
     DrivenInput, MASK_IMAGE_PREFIX, MOST_NESTING, MOST_NUMBERS_OF_A_CALL, MOST_POINTS_OF_A_GRAPH, Mapping, MaskChannel,
-    NUMBERS_BEFORE_THE_INPUTS, NUMBERS_OF_A_GRAPH, VEC4S_OF_THE_UNIFORM_BLOCK, image_name_of_the_mask,
+    NUMBERS_BEFORE_THE_INPUTS, NUMBERS_OF_A_GRAPH, NUMBERS_OF_A_WORLD_PLACEMENT, Space, VEC4S_OF_THE_UNIFORM_BLOCK,
+    WORLD_POSITION, WorldShape, image_name_of_the_mask,
 };
 pub use size_expression::{LONGEST_EXPRESSION, MOST_NESTING_OF_AN_EXPRESSION, read_size_expression};
 pub use structure::structure_of;

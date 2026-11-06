@@ -92,3 +92,6 @@ pub fn scan_of_the_shaders_of_the_program() -> ShaderScan {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod world_tests;

@@ -111,6 +111,9 @@ pub struct IsfInput {
     /// What a person is shown, the header's `LABEL` or else the name.
     pub label: String,
     pub kind: IsfInputKind,
+    /// Whether the header says `"WORLD_SPACE": true` of this input: the shader says, with `isf_world_position`, where in space it is working while it uses the input, so the input
+    /// may be **read from a mask that is laid in space** (a plane, a sphere or a cylinder) and not only from one that is laid over the picture. Only a float can be.
+    pub world_space: bool,
 }
 
 /// A pass of a multi-pass shader.
@@ -155,6 +158,9 @@ pub struct IsfFile {
     pub inputs: Vec<IsfInput>,
     pub passes: Vec<IsfPass>,
     pub imported: Vec<IsfImportedImage>,
+    /// The header's `WORLD_SIZE`, if it has one: how many units across the shape that the shader makes in space is (twice the radius of the sphere that holds it). A mask laid in space for one of
+    /// its inputs begins as a plane, or the like, that size, so that it covers what the shader shows.
+    pub world_size: Option<f32>,
     /// The file with its header replaced by spaces and line ends: what is left is the GLSL, on the lines that it was on.
     pub body: String,
 }
@@ -336,6 +342,17 @@ pub fn read(source: &str) -> Result<IsfFile, IsfProblem> {
         .chars()
         .map(|character| if character == '\n' { '\n' } else { ' ' })
         .collect();
+    let world_size = match header.get("WORLD_SIZE") {
+        None => None,
+        Some(value) => match value.as_f64() {
+            Some(size) if size.is_finite() && size > 0.0 && size <= 1.0e6 => Some(size as f32),
+            _ => {
+                return Err(IsfProblem::nowhere_in_particular(
+                    "the header's WORLD_SIZE is not a number above 0 and up to a million",
+                ));
+            }
+        },
+    };
     let file = IsfFile {
         description: text_of("DESCRIPTION"),
         credit: text_of("CREDIT"),
@@ -344,6 +361,7 @@ pub fn read(source: &str) -> Result<IsfFile, IsfProblem> {
         inputs,
         passes,
         imported,
+        world_size,
         body: format!("{}{}{}", &source[..start], blanked, &source[end + 2..]),
     };
     if file.numbers_of_the_inputs() > MOST_NUMBERS_OF_THE_INPUTS {
@@ -520,10 +538,22 @@ fn read_inputs(
             "" => return Err(wrong("it has no TYPE".to_owned())),
             other => return Err(wrong(format!("its TYPE, {other}, is not one that this program knows"))),
         };
+        let world_space = match input.get("WORLD_SPACE") {
+            None => false,
+            Some(Value::Bool(flag)) => *flag,
+            Some(_) => return Err(wrong("its WORLD_SPACE is not true or false".to_owned())),
+        };
+        if world_space && !matches!(kind, IsfInputKind::Float { .. }) {
+            return Err(wrong(
+                "it says WORLD_SPACE, which only a number (a float) can: a mask laid in space gives a number"
+                    .to_owned(),
+            ));
+        }
         inputs.push(IsfInput {
             name: name.to_owned(),
             label,
             kind,
+            world_space,
         });
     }
     Ok(inputs)

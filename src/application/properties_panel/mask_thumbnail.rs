@@ -12,8 +12,8 @@ use egui::{
     vec2,
 };
 
-use crate::application::mask_settings_window::name_of_a_channel;
-use crate::project::{MaskChannel, MaskMap};
+use crate::application::mask_settings_window::{name_of_a_channel, name_of_a_shape};
+use crate::project::{MaskChannel, MaskMap, MaskSpace};
 
 /// How tall the thumbnail is, in points.
 const HEIGHT: f32 = 22.0;
@@ -48,9 +48,25 @@ fn tint_of(channel: MaskChannel) -> Color32 {
     }
 }
 
-/// Shows the thumbnail of a mask made of the track called `track`, whose `channel`, mapped as `map` says, is the number called `name_of_the_number`, as wide as there is room. Gives its response: it is
-/// clicked when the window of the mask is wanted.
-pub fn show(ui: &mut Ui, name_of_the_number: &str, track: &str, channel: MaskChannel, map: MaskMap) -> Response {
+/// What is said after the track and the channel, for a mask laid in space: the shape it is wrapped on, in lower case (a word, because the row of the panel is only so wide: a mask over the
+/// picture is not wrapped on anything, so the word says that it is in space). Nothing for a mask over the picture.
+pub fn words_about_the_space(space: MaskSpace) -> Option<String> {
+    match space {
+        MaskSpace::Screen => None,
+        MaskSpace::World(placement) => Some(name_of_a_shape(placement.shape).to_lowercase()),
+    }
+}
+
+/// Shows the thumbnail of a mask made of the track called `track`, whose `channel`, mapped as `map` says, is the number called `name_of_the_number`, as wide as there is room (and, for a mask
+/// laid in space, what shape it is on). Gives its response: it is clicked when the window of the mask is wanted.
+pub fn show(
+    ui: &mut Ui,
+    name_of_the_number: &str,
+    track: &str,
+    channel: MaskChannel,
+    map: MaskMap,
+    space: MaskSpace,
+) -> Response {
     let width = ui.available_width().max(BAR_WIDTH + 40.0);
     let (rectangle, response) = ui.allocate_exact_size(vec2(width, HEIGHT), Sense::click());
     let label = label_of_the_thumbnail(name_of_the_number);
@@ -98,7 +114,10 @@ pub fn show(ui: &mut Ui, name_of_the_number: &str, track: &str, channel: MaskCha
     painter.text(
         pos2(bar.right() + 8.0, rectangle.center().y),
         egui::Align2::LEFT_CENTER,
-        format!("{track} \u{b7} {}", name_of_a_channel(channel)),
+        match words_about_the_space(space) {
+            Some(words) => format!("{track} \u{b7} {} \u{b7} {words}", name_of_a_channel(channel)),
+            None => format!("{track} \u{b7} {}", name_of_a_channel(channel)),
+        },
         egui::TextStyle::Body.resolve(ui.style()),
         visuals.text_color(),
     );

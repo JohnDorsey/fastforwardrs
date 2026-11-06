@@ -7,12 +7,13 @@
 //!
 //! The window changes nothing itself: a choice becomes a command, a step of the history that the choices about the same number are joined to.
 
-use egui::{Align2, ComboBox, Context, Grid, Id, Slider, SliderClamping, Window, vec2};
+use egui::{Align2, ComboBox, Context, DragValue, Grid, Id, Slider, SliderClamping, Ui, Window, vec2};
 
 use super::commands::Command;
 use super::mask_graph;
 use crate::project::{
-    DrivenValue, EffectInstanceId, Graph, GroupKind, MaskChannel, MaskMap, MaskSource, Member, Project, PropertyValue,
+    DrivenValue, EffectInstanceId, Graph, GroupKind, LARGEST_DISTANCE_OF_A_SHAPE, MaskChannel, MaskMap, MaskSource,
+    MaskSpace, Member, Project, PropertyValue, SMALLEST_SIZE_OF_A_SHAPE, WorldPlacement, WorldShape,
 };
 
 /// What the lines of the window are called.
@@ -23,6 +24,19 @@ pub const USE_THE_SLIDER_AGAIN_LABEL: &str = "Use the slider again";
 pub const GRAPH_LABEL: &str = "Graph";
 pub const STRAIGHT_LINE_AGAIN_LABEL: &str = "Straight line again";
 pub const REAL_BACKDROP_LABEL: &str = "Transitions see the real backdrop";
+
+/// What the lines of the window that are only there for a number that can be read from a mask laid in space are called.
+pub const SPACE_LABEL: &str = "Space";
+pub const OVER_THE_PICTURE_LABEL: &str = "Over the picture";
+pub const IN_SPACE_LABEL: &str = "In space";
+pub const SHAPE_LABEL: &str = "Shape";
+pub const POSITION_LABEL: &str = "Position";
+pub const TURN_LABEL: &str = "Turn";
+pub const WIDTH_LABEL: &str = "Width";
+pub const HEIGHT_LABEL: &str = "Height";
+/// What the boxes of the width and the height of the shape are called to a screen reader and the tests (the rows are called *Width* and *Height*, which are also the names of other things).
+pub const WIDTH_NAME: &str = "Shape width";
+pub const HEIGHT_NAME: &str = "Shape height";
 
 /// What the box of the track says while no track is chosen.
 pub const NO_TRACK_CHOSEN_LABEL: &str = "Choose a track or a group";
@@ -47,6 +61,37 @@ pub fn name_of_a_channel(channel: MaskChannel) -> &'static str {
         MaskChannel::Brightness => "Brightness",
     }
 }
+
+/// What the shapes are called.
+pub fn name_of_a_shape(shape: WorldShape) -> &'static str {
+    match shape {
+        WorldShape::Plane => "Plane",
+        WorldShape::Sphere => "Sphere",
+        WorldShape::Cylinder => "Cylinder",
+    }
+}
+
+/// What a shape does with the picture, in a few words, for under the lines of the window.
+pub fn what_a_shape_does(shape: WorldShape) -> &'static str {
+    match shape {
+        WorldShape::Plane => {
+            "The picture is laid flat, facing along z. A point of space reads the picture where it is dropped straight onto the plane; beyond the edges the picture has nothing."
+        }
+        WorldShape::Sphere => {
+            "The picture is wrapped round a ball like a map of the world: its middle faces along z and its top is the pole at +y. A point of space reads the picture in the direction it is from the middle, so the size of the ball does not matter."
+        }
+        WorldShape::Cylinder => {
+            "The picture is wrapped once round a tube round the y axis: its middle faces along z. A point of space reads the picture at its direction round, and at its height up the tube; above and below the tube the picture has nothing."
+        }
+    }
+}
+
+/// How wide the note about what a shape does is, in points: it is wrapped to this.
+const WIDTH_OF_THE_NOTE_ABOUT_A_SHAPE: f32 = 340.0;
+
+/// The names of the three numbers of a position, and of a turn, as a screen reader and the tests know them.
+pub const POSITION_NAMES: [&str; 3] = ["Position x", "Position y", "Position z"];
+pub const TURN_NAMES: [&str; 3] = ["Turn yaw", "Turn pitch", "Turn roll"];
 
 /// Which number of which effect the window is about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,6 +130,138 @@ fn sources_to_choose_from(project: &Project) -> Vec<(MaskSource, String)> {
         }
     }
     sources
+}
+
+/// A box that a number is dragged or typed in, known to screen readers and the tests as `name` (the text next to it only says which of three it is).
+fn number_box(ui: &mut Ui, value: &mut f32, name: &str, speed: f64, range: std::ops::RangeInclusive<f32>) -> bool {
+    let response = ui.add(DragValue::new(value).speed(speed).range(range));
+    let (enabled, shown) = (ui.is_enabled(), *value);
+    response.widget_info(|| egui::WidgetInfo {
+        label: Some(name.to_owned()),
+        value: Some(f64::from(shown)),
+        enabled,
+        ..egui::WidgetInfo::new(egui::WidgetType::DragValue)
+    });
+    response.changed()
+}
+
+/// The rows of the window about where the mask is laid: over the picture or in space, and (in space) the shape and how it is put. A choice becomes `set(...)`, a command.
+fn show_the_space(
+    ui: &mut Ui,
+    effect: &crate::project::Effect,
+    slot: usize,
+    driven: Option<DrivenValue>,
+    set: &dyn Fn(DrivenValue) -> Command,
+    commands: &mut Vec<Command>,
+) {
+    let no_room = effect.why_the_value_cannot_be_in_space(slot);
+    ui.label(SPACE_LABEL);
+    ui.horizontal(|ui| {
+        for (label, in_space) in [(OVER_THE_PICTURE_LABEL, false), (IN_SPACE_LABEL, true)] {
+            let selected = driven.is_some_and(|driven| driven.space.is_in_space() == in_space);
+            let can_be_chosen = driven.is_some() && (!in_space || no_room.is_none());
+            let mut response = ui.add_enabled(can_be_chosen, egui::Button::selectable(selected, label));
+            if in_space && let (Some(reason), true) = (no_room, driven.is_some()) {
+                response = response.on_disabled_hover_text(reason);
+            }
+            if response.clicked()
+                && !selected
+                && let Some(driven) = driven
+            {
+                let space = if in_space {
+                    MaskSpace::World(driven.space.placement_or(effect.placement_in_space_to_begin_with()))
+                } else {
+                    MaskSpace::Screen
+                };
+                commands.push(set(driven.with_the_space(space)));
+            }
+        }
+    });
+    ui.end_row();
+
+    let Some(driven) = driven else {
+        return;
+    };
+    let MaskSpace::World(placement) = driven.space else {
+        return;
+    };
+    let put = |placement: WorldPlacement| set(driven.with_the_space(MaskSpace::World(placement)));
+
+    ui.label(SHAPE_LABEL);
+    ui.horizontal(|ui| {
+        for shape in WorldShape::ALL {
+            let selected = placement.shape == shape;
+            if ui
+                .add(egui::Button::selectable(selected, name_of_a_shape(shape)))
+                .clicked()
+                && !selected
+            {
+                commands.push(put(placement.with_the_shape(shape)));
+            }
+        }
+    });
+    ui.end_row();
+
+    ui.label("");
+    // (Wrapped in a column of its own: a line of this length would make the whole window as wide as the line.)
+    ui.vertical(|ui| {
+        ui.set_max_width(WIDTH_OF_THE_NOTE_ABOUT_A_SHAPE);
+        ui.add(egui::Label::new(egui::RichText::new(what_a_shape_does(placement.shape)).small()).wrap());
+    });
+    ui.end_row();
+
+    let far = LARGEST_DISTANCE_OF_A_SHAPE;
+    ui.label(POSITION_LABEL);
+    ui.horizontal(|ui| {
+        let mut position = placement.position;
+        let mut changed = false;
+        for (number, (axis, name)) in position.iter_mut().zip(["x", "y", "z"].into_iter().zip(POSITION_NAMES)) {
+            ui.label(axis);
+            changed |= number_box(ui, number, name, 0.02, -far..=far);
+        }
+        if changed {
+            commands.push(put(WorldPlacement { position, ..placement }));
+        }
+    });
+    ui.end_row();
+
+    ui.label(TURN_LABEL);
+    ui.horizontal(|ui| {
+        let mut turn = placement.yaw_pitch_roll_degrees;
+        let mut changed = false;
+        for (number, (word, name)) in turn
+            .iter_mut()
+            .zip(["yaw", "pitch", "roll"].into_iter().zip(TURN_NAMES))
+        {
+            ui.label(word);
+            changed |= number_box(ui, number, name, 0.5, -360.0..=360.0);
+        }
+        if changed {
+            commands.push(put(WorldPlacement {
+                yaw_pitch_roll_degrees: turn,
+                ..placement
+            }));
+        }
+    });
+    ui.end_row();
+
+    // (A sphere has no use for a size, and a cylinder only for its height.)
+    if placement.shape == WorldShape::Plane {
+        ui.label(WIDTH_LABEL);
+        let mut width = placement.width;
+        if number_box(ui, &mut width, WIDTH_NAME, 0.02, SMALLEST_SIZE_OF_A_SHAPE..=far) {
+            commands.push(put(WorldPlacement { width, ..placement }));
+        }
+        ui.end_row();
+    }
+    if placement.shape != WorldShape::Sphere {
+        ui.label(HEIGHT_LABEL);
+        let mut height = placement.height;
+        if number_box(ui, &mut height, HEIGHT_NAME, 0.02, SMALLEST_SIZE_OF_A_SHAPE..=far) {
+            commands.push(put(WorldPlacement { height, ..placement }));
+        }
+        ui.end_row();
+    }
 }
 
 /// Shows the window of `open_for`, if there is one and the effect is still in the project, and adds a command for a change made in it. The window closes (`open_for` becomes `None`) when
@@ -158,6 +335,7 @@ pub fn show(context: &Context, open_for: &mut Option<WhichValue>, project: &Proj
                                         value_where_nothing: driven
                                             .map_or(slider_now, |driven| driven.value_where_nothing),
                                         map: driven.map_or(MaskMap::Straight, |driven| driven.map),
+                                        space: driven.map_or(MaskSpace::Screen, |driven| driven.space),
                                         real_backdrop: driven.is_none_or(|driven| driven.real_backdrop),
                                     }));
                                 }
@@ -182,6 +360,11 @@ pub fn show(context: &Context, open_for: &mut Option<WhichValue>, project: &Proj
                         }
                     });
                     ui.end_row();
+
+                    // (Only for a number that its shader says can be read in space: for every other number the window is as it was.)
+                    if effect.can_the_value_be_laid_in_space(which.slot) {
+                        show_the_space(ui, effect, which.slot, driven, &set, commands);
+                    }
 
                     ui.label(GRAPH_LABEL);
                     ui.vertical(|ui| {
